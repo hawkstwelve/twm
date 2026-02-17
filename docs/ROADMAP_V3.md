@@ -241,7 +241,7 @@ rm -rf ~/path/to/twf_models
 
 **Runs as:** systemd services per model (same pattern as current `twf-hrrr-v2-scheduler.service`)
 
-**Key change from V2:** Colorization happens here, not at serve time. The `encode_to_byte_and_alpha()` + `get_lut()` chain from current `colormaps_v2.py` merges into a single `float_to_rgba()` step in the builder.
+**Key change from V2:** Colorization happens here, not at serve time. The `encode_to_byte_and_alpha()` + `get_lut()` chain from `colormaps.py` merges into a single `float_to_rgba()` step in `builder/colorize.py`.
 
 **Derivation paths (carried forward from build_cog.py):**
 
@@ -617,7 +617,7 @@ Already matches current V2 caching headers — no change needed.
 | System | File | Defines |
 |---|---|---|
 | Model plugins | `models/hrrr.py`, `models/gfs.py` | `VarSpec`: GRIB selectors, derivation type, component hints |
-| Colormap specs | `services/colormaps_v2.py` | `VAR_SPECS`: encoding range, colors, units, kind |
+| Colormap specs | `services/colormaps.py` | `VAR_SPECS`: encoding range, colors, units, kind |
 | Legacy registry | `services/variable_registry.py` | `VARIABLE_ALIASES`, `VARIABLE_SELECTORS`, `HERBIE_SEARCH` |
 
 ### Target state (single source of truth)
@@ -662,37 +662,51 @@ Adding a new variable becomes:
 
 ## Phased Rollout
 
-### Phase 0 — Repo Setup + Contract Lock (1–2 days)
+### Phase 0 — Repo Setup + Contract Lock (1–2 days) ✅ COMPLETE
 
 **Objective:** Create the V3 repo, tear down V2 entirely, lock the artifact contract.
 
+**Completed:** 2026-02-17
+
 **Steps:**
 
-1. **Run the consolidation procedure** (see "Consolidation procedure" section above) — creates repo, stops V2 services, sets up prod and local dev
-2. Copy model plugins (`hrrr.py`, `gfs.py`, `base.py`, `registry.py`) from archived `twf_models_legacy`
-3. Copy colormap specs from `colormaps_v2.py` — begin unifying into extended `VarSpec`
-4. Copy frontend from `frontend_v2/models-v2/` → adapt config for V3 API/tile URLs
-5. Commit artifact contract (this document's "Artifact Contract" section)
-6. Verify: 512 tileSize (already decided), float32 COG for value grid (confirmed), overview rules locked by `VarSpec.kind`
-7. Archive `twf_models` and `twf_models_legacy` repos on GitHub
+1. ✅ **Run the consolidation procedure** (see "Consolidation procedure" section above) — creates repo, stops V2 services, sets up prod and local dev
+2. ✅ Copy model plugins (`hrrr.py`, `gfs.py`, `base.py`, `registry.py`) from archived `twf_models_legacy`
+3. ✅ Copy colormap specs from `colormaps_v2.py` → renamed to `colormaps.py` — begin unifying into extended `VarSpec`
+4. ✅ Copy frontend from `frontend_v2/models-v2/` → adapt config for V3 API/tile URLs
+5. ✅ Commit artifact contract (this document's "Artifact Contract" section)
+6. ✅ Verify: 512 tileSize (already decided), float32 COG for value grid (confirmed), overview rules locked by `VarSpec.kind`
+7. ✅ Archive `twf_models` and `twf_models_legacy` repos on GitHub
 
-**Checkpoint:** Single repo exists on GitHub, cloned to prod and local machine. V2 is stopped. Frontend skeleton loads (no data pipeline yet).
+**Additional completions beyond Phase 0 scope:**
+- ✅ Nginx routing switched to `/models-v3`, `/api/v3/`, `/tiles/v3/`
+- ✅ V2 endpoints return 410 Gone
+- ✅ Ports migrated (8200 API / 8201 tiles)
+- ✅ systemd services deployed: `twf-v3-api`, `twf-v3-tile-server`
+- ✅ API health endpoint live (`/api/v3/health`)
+- ✅ Tile server health endpoint live (`/tiles/v3/health`)
+- ✅ Tile server enforces "Hard Rule: No Runtime Transformation" — no colormap logic, no var-branching
+- ✅ Frontend builds against V3 routes exclusively (V2 URL leakage fixed)
 
-### Phase 1 — One Model + One Variable End-to-End (2–4 days)
+**Checkpoint:** ~~Single repo exists on GitHub, cloned to prod and local machine. V2 is stopped. Frontend skeleton loads (no data pipeline yet).~~ **PASSED.**
+
+### Phase 1 — One Model + One Variable End-to-End (2–4 days) 🚧 IN PROGRESS
 
 **Objective:** HRRR tmp2m producing RGBA + value COGs, served via dumb tile server, rendered in frontend, with hover sampling.
 
+**Status:** Infrastructure checkpoint passed. Builder pipeline not yet started.
+
 **Steps:**
 
-1. Implement `builder/pipeline.py` — orchestrates fetch → derive → colorize → write for the simple (tmp2m) path only
-2. Implement `builder/colorize.py` — `float_to_rgba()` merging `encode_to_byte_and_alpha()` + `get_lut()` into one step
-3. Implement `builder/value_grid.py` — writes float32 single-band COG alongside RGBA
-4. Implement `builder/cog_writer.py` — extract GeoTIFF write + gdalwarp + gdaladdo + gdal_translate into reusable module (from current `build_cog.py` lines ~1600–3400)
-5. Write HRRR tmp2m artifacts to `/opt/twf_v3/data/v3/published/hrrr/conus/{run}/tmp2m/`
-6. Implement dumb tile server (~100 lines): read 4-band RGBA COG → tile → PNG
-7. Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON
-8. Wire frontend to V3 tile URL and add hover tooltip calling `/sample`
-9. Validate: `gdalinfo fh000.rgba.cog.tif` shows 4 bands uint8, CRS, overviews; tiles return 200 at z2–z10; hover returns correct temperature values
+1. ❌ Implement `builder/pipeline.py` — orchestrates fetch → derive → colorize → write for the simple (tmp2m) path only
+2. ❌ Implement `builder/colorize.py` — `float_to_rgba()` merging `encode_to_byte_and_alpha()` + `get_lut()` into one step
+3. ❌ Implement `builder/value_grid.py` — writes float32 single-band COG alongside RGBA
+4. ❌ Implement `builder/cog_writer.py` — extract GeoTIFF write + gdalwarp + gdaladdo + gdal_translate into reusable module (from current `build_cog.py` lines ~1600–3400)
+5. ❌ Write HRRR tmp2m artifacts to `/opt/twf_v3/data/v3/published/hrrr/conus/{run}/tmp2m/`
+6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG → tile → PNG — *stub deployed, needs COG-reading logic once artifacts exist*
+7. ❌ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON
+8. ⬜ Wire frontend to V3 tile URL and add hover tooltip calling `/sample` — *tile URLs wired; hover not started*
+9. ❌ Validate: `gdalinfo fh000.rgba.cog.tif` shows 4 bands uint8, CRS, overviews; tiles return 200 at z2–z10; hover returns correct temperature values
 
 **Checkpoint:** Single variable works end-to-end. Tiles are crisp at all zooms. Hover shows real values.
 
@@ -821,7 +835,7 @@ Estimates use deflate-compressed COG sizes from the grid dimensions table. Per-f
 | Component | Reason |
 |---|---|
 | `titiler_service/main.py` `_image_data_to_rgba()` (70+ lines) | RGBA COGs eliminate runtime colorization |
-| `colormaps_v2.py` `get_lut()` at serve time | LUT applied at build time now |
+| `colormaps.py` `get_lut()` at serve time | LUT applied at build time now; `float_to_rgba()` in `builder/colorize.py` replaces both |
 | `variable_registry.py` | Unified into extended VarSpec |
 | `build_cog.py` monolithic `main()` | Decomposed into builder modules |
 | `services/mbtiles.py` | PMTiles approach abandoned |
@@ -1051,24 +1065,28 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 - [ ] HRRR tmp2m tiles return 200 at z2–z10 for CONUS extent
 - [ ] Hover over any tile shows correct numeric value with units
 - [ ] Adding a new simple variable requires only a `VarSpec` entry (one file, one place)
-- [ ] Tile server has zero colormap/science logic (under 150 lines total)
+- [x] Tile server has zero colormap/science logic (under 150 lines total)
 - [ ] Animation is smooth (double-buffer swap, no flash between frames)
 - [ ] Build pipeline produces both RGBA + value COGs per frame
 - [ ] Builder correctness gates (gdalinfo + pixel sanity) reject broken artifacts before promotion
 - [ ] Run promotion is atomic via `LATEST.json` pointer
 - [ ] 2-run retention keeps disk usage within budgeted ~12 GB (validated against disk budget table)
 - [ ] All current variables (tmp2m, wspd10m, refc, radar_ptype, precip_ptype) work in V3
-- [ ] Single repo (`twf_models_v3`), single prod directory (`/opt/twf_v3`), no V2 remnants anywhere
-- [ ] Old repos archived on GitHub, old directories removed from prod and local machine
+- [x] Single repo (`twf_models_v3`), single prod directory (`/opt/twf_v3`), no V2 remnants anywhere
+- [x] Old repos archived on GitHub, old directories removed from prod and local machine
 
 ---
 
 ## Immediate Next Steps (do these first)
 
-1. **Create the `twf_models_v3` GitHub repo** with the target directory structure
-2. **Copy model plugins + colormap specs** from this repo into V3 structure
-3. **Implement `builder/colorize.py`** — the `float_to_rgba()` function that merges encode + LUT into one build-time step
-4. **Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo`
-5. **Implement the dumb tile server** and verify a single `{z}/{x}/{y}` tile returns 200 widely, not just at zoom 7+
-6. **Add `/api/v3/sample`** reading `val.cog.tif`
-7. **Wire the frontend** and confirm end-to-end
+1. ~~**Create the `twf_models_v3` GitHub repo** with the target directory structure~~ ✅
+2. ~~**Copy model plugins + colormap specs** from this repo into V3 structure~~ ✅
+3. **Implement `builder/colorize.py`** — the `float_to_rgba()` function that merges encode + LUT into one build-time step ← **START HERE**
+4. **Implement `builder/cog_writer.py`** — GeoTIFF write + warp + overviews + COG output
+5. **Implement `builder/value_grid.py`** — float32 single-band COG for hover sampling
+6. **Implement `builder/pipeline.py`** — orchestrator for fetch → derive → colorize → write
+7. **Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo`
+8. **Upgrade tile server stub** to read 4-band RGBA COGs via rio-tiler and return PNG tiles
+9. **Add `/api/v3/sample`** reading `val.cog.tif`
+10. **Wire frontend hover tooltip** calling `/sample`
+11. **Validate end-to-end:** tiles at z2–z10, hover returns correct values
