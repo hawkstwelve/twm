@@ -2,10 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.services.hrrr_fetch import ensure_latest_cycles
-from app.services.hrrr_runs import HRRRCacheConfig
-from app.services.variable_registry import normalize_api_variable, select_dataarray
-
 from .base import BaseModelPlugin, RegionSpec, VarSelectors, VarSpec
 
 
@@ -16,6 +12,8 @@ class HRRRPlugin(BaseModelPlugin):
         return list(range(0, 19))
 
     def normalize_var_id(self, var_id: str) -> str:
+        from app.services.variable_registry import normalize_api_variable
+
         normalized = normalize_api_variable(var_id)
         if normalized in {"t2m", "tmp2m", "2t"}:
             return "tmp2m"
@@ -32,9 +30,14 @@ class HRRRPlugin(BaseModelPlugin):
         return normalized
 
     def select_dataarray(self, ds: object, var_id: str) -> object:
+        from app.services.variable_registry import select_dataarray
+
         return select_dataarray(ds, var_id)
 
     def ensure_latest_cycles(self, keep_cycles: int, *, cache_dir: Path | None = None) -> dict[str, int]:
+        from app.services.hrrr_fetch import ensure_latest_cycles
+        from app.services.hrrr_runs import HRRRCacheConfig
+
         if cache_dir is None:
             return ensure_latest_cycles(keep_cycles=keep_cycles)
         cache_cfg = HRRRCacheConfig(base_dir=cache_dir, keep_runs=keep_cycles)
