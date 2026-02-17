@@ -128,9 +128,14 @@ def fetch_variable(
 # Each converter takes a float32 array (in-place safe) and returns float32.
 # ---------------------------------------------------------------------------
 
-def _kelvin_to_fahrenheit(data: np.ndarray) -> np.ndarray:
-    """Convert Kelvin → Fahrenheit, preserving NaN."""
-    return (data - 273.15) * 9.0 / 5.0 + 32.0
+def _celsius_to_fahrenheit(data: np.ndarray) -> np.ndarray:
+    """Convert Celsius → Fahrenheit, preserving NaN.
+
+    GDAL's GRIB driver normalizes temperatures to °C by default
+    (GRIB_NORMALIZE_UNITS=YES since GDAL 2.0), so GRIB TMP fields
+    arrive as °C, not Kelvin.
+    """
+    return data * 9.0 / 5.0 + 32.0
 
 
 def _ms_to_mph(data: np.ndarray) -> np.ndarray:
@@ -140,8 +145,10 @@ def _ms_to_mph(data: np.ndarray) -> np.ndarray:
 
 # Registry: var_id → converter function
 # Variables not listed here need no conversion (GRIB units match spec units).
+# NOTE: GDAL's GRIB driver applies GRIB_NORMALIZE_UNITS=YES by default,
+# so temperatures arrive in °C (not K) and wind speeds in m/s.
 UNIT_CONVERTERS: dict[str, Any] = {
-    "tmp2m": _kelvin_to_fahrenheit,
+    "tmp2m": _celsius_to_fahrenheit,
     "wspd10m": _ms_to_mph,
 }
 

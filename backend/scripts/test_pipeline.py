@@ -47,16 +47,17 @@ REGION = "pnw"
 
 
 def _make_synthetic_tmp2m() -> np.ndarray:
-    """Create synthetic 2m temperature data in Kelvin (GRIB native units).
+    """Create synthetic 2m temperature data in Celsius (GDAL GRIB output).
 
-    Fills the HRRR/PNW grid with a gradient from 250K to 310K
+    GDAL's GRIB driver normalizes temps to °C (GRIB_NORMALIZE_UNITS=YES).
+    Fills the HRRR/PNW grid with a gradient from -23.15°C to 36.85°C
     (roughly -10°F to 98°F), with a NaN strip at the top for nodata.
     """
     bbox, grid_m = get_grid_params(MODEL, REGION)
     _, height, width = compute_transform_and_shape(bbox, grid_m)
 
-    # Gradient from 250K to 310K across the height
-    data = np.linspace(250.0, 310.0, height)[:, np.newaxis]
+    # Gradient from -23.15°C to 36.85°C across the height
+    data = np.linspace(-23.15, 36.85, height)[:, np.newaxis]
     data = np.broadcast_to(data, (height, width)).copy().astype(np.float32)
 
     # NaN strip at top (simulates area outside GRIB domain)
@@ -65,12 +66,12 @@ def _make_synthetic_tmp2m() -> np.ndarray:
 
 
 def test_unit_conversion():
-    """Verify Kelvin → Fahrenheit conversion."""
-    k_data = np.array([273.15, 373.15, 233.15], dtype=np.float32)
-    f_data = convert_units(k_data, "tmp2m")
+    """Verify Celsius → Fahrenheit conversion (GDAL delivers °C for GRIB TMP)."""
+    c_data = np.array([0.0, 100.0, -40.0], dtype=np.float32)
+    f_data = convert_units(c_data, "tmp2m")
     expected = np.array([32.0, 212.0, -40.0], dtype=np.float32)
     np.testing.assert_allclose(f_data, expected, atol=0.01)
-    print("  Unit conversion (K→°F): PASS")
+    print("  Unit conversion (°C→°F): PASS")
 
 
 def test_colorize_roundtrip():
