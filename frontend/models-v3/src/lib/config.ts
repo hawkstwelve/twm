@@ -9,12 +9,12 @@ const isLocalDevPort =
 
 export const API_BASE =
   isLocalDevHost && isLocalDevPort
-    ? "http://127.0.0.1:8099/api/v2"
-    : "https://api.sodakweather.com/api/v2";
+    ? "http://127.0.0.1:8200/api/v3"
+    : "https://api.sodakweather.com/api/v3";
 
 export const TILES_BASE =
   isLocalDevHost && isLocalDevPort
-    ? "http://127.0.0.1:8101"
+    ? "http://127.0.0.1:8201"
     : "https://api.sodakweather.com";
 
 export const DEFAULTS = {
