@@ -89,7 +89,11 @@ def fetch_variable(
     if herbie_kwargs:
         kwargs.update(herbie_kwargs)
 
-    H = Herbie(run_date, **kwargs)
+    # Herbie expects a tz-naive datetime (assumes UTC internally).
+    # Strip tzinfo to avoid pandas tz-naive vs tz-aware comparison errors.
+    herbie_date = run_date.replace(tzinfo=None) if run_date.tzinfo else run_date
+
+    H = Herbie(herbie_date, **kwargs)
 
     # Download the subset matching the search pattern
     grib_path = H.download(search_pattern)
