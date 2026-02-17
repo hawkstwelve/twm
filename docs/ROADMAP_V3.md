@@ -69,12 +69,11 @@ github.com/hawkstwelve/twf_models_v3
 │   │   ├── models/           (model plugins: hrrr.py, gfs.py, etc.)
 │   │   └── services/
 │   │       ├── builder/      (modular build pipeline — replaces monolithic build_cog.py)
-│   │       │   ├── fetch.py          (GRIB acquisition via Herbie)
+│   │       │   ├── fetch.py          (GRIB acquisition via Herbie + unit conversion)
 │   │       │   ├── derive.py         (variable derivation: passthrough, wspd hypot, ptype argmax/blend)
 │   │       │   ├── colorize.py       (float → RGBA using var spec)
-│   │       │   ├── value_grid.py     (float → float32 COG)
 │   │       │   ├── cog_writer.py     (GeoTIFF → warp → overviews (gdaladdo subprocess) → COG (gdal_translate))
-│   │       │   └── pipeline.py       (orchestrator: fetch → derive → colorize → write)
+│   │       │   └── pipeline.py       (orchestrator: fetch → warp → colorize → write → validate + sidecar JSON)
 │   │       ├── scheduler.py          (model_scheduler, run promotion, retention)
 │   │       ├── colormaps.py          (VAR_SPECS: encoding ranges, colors, legend config)
 │   │       ├── discovery.py          (manifest-based discovery)
@@ -694,14 +693,14 @@ Adding a new variable becomes:
 
 **Objective:** HRRR tmp2m producing RGBA + value COGs, served via dumb tile server, rendered in frontend, with hover sampling.
 
-**Status:** Infrastructure checkpoint passed. Builder pipeline not yet started.
+**Status:** Builder core modules implemented. First real GRIB fetch pending.
 
 **Steps:**
 
-1. ❌ Implement `builder/pipeline.py` — orchestrates fetch → derive → colorize → write for the simple (tmp2m) path only
-2. ❌ Implement `builder/colorize.py` — `float_to_rgba()` merging `encode_to_byte_and_alpha()` + `get_lut()` into one step
-3. ❌ Implement `builder/value_grid.py` — writes float32 single-band COG alongside RGBA
-4. ❌ Implement `builder/cog_writer.py` — extract GeoTIFF write + gdalwarp + gdaladdo + gdal_translate into reusable module (from current `build_cog.py` lines ~1600–3400)
+1. ✅ Implement `builder/pipeline.py` — orchestrates fetch → derive → colorize → write for the simple (tmp2m) path only
+2. ✅ Implement `builder/colorize.py` — `float_to_rgba()` merging `encode_to_byte_and_alpha()` + `get_lut()` into one step
+3. ✅ Implement `builder/value_grid.py` — `write_value_cog()` lives in `cog_writer.py` (float32 single-band COG alongside RGBA)
+4. ✅ Implement `builder/cog_writer.py` — GeoTIFF write + warp + overviews (gdaladdo subprocess) + COG (gdal_translate)
 5. ❌ Write HRRR tmp2m artifacts to `/opt/twf_v3/data/v3/published/hrrr/conus/{run}/tmp2m/`
 6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG → tile → PNG — *stub deployed, needs COG-reading logic once artifacts exist*
 7. ❌ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON
@@ -1067,8 +1066,8 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 - [ ] Adding a new simple variable requires only a `VarSpec` entry (one file, one place)
 - [x] Tile server has zero colormap/science logic (under 150 lines total)
 - [ ] Animation is smooth (double-buffer swap, no flash between frames)
-- [ ] Build pipeline produces both RGBA + value COGs per frame
-- [ ] Builder correctness gates (gdalinfo + pixel sanity) reject broken artifacts before promotion
+- [x] Build pipeline produces both RGBA + value COGs per frame
+- [x] Builder correctness gates (gdalinfo + pixel sanity) reject broken artifacts before promotion
 - [ ] Run promotion is atomic via `LATEST.json` pointer
 - [ ] 2-run retention keeps disk usage within budgeted ~12 GB (validated against disk budget table)
 - [ ] All current variables (tmp2m, wspd10m, refc, radar_ptype, precip_ptype) work in V3
@@ -1081,11 +1080,11 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 
 1. ~~**Create the `twf_models_v3` GitHub repo** with the target directory structure~~ ✅
 2. ~~**Copy model plugins + colormap specs** from this repo into V3 structure~~ ✅
-3. **Implement `builder/colorize.py`** — the `float_to_rgba()` function that merges encode + LUT into one build-time step ← **START HERE**
-4. **Implement `builder/cog_writer.py`** — GeoTIFF write + warp + overviews + COG output
-5. **Implement `builder/value_grid.py`** — float32 single-band COG for hover sampling
-6. **Implement `builder/pipeline.py`** — orchestrator for fetch → derive → colorize → write
-7. **Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo`
+3. ~~**Implement `builder/colorize.py`** — the `float_to_rgba()` function~~ ✅
+4. ~~**Implement `builder/cog_writer.py`** — GeoTIFF write + warp + overviews + COG output~~ ✅
+5. ~~**Implement `builder/fetch.py`** — GRIB acquisition via Herbie + unit conversion~~ ✅
+6. ~~**Implement `builder/pipeline.py`** — orchestrator for fetch → warp → colorize → write → validate~~ ✅
+7. **Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo` ← **START HERE**
 8. **Upgrade tile server stub** to read 4-band RGBA COGs via rio-tiler and return PNG tiles
 9. **Add `/api/v3/sample`** reading `val.cog.tif`
 10. **Wire frontend hover tooltip** calling `/sample`

@@ -3,3 +3,4 @@ uvicorn[standard]
 numpy
 rasterio
 rio-tiler
+herbie-data
