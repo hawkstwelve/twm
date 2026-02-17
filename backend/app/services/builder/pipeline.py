@@ -569,9 +569,15 @@ def _resolve_model_var_spec(
         if spec is not None:
             return spec
 
-    # Fallback: import from model registry
-    from app.models.registry import MODEL_REGISTRY
-    plugin = MODEL_REGISTRY.get(model)
+    # Try direct plugin import first (avoids registry pulling in all models)
+    if model == "hrrr":
+        from app.models.hrrr import HRRR_MODEL
+        plugin = HRRR_MODEL
+    else:
+        # Fallback: import from model registry
+        from app.models.registry import MODEL_REGISTRY
+        plugin = MODEL_REGISTRY.get(model)
+
     if plugin is None:
         raise ValueError(f"Unknown model: {model!r}")
     spec = plugin.get_var(var_id)
