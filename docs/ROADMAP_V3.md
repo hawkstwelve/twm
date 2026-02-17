@@ -693,7 +693,7 @@ Adding a new variable becomes:
 
 **Objective:** HRRR tmp2m producing RGBA + value COGs, served via dumb tile server, rendered in frontend, with hover sampling.
 
-**Status:** Builder core modules implemented. First real GRIB fetch pending.
+**Status:** Builder complete. First artifacts passing all gates on prod. Tile server + sample API implemented.
 
 **Steps:**
 
@@ -701,11 +701,11 @@ Adding a new variable becomes:
 2. ✅ Implement `builder/colorize.py` — `float_to_rgba()` merging `encode_to_byte_and_alpha()` + `get_lut()` into one step
 3. ✅ Implement `builder/value_grid.py` — `write_value_cog()` lives in `cog_writer.py` (float32 single-band COG alongside RGBA)
 4. ✅ Implement `builder/cog_writer.py` — GeoTIFF write + warp + overviews (gdaladdo subprocess) + COG (gdal_translate)
-5. ❌ Write HRRR tmp2m artifacts to `/opt/twf_v3/data/v3/published/hrrr/conus/{run}/tmp2m/`
-6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG → tile → PNG — *stub deployed, needs COG-reading logic once artifacts exist*
-7. ❌ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON
+5. ✅ Write HRRR tmp2m artifacts to staging — `gdalinfo` confirms contract-compliant RGBA + value COGs with correct CRS, bands, overviews
+6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG via rio-tiler → PNG tile with immutable cache headers
+7. ✅ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON with units from sidecar
 8. ⬜ Wire frontend to V3 tile URL and add hover tooltip calling `/sample` — *tile URLs wired; hover not started*
-9. ❌ Validate: `gdalinfo fh000.rgba.cog.tif` shows 4 bands uint8, CRS, overviews; tiles return 200 at z2–z10; hover returns correct temperature values
+9. ❌ Validate: tiles return 200 at z2–z10; hover returns correct temperature values
 
 **Checkpoint:** Single variable works end-to-end. Tiles are crisp at all zooms. Hover shows real values.
 
@@ -1084,8 +1084,8 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 4. ~~**Implement `builder/cog_writer.py`** — GeoTIFF write + warp + overviews + COG output~~ ✅
 5. ~~**Implement `builder/fetch.py`** — GRIB acquisition via Herbie + unit conversion~~ ✅
 6. ~~**Implement `builder/pipeline.py`** — orchestrator for fetch → warp → colorize → write → validate~~ ✅
-7. **Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo` ← **START HERE**
-8. **Upgrade tile server stub** to read 4-band RGBA COGs via rio-tiler and return PNG tiles
-9. **Add `/api/v3/sample`** reading `val.cog.tif`
-10. **Wire frontend hover tooltip** calling `/sample`
+7. ~~**Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo`~~ ✅
+8. ~~**Upgrade tile server stub** to read 4-band RGBA COGs via rio-tiler and return PNG tiles~~ ✅
+9. ~~**Add `/api/v3/sample`** reading `val.cog.tif`~~ ✅
+10. **Wire frontend hover tooltip** calling `/sample` ← **START HERE**
 11. **Validate end-to-end:** tiles at z2–z10, hover returns correct values
