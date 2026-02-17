@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import logging
 import os
+import traceback
 from pathlib import Path
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from rio_tiler.io import Reader
 from rio_tiler.errors import TileOutsideBounds
@@ -88,9 +89,15 @@ def get_tile(
             status_code=204,
             headers={"Cache-Control": CACHE_MISS},
         )
-    except Exception:
+    except Exception as exc:
         logger.exception(
             "Tile read failed: %s/%s/%s/%s/fh%03d/%d/%d/%d",
             model, region, run, var, fh, z, x, y,
         )
-        return Response(status_code=500)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": str(exc),
+                "trace": traceback.format_exc().splitlines()[-40:],
+            },
+        )
