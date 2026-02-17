@@ -18,6 +18,7 @@ import {
 import { DEFAULTS, VARIABLE_LABELS } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
+import { useSampleTooltip } from "@/lib/use-sample-tooltip";
 
 const AUTOPLAY_TICK_MS = 400;
 const AUTOPLAY_MAX_HOLD_MS = 1000;
@@ -305,6 +306,15 @@ export default function App() {
 
   const effectiveRunId = currentFrame?.run ?? (run !== "latest" ? run : latestRunId);
   const runDateTimeISO = runIdToIso(effectiveRunId);
+
+  // ── Hover-for-data tooltip ──────────────────────────────────────────
+  const { tooltip, onHover, onHoverEnd } = useSampleTooltip({
+    model,
+    region,
+    run: resolvedRunForRequests,
+    varId: variable,
+    fh: forecastHour,
+  });
 
   useEffect(() => {
     if (frameHours.length > 0) {
@@ -626,7 +636,21 @@ export default function App() {
           onFrameSettled={handleFrameSettled}
           onTileReady={handleTileReady}
           onZoomHint={setShowZoomHint}
+          onMapHover={onHover}
+          onMapHoverEnd={onHoverEnd}
         />
+
+        {tooltip && (
+          <div
+            className="pointer-events-none absolute z-50 rounded-md border border-border/60 bg-[hsl(var(--toolbar))]/95 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-xl backdrop-blur-md"
+            style={{
+              left: tooltip.x + 14,
+              top: tooltip.y - 32,
+            }}
+          >
+            {tooltip.value.toFixed(1)} {tooltip.units}
+          </div>
+        )}
 
         {error && (
           <div className="absolute left-4 top-4 z-40 flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-lg backdrop-blur-md">

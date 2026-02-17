@@ -704,7 +704,7 @@ Adding a new variable becomes:
 5. ✅ Write HRRR tmp2m artifacts to staging — `gdalinfo` confirms contract-compliant RGBA + value COGs with correct CRS, bands, overviews
 6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG via rio-tiler → PNG tile with immutable cache headers
 7. ✅ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON with units from sidecar
-8. ⬜ Wire frontend to V3 tile URL and add hover tooltip calling `/sample` — *tile URLs wired; hover not started*
+8. ✅ Wire frontend to V3 tile URL and add hover tooltip calling `/sample` — *debounce + generation counter + LRU cache per sampling cost control spec*
 9. ❌ Validate: tiles return 200 at z2–z10; hover returns correct temperature values
 
 **Checkpoint:** Single variable works end-to-end. Tiles are crisp at all zooms. Hover shows real values.
@@ -1087,5 +1087,5 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 7. ~~**Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo`~~ ✅
 8. ~~**Upgrade tile server stub** to read 4-band RGBA COGs via rio-tiler and return PNG tiles~~ ✅
 9. ~~**Add `/api/v3/sample`** reading `val.cog.tif`~~ ✅
-10. **Wire frontend hover tooltip** calling `/sample` ← **START HERE**
-11. **Validate end-to-end:** tiles at z2–z10, hover returns correct values
+10. ~~**Wire frontend hover tooltip** calling `/sample`~~ ✅
+11. **Validate end-to-end:** tiles at z2–z10, hover returns correct values ← **START HERE**

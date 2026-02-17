@@ -87,3 +87,44 @@ export async function fetchFrames(
     .filter((row) => row && row.has_cog && Number.isFinite(Number(row.fh)))
     .sort((a, b) => Number(a.fh) - Number(b.fh));
 }
+
+// ── Sample (hover-for-data) ──────────────────────────────────────────
+
+export type SampleResult = {
+  value: number;
+  units: string;
+  model: string;
+  var: string;
+  fh: number;
+  valid_time: string;
+  lat: number;
+  lon: number;
+};
+
+export async function fetchSample(params: {
+  model: string;
+  region: string;
+  run: string;
+  var: string;
+  fh: number;
+  lat: number;
+  lon: number;
+}): Promise<SampleResult | null> {
+  const qs = new URLSearchParams({
+    model: params.model,
+    region: params.region,
+    run: params.run,
+    var: params.var,
+    fh: String(params.fh),
+    lat: String(params.lat),
+    lon: String(params.lon),
+  });
+  const response = await fetch(`${API_BASE}/sample?${qs}`, { credentials: "omit" });
+  if (response.status === 204 || response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`Sample request failed: ${response.status}`);
+  }
+  return response.json() as Promise<SampleResult>;
+}

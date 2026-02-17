@@ -205,6 +205,8 @@ type MapCanvasProps = {
   onFrameSettled?: (tileUrl: string) => void;
   onTileReady?: (tileUrl: string) => void;
   onZoomHint?: (show: boolean) => void;
+  onMapHover?: (lat: number, lon: number, x: number, y: number) => void;
+  onMapHoverEnd?: () => void;
 };
 
 export function MapCanvas({
@@ -219,6 +221,8 @@ export function MapCanvas({
   onFrameSettled,
   onTileReady,
   onZoomHint,
+  onMapHover,
+  onMapHoverEnd,
 }: MapCanvasProps) {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -702,6 +706,35 @@ export function MapCanvas({
     }
     map.easeTo({ center: view.center, zoom: view.zoom, duration: 600 });
   }, [view, isLoaded]);
+
+  // ── Hover events for sample tooltip ──────────────────────────────────
+  const onMapHoverRef = useRef(onMapHover);
+  onMapHoverRef.current = onMapHover;
+  const onMapHoverEndRef = useRef(onMapHoverEnd);
+  onMapHoverEndRef.current = onMapHoverEnd;
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) return;
+
+    const handleMove = (e: maplibregl.MapMouseEvent) => {
+      const { lng, lat } = e.lngLat;
+      const { x, y } = e.point;
+      onMapHoverRef.current?.(lat, lng, x, y);
+    };
+
+    const handleLeave = () => {
+      onMapHoverEndRef.current?.();
+    };
+
+    map.on("mousemove", handleMove);
+    map.getCanvas().addEventListener("mouseleave", handleLeave);
+
+    return () => {
+      map.off("mousemove", handleMove);
+      map.getCanvas().removeEventListener("mouseleave", handleLeave);
+    };
+  }, [isLoaded]);
 
   return <div ref={mapContainerRef} className="absolute inset-0" aria-label="Weather map" />;
 }
