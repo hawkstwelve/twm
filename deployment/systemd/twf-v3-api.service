@@ -1,0 +1,14 @@
+[Unit]
+Description=TWF V3 API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/twf_v3
+Environment=PATH=/opt/twf_v3/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/twf_v3/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8200
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
