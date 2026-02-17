@@ -73,7 +73,7 @@ github.com/hawkstwelve/twf_models_v3
 │   │       │   ├── derive.py         (variable derivation: passthrough, wspd hypot, ptype argmax/blend)
 │   │       │   ├── colorize.py       (float → RGBA using var spec)
 │   │       │   ├── value_grid.py     (float → float32 COG)
-│   │       │   ├── cog_writer.py     (GeoTIFF → warp → overviews → COG)
+│   │       │   ├── cog_writer.py     (GeoTIFF → warp → overviews (gdaladdo subprocess) → COG (gdal_translate))
 │   │       │   └── pipeline.py       (orchestrator: fetch → derive → colorize → write)
 │   │       ├── scheduler.py          (model_scheduler, run promotion, retention)
 │   │       ├── colormaps.py          (VAR_SPECS: encoding ranges, colors, legend config)
