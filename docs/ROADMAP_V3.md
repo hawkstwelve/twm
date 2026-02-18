@@ -705,9 +705,9 @@ Adding a new variable becomes:
 6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG via rio-tiler → PNG tile with immutable cache headers
 7. ✅ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON with units from sidecar
 8. ✅ Wire frontend to V3 tile URL and add hover tooltip calling `/sample` — *debounce + generation counter + LRU cache per sampling cost control spec*
-9. ❌ Validate: tiles return 200 at z2–z10; hover returns correct temperature values
+9. ✅ Validate: tiles return 200 at z2–z10; hover returns correct temperature values
 
-**Checkpoint:** Single variable works end-to-end. Tiles are crisp at all zooms. Hover shows real values.
+**Checkpoint:** ~~Single variable works end-to-end. Tiles are crisp at all zooms. Hover shows real values~~. **PASSED.**
 
 ### Phase 2 — Expand Variables for HRRR (3–5 days)
 
