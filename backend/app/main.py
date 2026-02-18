@@ -144,7 +144,7 @@ def list_vars(model: str, region: str, run: str):
                     var_ids.add(child.name)
 
     # Import VAR_SPECS for display names
-    from app.services.colormaps import VAR_SPECS
+    from .services.colormaps import VAR_SPECS
     result = []
     for v in sorted(var_ids):
         spec = VAR_SPECS.get(v, {})
