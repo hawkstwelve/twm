@@ -14,7 +14,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.windows import Window
-from fastapi import FastAPI, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pyproj import Transformer
 
@@ -268,6 +268,26 @@ def _resolve_sidecar(model: str, region: str, run: str, var: str, fh: int) -> di
     return None
 
 
+def _resolve_frame_var_dir(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
+    """Resolve the directory containing the requested frame artifacts.
+
+    Uses the same precedence as frame discovery: published first, then staging.
+    """
+    resolved = _resolve_run(model, region, run)
+    if resolved is None:
+        return None
+
+    fh_str = f"fh{fh:03d}"
+    for prefix in ("published", "staging"):
+        var_dir = DATA_ROOT / prefix / model / region / resolved / var
+        if not var_dir.is_dir():
+            continue
+        frame_cog = var_dir / f"{fh_str}.rgba.cog.tif"
+        if frame_cog.is_file():
+            return var_dir
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Sample endpoint
 # ---------------------------------------------------------------------------
@@ -344,3 +364,68 @@ def sample(
                          model, region, run, var, fh, lat, lon)
         return Response(status_code=500, content='{"error": "internal error"}',
                         media_type="application/json")
+
+
+@app.get("/api/v3/{model}/{region}/{run}/{var}/{fh:int}/contours/{key}")
+def get_contour_geojson(
+    model: str,
+    region: str,
+    run: str,
+    var: str,
+    fh: int,
+    key: str,
+):
+    """Return a precomputed contour GeoJSON for a frame.
+
+    Resolves the frame directory using published/staging precedence, then loads
+    sidecar + contour path from that exact var directory.
+    """
+    var_dir = _resolve_frame_var_dir(model, region, run, var, fh)
+    if var_dir is None:
+        raise HTTPException(status_code=404, detail="Frame not found")
+
+    sidecar_path = var_dir / f"fh{fh:03d}.json"
+    if not sidecar_path.is_file():
+        raise HTTPException(status_code=404, detail="Sidecar not found")
+
+    try:
+        sidecar = json.loads(sidecar_path.read_text())
+    except Exception as exc:
+        logger.exception(
+            "Failed to read sidecar for contour: %s/%s/%s/%s/fh%03d (%s)",
+            model,
+            region,
+            run,
+            var,
+            fh,
+            sidecar_path,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to read sidecar: {exc}") from exc
+
+    contours = sidecar.get("contours")
+    if not isinstance(contours, dict) or key not in contours:
+        raise HTTPException(status_code=404, detail=f"Contour '{key}' not found")
+
+    contour_meta = contours[key]
+    contour_rel_path = contour_meta.get("path") if isinstance(contour_meta, dict) else None
+    if not isinstance(contour_rel_path, str) or not contour_rel_path:
+        raise HTTPException(status_code=500, detail=f"Contour '{key}' has invalid sidecar path")
+
+    contour_path = var_dir / contour_rel_path
+    if not contour_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Contour file missing: {contour_rel_path}")
+
+    try:
+        return json.loads(contour_path.read_text())
+    except Exception as exc:
+        logger.exception(
+            "Failed to read contour GeoJSON: %s/%s/%s/%s/fh%03d/%s (%s)",
+            model,
+            region,
+            run,
+            var,
+            fh,
+            key,
+            contour_path,
+        )
+        raise HTTPException(status_code=500, detail=f"Failed to read contour GeoJSON: {exc}") from exc
