@@ -195,11 +195,11 @@ def _colorize_indexed(
 
     # Direct index lookup: clip(round(data), 0, len(colors)-1)
     max_idx = len(colors) - 1
-    indices = np.where(
-        finite_mask,
-        np.clip(np.rint(data).astype(np.int32), 0, max_idx),
-        0,
-    ).astype(np.uint8)
+    indices_i32 = np.zeros(data.shape, dtype=np.int32)
+    if finite_mask.any():
+        rounded = np.rint(data[finite_mask]).astype(np.int32)
+        indices_i32[finite_mask] = np.clip(rounded, 0, max_idx)
+    indices = indices_i32.astype(np.uint8)
 
     # LUT lookup
     rgba_hwc = lut[indices]  # (H, W, 4)

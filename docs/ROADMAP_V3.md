@@ -715,12 +715,12 @@ Adding a new variable becomes:
 
 **Steps:**
 
-1. Implement `builder/derive.py` — extract derivation logic from `build_cog.py`:
+1. ✅ Implement `builder/derive.py` — extract derivation logic from `build_cog.py`:
    - `derive_wspd()`: fetch u/v → `np.hypot()`
    - `derive_radar_ptype()`: fetch refc + 4 ptype masks → argmax
    - Wire each into `pipeline.py` as a dispatch based on `VarSpec.derivation`
-2. Verify categorical overview handling: radar_ptype uses nearest for all bands
-3. Verify value-grid semantics: wspd stores derived float mph; radar_ptype stores category index
+2. ✅ Verify categorical overview handling: radar_ptype uses nearest for all bands
+3. ✅ Verify value-grid semantics: wspd stores derived float mph; radar_ptype stores category index
 4. Run all HRRR variables through scheduler, validate tiles + hover for each
 5. Confirm legend rendering for all types (gradient, discrete, segmented)
 

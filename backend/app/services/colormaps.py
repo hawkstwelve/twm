@@ -533,7 +533,7 @@ VAR_SPECS = {
         "colors": PRECIP_CONFIG["snow"]["colors"],
     },
     "radar_ptype": {
-        "type": "discrete",
+        "type": "indexed",
         "units": "dBZ",
         "levels": RADAR_PTYPE_LEVELS,
         "colors": RADAR_PTYPE_COLORS,
@@ -558,7 +558,7 @@ VAR_SPECS = {
         "legend_stops": QPF6H_LEGEND_STOPS,
     },
     "precip_ptype": {
-        "type": "discrete",
+        "type": "indexed",
         "units": "mm/hr",
         "levels": PRECIP_PTYPE_LEVELS,
         "colors": PRECIP_PTYPE_COLORS,

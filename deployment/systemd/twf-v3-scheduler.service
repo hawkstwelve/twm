@@ -1,0 +1,22 @@
+[Unit]
+Description=TWF V3 Scheduler (HRRR CONUS)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=twf
+Group=twf
+UMask=0027
+LimitNOFILE=65536
+WorkingDirectory=/opt/twf_models_v3/backend
+EnvironmentFile=-/etc/twf-v3/scheduler.env
+Environment=PATH=/opt/twf_models_v3/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/twf_models_v3/.venv/bin/python -m app.services.scheduler --model hrrr --region conus
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

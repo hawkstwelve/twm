@@ -184,15 +184,23 @@ def compute_transform_and_shape(
 
 
 def _overview_levels(height: int, width: int) -> list[int]:
-    """Compute overview levels (powers of 2) down to roughly 256px."""
+    """Compute overview levels (powers of 2), including small grids.
+
+    Contract requires internal overviews. For compact domains (e.g. GFS PNW),
+    still emit at least a 2x overview when possible.
+    """
     max_dim = max(height, width)
+    if max_dim < 2:
+        return []
+
     levels = []
     factor = 2
     while max_dim // factor >= 128:
         levels.append(factor)
         factor *= 2
-    # Always have at least one overview level if image is large enough
-    if not levels and max_dim > 256:
+
+    # Always have at least one overview level for any grid that can be downsampled.
+    if not levels:
         levels.append(2)
     return levels
 

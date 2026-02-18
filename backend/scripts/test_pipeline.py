@@ -16,6 +16,7 @@ import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -30,6 +31,7 @@ from app.services.builder.cog_writer import (
 )
 from app.services.builder.colorize import float_to_rgba
 from app.services.builder.fetch import convert_units
+from app.services.builder import derive as derive_module
 from app.services.builder.pipeline import (
     CONTRACT_VERSION,
     _format_units,
@@ -39,7 +41,7 @@ from app.services.builder.pipeline import (
     check_pixel_sanity,
     validate_cog,
 )
-from app.services.colormaps import VAR_SPECS
+from app.services.colormaps import RADAR_PTYPE_BREAKS, RADAR_PTYPE_ORDER, VAR_SPECS
 
 
 MODEL = "hrrr"
@@ -232,6 +234,128 @@ def test_validate_cog_rejects_bad_band_count():
     print("  Gate 1 rejection (wrong band count): PASS")
 
 
+def test_phase2_value_grid_semantics():
+    """Verify Phase 2 value-grid semantics for derived products.
+
+    - wspd10m value grid stores physical wind speed in mph (float32)
+    - radar_ptype value grid stores category/palette index values (float32 integers)
+    """
+    run_date = datetime(2026, 2, 17, 6, tzinfo=timezone.utc)
+
+    class _Plugin:
+        def __init__(self, vars_map: dict[str, object]):
+            self._vars_map = vars_map
+
+        def get_var(self, var_id: str):
+            return self._vars_map.get(var_id)
+
+    def _var_with_search(search: str) -> object:
+        return SimpleNamespace(selectors=SimpleNamespace(search=[search]))
+
+    vars_map = {
+        "10u": _var_with_search(":UGRD:10 m above ground:"),
+        "10v": _var_with_search(":VGRD:10 m above ground:"),
+        "refc": _var_with_search(":REFC:"),
+        "crain": _var_with_search(":CRAIN:surface:"),
+        "csnow": _var_with_search(":CSNOW:surface:"),
+        "cicep": _var_with_search(":CICEP:surface:"),
+        "cfrzr": _var_with_search(":CFRZR:surface:"),
+    }
+    plugin = _Plugin(vars_map)
+
+    wspd_spec = SimpleNamespace(
+        derive="wspd10m",
+        selectors=SimpleNamespace(hints={"u_component": "10u", "v_component": "10v"}),
+    )
+    radar_spec = SimpleNamespace(
+        derive="radar_ptype_combo",
+        selectors=SimpleNamespace(
+            hints={
+                "refl_component": "refc",
+                "rain_component": "crain",
+                "snow_component": "csnow",
+                "sleet_component": "cicep",
+                "frzr_component": "cfrzr",
+            }
+        ),
+    )
+
+    u = np.full((2, 2), 3.0, dtype=np.float32)
+    v = np.full((2, 2), 4.0, dtype=np.float32)
+    refl = np.full((2, 2), 35.0, dtype=np.float32)
+    rain = np.array([[1.0, 0.0], [0.0, 0.0]], dtype=np.float32)
+    snow = np.array([[0.0, 1.0], [0.0, 0.0]], dtype=np.float32)
+    sleet = np.array([[0.0, 0.0], [1.0, 0.0]], dtype=np.float32)
+    frzr = np.array([[0.0, 0.0], [0.0, 1.0]], dtype=np.float32)
+
+    fake_map = {
+        ":UGRD:10 m above ground:": u,
+        ":VGRD:10 m above ground:": v,
+        ":REFC:": refl,
+        ":CRAIN:surface:": rain,
+        ":CSNOW:surface:": snow,
+        ":CICEP:surface:": sleet,
+        ":CFRZR:surface:": frzr,
+    }
+
+    def _fake_fetch_variable(
+        model_id: str,
+        product: str,
+        search_pattern: str,
+        run_date: datetime,
+        fh: int,
+        *,
+        herbie_kwargs=None,
+    ):
+        del model_id, product, run_date, fh, herbie_kwargs
+        arr = fake_map[search_pattern]
+        return arr.copy(), "EPSG:4326", None
+
+    original_fetch = derive_module.fetch_variable
+    derive_module.fetch_variable = _fake_fetch_variable
+    try:
+        wspd, _, _ = derive_module.derive_variable(
+            model_id="hrrr",
+            product="sfc",
+            run_date=run_date,
+            fh=0,
+            var_spec_model=wspd_spec,
+            model_plugin=plugin,
+        )
+        expected_mph = float(np.hypot(3.0, 4.0) * 2.23694)
+        assert wspd.dtype == np.float32
+        np.testing.assert_allclose(wspd, expected_mph, atol=1e-3)
+
+        radar_idx, _, _ = derive_module.derive_variable(
+            model_id="hrrr",
+            product="sfc",
+            run_date=run_date,
+            fh=0,
+            var_spec_model=radar_spec,
+            model_plugin=plugin,
+        )
+        assert radar_idx.dtype == np.float32
+        assert np.all(np.isfinite(radar_idx))
+        assert np.allclose(radar_idx, np.rint(radar_idx))
+
+        normalized = np.clip(35.0 / 70.0, 0.0, 1.0)
+        expected_indices = []
+        for code in ["rain", "snow", "sleet", "frzr"]:
+            offset = int(RADAR_PTYPE_BREAKS[code]["offset"])
+            count = int(RADAR_PTYPE_BREAKS[code]["count"])
+            local = int(np.clip(np.rint(normalized * (count - 1)), 0, count - 1))
+            expected_indices.append(offset + local)
+
+        assert int(radar_idx[0, 0]) == expected_indices[RADAR_PTYPE_ORDER.index("rain")]
+        assert int(radar_idx[0, 1]) == expected_indices[RADAR_PTYPE_ORDER.index("snow")]
+        assert int(radar_idx[1, 0]) == expected_indices[RADAR_PTYPE_ORDER.index("sleet")]
+        assert int(radar_idx[1, 1]) == expected_indices[RADAR_PTYPE_ORDER.index("frzr")]
+    finally:
+        derive_module.fetch_variable = original_fetch
+
+    print("  Phase 2 value-grid semantics (wspd mph + radar index): PASS")
+
+
 if __name__ == "__main__":
     print("=== Pipeline Integration Tests ===\n")
 
@@ -241,5 +365,6 @@ if __name__ == "__main__":
     test_validate_cog_gates()
     test_sidecar_json()
     test_validate_cog_rejects_bad_band_count()
+    test_phase2_value_grid_semantics()
 
     print("\nAll pipeline tests passed.")

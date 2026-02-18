@@ -42,6 +42,7 @@ from app.services.builder.cog_writer import (
     warp_to_target_grid,
 )
 from app.services.builder.colorize import float_to_rgba
+from app.services.builder.derive import derive_variable
 from app.services.builder.fetch import convert_units, fetch_variable
 from app.services.colormaps import VAR_SPECS
 
@@ -153,6 +154,7 @@ def check_pixel_sanity(
     rgba_path: Path,
     val_path: Path,
     var_spec: dict[str, Any],
+    var_spec_model: Any | None = None,
 ) -> bool:
     """Sanity-check pixel statistics of the produced artifacts.
 
@@ -163,6 +165,18 @@ def check_pixel_sanity(
     Returns True if all checks pass.
     """
     ok = True
+    spec_type = str(var_spec.get("type", "")).lower()
+    model_kind = str(getattr(var_spec_model, "kind", "") or "").lower()
+    model_units = getattr(var_spec_model, "units", None) if var_spec_model is not None else None
+    is_non_physical_kind = spec_type in {"indexed", "categorical", "discrete"} or model_kind in {
+        "indexed",
+        "categorical",
+        "discrete",
+    }
+    is_non_physical_units = model_units is None or var_spec.get("units") is None
+    is_non_physical_flag = var_spec.get("physical") is False
+    skip_physical_range_checks = is_non_physical_kind or is_non_physical_units or is_non_physical_flag
+    is_categorical_ptype = spec_type in {"discrete", "indexed"} and bool(var_spec.get("ptype_breaks"))
 
     # --- RGBA checks ---
     with rasterio.open(rgba_path) as src:
@@ -173,11 +187,18 @@ def check_pixel_sanity(
         valid_count = int(np.count_nonzero(alpha == 255))
         coverage = valid_count / total_pixels
         if coverage < 0.05:
-            logger.error(
-                "Alpha coverage too low: %.1f%% (<5%%) — likely all-transparent (%s)",
-                coverage * 100, rgba_path,
-            )
-            ok = False
+            if is_categorical_ptype and valid_count == 0:
+                logger.warning(
+                    "Dry categorical ptype frame allowed: alpha coverage %.1f%% (%s)",
+                    coverage * 100,
+                    rgba_path,
+                )
+            else:
+                logger.error(
+                    "Alpha coverage too low: %.1f%% (<5%%) — likely all-transparent (%s)",
+                    coverage * 100, rgba_path,
+                )
+                ok = False
 
         # RGB not constant (at least 2 distinct values per band)
         for band_idx in range(1, 4):
@@ -203,12 +224,19 @@ def check_pixel_sanity(
         # Nodata ratio: <95% nodata
         nodata_ratio = 1.0 - (finite_count / total_pixels)
         if nodata_ratio > 0.95:
-            logger.error(
-                "Value COG nodata ratio too high: %.1f%% (>95%%) — "
-                "likely grid misalignment or empty fetch (%s)",
-                nodata_ratio * 100, val_path,
-            )
-            ok = False
+            if is_categorical_ptype and finite_count == 0:
+                logger.warning(
+                    "Dry categorical ptype frame allowed: nodata ratio %.1f%% (%s)",
+                    nodata_ratio * 100,
+                    val_path,
+                )
+            else:
+                logger.error(
+                    "Value COG nodata ratio too high: %.1f%% (>95%%) — "
+                    "likely grid misalignment or empty fetch (%s)",
+                    nodata_ratio * 100, val_path,
+                )
+                ok = False
 
         # Value range: min ≠ max
         if finite_count > 0:
@@ -222,9 +250,9 @@ def check_pixel_sanity(
                 )
                 ok = False
 
-            # Value range within VarSpec.range ± 20% (for continuous vars)
+            # Value range within VarSpec.range ± 20% (for physical continuous vars)
             spec_range = var_spec.get("range")
-            if spec_range and len(spec_range) == 2:
+            if not skip_physical_range_checks and spec_range and len(spec_range) == 2:
                 spec_min, spec_max = float(spec_range[0]), float(spec_range[1])
                 span = spec_max - spec_min
                 margin = span * 0.2
@@ -270,8 +298,11 @@ def build_sidecar_json(
     model_kind = getattr(var_spec_model, "kind", None) if var_spec_model is not None else None
     model_units = getattr(var_spec_model, "units", None) if var_spec_model is not None else None
 
-    kind = model_kind or colorize_meta.get("kind", var_spec.get("type", "continuous"))
-    units = model_units or colorize_meta.get("units") or var_spec.get("units", "")
+    kind = colorize_meta.get("kind") or model_kind or var_spec.get("type", "continuous")
+    if str(kind).lower() == "indexed":
+        units = "index"
+    else:
+        units = model_units or colorize_meta.get("units") or var_spec.get("units", "")
 
     # Build legend
     legend = _build_legend(kind, var_spec, colorize_meta)
@@ -511,9 +542,10 @@ def build_frame(
         return None
 
     # Get GRIB search pattern from model plugin
-    var_spec_model = _resolve_model_var_spec(model, var_id, model_plugin)
+    resolved_plugin = model_plugin or _resolve_model_plugin(model)
+    var_spec_model = _resolve_model_var_spec(model, var_id, resolved_plugin)
     kind = getattr(var_spec_model, "kind", None) or var_spec_colormap.get("type", "continuous")
-    search_pattern = _get_search_pattern(var_spec_model)
+    search_pattern = None if getattr(var_spec_model, "derived", False) else _get_search_pattern(var_spec_model)
 
     # --- Staging directory ---
     staging_dir = data_root / "staging" / model / region / run_id / var_id
@@ -526,19 +558,35 @@ def build_frame(
     contour_sidecar: dict[str, Any] | None = None
 
     try:
-        # --- Step 1: Fetch GRIB data ---
-        logger.info("Step 1/6: Fetching GRIB data")
-        raw_data, src_crs, src_transform = fetch_variable(
-            model_id=model,
-            product=product,
-            search_pattern=search_pattern,
-            run_date=run_date,
-            fh=fh,
-        )
+        if getattr(var_spec_model, "derived", False):
+            # --- Step 1/2: Derive from component GRIB fields ---
+            logger.info("Step 1/6: Deriving variable components")
+            converted_data, src_crs, src_transform = derive_variable(
+                model_id=model,
+                product=product,
+                run_date=run_date,
+                fh=fh,
+                var_spec_model=var_spec_model,
+                model_plugin=resolved_plugin,
+            )
+        else:
+            # --- Step 1: Fetch GRIB data ---
+            logger.info("Step 1/6: Fetching GRIB data")
+            if search_pattern is None:
+                raise ValueError(
+                    f"No search pattern resolved for non-derived var {var_id!r}"
+                )
+            raw_data, src_crs, src_transform = fetch_variable(
+                model_id=model,
+                product=product,
+                search_pattern=search_pattern,
+                run_date=run_date,
+                fh=fh,
+            )
 
-        # --- Step 2: Unit conversion ---
-        logger.info("Step 2/6: Unit conversion")
-        converted_data = convert_units(raw_data, var_id)
+            # --- Step 2: Unit conversion ---
+            logger.info("Step 2/6: Unit conversion")
+            converted_data = convert_units(raw_data, var_id)
 
         # --- Step 3: Warp to target grid ---
         logger.info("Step 3/6: Warping to target grid")
@@ -642,7 +690,12 @@ def build_frame(
             return None
 
         # Gate 2: pixel sanity
-        if not check_pixel_sanity(rgba_path, val_path, var_spec_colormap):
+        if not check_pixel_sanity(
+            rgba_path,
+            val_path,
+            var_spec_colormap,
+            var_spec_model=var_spec_model,
+        ):
             logger.error("Gate 2 FAILED — rejecting frame")
             _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
             return None
@@ -692,28 +745,27 @@ def _resolve_model_var_spec(
     model_plugin: Any = None,
 ) -> Any:
     """Resolve the VarSpec from model plugin or registry."""
-    if model_plugin is not None:
-        spec = model_plugin.get_var(var_id)
-        if spec is not None:
-            return spec
-
-    # Try direct plugin import first (avoids registry pulling in all models)
-    if model == "hrrr":
-        from app.models.hrrr import HRRR_MODEL
-        plugin = HRRR_MODEL
-    else:
-        # Fallback: import from model registry
-        from app.models.registry import MODEL_REGISTRY
-        plugin = MODEL_REGISTRY.get(model)
-
-    if plugin is None:
-        raise ValueError(f"Unknown model: {model!r}")
+    plugin = model_plugin or _resolve_model_plugin(model)
     spec = plugin.get_var(var_id)
     if spec is None:
         raise ValueError(
             f"Variable {var_id!r} not found in {model!r} model plugin"
         )
     return spec
+
+
+def _resolve_model_plugin(model: str) -> Any:
+    """Resolve a model plugin by id."""
+    if model == "hrrr":
+        from app.models.hrrr import HRRR_MODEL
+
+        return HRRR_MODEL
+    from app.models.registry import MODEL_REGISTRY
+
+    plugin = MODEL_REGISTRY.get(model)
+    if plugin is None:
+        raise ValueError(f"Unknown model: {model!r}")
+    return plugin
 
 
 def _run_id_from_date(run_date: datetime) -> str:

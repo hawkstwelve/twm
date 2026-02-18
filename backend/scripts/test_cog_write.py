@@ -90,13 +90,23 @@ def test_rgba_cog_continuous():
 
 
 def test_rgba_cog_discrete():
-    """Write a discrete RGBA COG and validate all-nearest overviews."""
+    """Write a discrete RGBA COG and validate all-nearest overviews.
+
+    Uses a checkerboard pattern so averaging would create intermediate values.
+    For nearest resampling, overview pixels remain a subset of source values
+    for every band (R/G/B/A). This matches radar_ptype requirements.
+    """
     bbox, grid_m = get_grid_params("hrrr", "pnw")
     transform, height, width = compute_transform_and_shape(bbox, grid_m)
 
-    rgba = np.random.randint(0, 255, (4, height, width), dtype=np.uint8)
-    rgba[3, :, :] = 255
-    rgba[3, :10, :] = 0
+    yy, xx = np.indices((height, width))
+    checker = ((xx + yy) % 2).astype(np.uint8)
+
+    rgba = np.zeros((4, height, width), dtype=np.uint8)
+    rgba[0] = np.where(checker == 0, 10, 200).astype(np.uint8)
+    rgba[1] = np.where(checker == 0, 20, 180).astype(np.uint8)
+    rgba[2] = np.where(checker == 0, 30, 160).astype(np.uint8)
+    rgba[3] = np.where(checker == 0, 0, 255).astype(np.uint8)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out = os.path.join(tmpdir, "fh000.rgba.cog.tif")
@@ -107,6 +117,43 @@ def test_rgba_cog_discrete():
             ovrs = src.overviews(1)
             print(f"  Discrete RGBA: {src.width}x{src.height}, overviews={ovrs}")
             assert len(ovrs) >= 1
+
+        # Verify first overview preserves nearest-neighbor semantics on all bands.
+        # If averaged, intermediate values would appear for checkerboard input.
+        first_ovr = 1
+        gdal_translate_bin = _gdal("gdal_translate")
+        expected_vals = {
+            1: {10, 200},
+            2: {20, 180},
+            3: {30, 160},
+            4: {0, 255},
+        }
+        for band in (1, 2, 3, 4):
+            ovr_band_path = os.path.join(tmpdir, f"ovr{first_ovr}_b{band}.tif")
+            subprocess.run(
+                [
+                    gdal_translate_bin,
+                    "-of",
+                    "GTiff",
+                    "-ovr",
+                    str(first_ovr),
+                    "-b",
+                    str(band),
+                    out,
+                    ovr_band_path,
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            with rasterio.open(ovr_band_path) as ovr_src:
+                band_data = ovr_src.read(1)
+            unique_vals = set(np.unique(band_data).astype(int).tolist())
+            disallowed = unique_vals - expected_vals[band]
+            assert not disallowed, (
+                f"Band {band} overview has non-nearest values: {sorted(disallowed)}; "
+                f"expected subset of {sorted(expected_vals[band])}"
+            )
 
     print("  RGBA COG (discrete): PASS\n")
 
