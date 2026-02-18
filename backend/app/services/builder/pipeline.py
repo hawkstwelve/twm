@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,6 @@ from app.services.builder.cog_writer import (
     warp_to_target_grid,
 )
 from app.services.builder.colorize import float_to_rgba
-from app.services.builder.colorize import overlay_contour_line
 from app.services.builder.fetch import convert_units, fetch_variable
 from app.services.colormaps import VAR_SPECS
 
@@ -256,6 +256,7 @@ def build_sidecar_json(
     run_date: datetime,
     colorize_meta: dict[str, Any],
     var_spec: dict[str, Any],
+    contours: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the sidecar metadata dict per the artifact contract.
 
@@ -286,7 +287,70 @@ def build_sidecar_json(
         "legend": legend,
     }
 
+    if contours:
+        sidecar["contours"] = contours
+
     return sidecar
+
+
+def build_iso_contour_geojson(
+    *,
+    val_cog_path: Path,
+    out_geojson_path: Path,
+    level: float,
+    srs: str = "EPSG:3857",
+) -> None:
+    """Generate iso-contour GeoJSON from a value COG using GDAL CLI tools."""
+    out_geojson_path.parent.mkdir(parents=True, exist_ok=True)
+
+    gdalwarp_bin = _gdal("gdalwarp")
+    gdal_contour_bin = _gdal("gdal_contour")
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+
+        subprocess.run(
+            [
+                gdalwarp_bin,
+                "-t_srs",
+                srs,
+                "-r",
+                "bilinear",
+                "-of",
+                "GTiff",
+                str(val_cog_path),
+                str(tmp_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        subprocess.run(
+            [
+                gdal_contour_bin,
+                "-fl",
+                str(float(level)),
+                "-a",
+                "value",
+                "-f",
+                "GeoJSON",
+                str(tmp_path),
+                str(out_geojson_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    finally:
+        if tmp_path is not None:
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                pass
 
 
 def _build_legend(
@@ -455,6 +519,8 @@ def build_frame(
     rgba_path = staging_dir / f"{fh_str}.rgba.cog.tif"
     val_path = staging_dir / f"{fh_str}.val.cog.tif"
     sidecar_path = staging_dir / f"{fh_str}.json"
+    contour_geojson_path: Path | None = None
+    contour_sidecar: dict[str, Any] | None = None
 
     try:
         # --- Step 1: Fetch GRIB data ---
@@ -488,19 +554,6 @@ def build_frame(
         logger.info("Step 4/6: Colorizing")
         rgba, colorize_meta = float_to_rgba(warped_data, var_id)
 
-        contour_value = var_spec_colormap.get("contour_value")
-        if contour_value is not None:
-            contour_color = str(var_spec_colormap.get("contour_color", "#111111"))
-            contour_thickness = int(var_spec_colormap.get("contour_thickness_px", 1))
-            contour_thickness = max(1, min(3, contour_thickness))
-            rgba = overlay_contour_line(
-                warped_data,
-                rgba,
-                threshold=float(contour_value),
-                color_hex=contour_color,
-                thickness_px=contour_thickness,
-            )
-
         # --- Step 5: Write COGs ---
         logger.info("Step 5/6: Writing COGs")
         write_rgba_cog(
@@ -511,6 +564,52 @@ def build_frame(
             warped_data, val_path,
             model=model, region=region,
         )
+
+        # --- Step 5b: Optional contour extraction (tmp2m only) ---
+        if var_id == "tmp2m":
+            contour_rel_path = f"contours/{fh_str}.iso32.geojson"
+            contour_geojson_path = staging_dir / contour_rel_path
+            try:
+                build_iso_contour_geojson(
+                    val_cog_path=val_path,
+                    out_geojson_path=contour_geojson_path,
+                    level=32.0,
+                    srs="EPSG:3857",
+                )
+                contour_sidecar = {
+                    "iso32f": {
+                        "format": "geojson",
+                        "path": contour_rel_path,
+                        "srs": "EPSG:3857",
+                        "level": 32.0,
+                    }
+                }
+                logger.info(
+                    "Contour generated: %s/%s/%s/%s/%s -> %s",
+                    model,
+                    region,
+                    run_id,
+                    var_id,
+                    fh_str,
+                    contour_geojson_path,
+                )
+            except Exception as exc:
+                stdout = getattr(exc, "stdout", None)
+                stderr = getattr(exc, "stderr", None)
+                logger.warning(
+                    "Contour generation failed (continuing): %s/%s/%s/%s/%s -> %s | %s | stdout=%r stderr=%r",
+                    model,
+                    region,
+                    run_id,
+                    var_id,
+                    fh_str,
+                    contour_geojson_path,
+                    exc,
+                    stdout,
+                    stderr,
+                )
+                contour_geojson_path = None
+                contour_sidecar = None
 
         # --- Step 6: Validate (Gates 1 & 2) ---
         logger.info("Step 6/6: Validating artifacts")
@@ -525,7 +624,7 @@ def build_frame(
             grid_meters=grid_m,
         ):
             logger.error("Gate 1 FAILED for RGBA COG — rejecting frame")
-            _cleanup_artifacts(rgba_path, val_path, sidecar_path)
+            _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
             return None
 
         if not validate_cog(
@@ -536,13 +635,13 @@ def build_frame(
             grid_meters=grid_m,
         ):
             logger.error("Gate 1 FAILED for value COG — rejecting frame")
-            _cleanup_artifacts(rgba_path, val_path, sidecar_path)
+            _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
             return None
 
         # Gate 2: pixel sanity
         if not check_pixel_sanity(rgba_path, val_path, var_spec_colormap):
             logger.error("Gate 2 FAILED — rejecting frame")
-            _cleanup_artifacts(rgba_path, val_path, sidecar_path)
+            _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
             return None
 
         # --- Write sidecar JSON ---
@@ -555,6 +654,7 @@ def build_frame(
             run_date=run_date,
             colorize_meta=colorize_meta,
             var_spec=var_spec_colormap,
+            contours=contour_sidecar,
         )
         _write_json_atomic(sidecar_path, sidecar)
 
@@ -573,7 +673,7 @@ def build_frame(
             "Build failed for %s/%s/%s/%s/%s",
             model, region, run_id, var_id, fh_str,
         )
-        _cleanup_artifacts(rgba_path, val_path, sidecar_path)
+        _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
         return None
 
 
@@ -630,10 +730,10 @@ def _write_json_atomic(path: Path, data: dict) -> None:
     logger.debug("Wrote sidecar JSON: %s", path)
 
 
-def _cleanup_artifacts(*paths: Path) -> None:
+def _cleanup_artifacts(*paths: Path | None) -> None:
     """Remove artifact files that failed validation."""
     for p in paths:
-        if p.exists():
+        if p is not None and p.exists():
             p.unlink()
             logger.debug("Cleaned up: %s", p)
 
