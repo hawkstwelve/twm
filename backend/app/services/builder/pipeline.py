@@ -298,7 +298,7 @@ def build_iso_contour_geojson(
     val_cog_path: Path,
     out_geojson_path: Path,
     level: float,
-    srs: str = "EPSG:3857",
+    srs: str = "EPSG:4326",
 ) -> None:
     """Generate iso-contour GeoJSON from a value COG using GDAL CLI tools."""
     out_geojson_path.parent.mkdir(parents=True, exist_ok=True)
@@ -574,13 +574,13 @@ def build_frame(
                     val_cog_path=val_path,
                     out_geojson_path=contour_geojson_path,
                     level=32.0,
-                    srs="EPSG:3857",
+                    srs="EPSG:4326",
                 )
                 contour_sidecar = {
                     "iso32f": {
                         "format": "geojson",
                         "path": contour_rel_path,
-                        "srs": "EPSG:3857",
+                        "srs": "EPSG:4326",
                         "level": 32.0,
                     }
                 }
