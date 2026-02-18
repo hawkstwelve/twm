@@ -44,6 +44,8 @@ class VarSpec:
     primary: bool = False
     derived: bool = False
     derive: Optional[str] = None
+    kind: Optional[str] = None
+    units: Optional[str] = None
     normalize_units: Optional[str] = None
     scale: Optional[float] = None
 

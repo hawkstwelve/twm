@@ -256,6 +256,7 @@ def build_sidecar_json(
     run_date: datetime,
     colorize_meta: dict[str, Any],
     var_spec: dict[str, Any],
+    var_spec_model: Any | None = None,
     contours: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the sidecar metadata dict per the artifact contract.
@@ -266,8 +267,11 @@ def build_sidecar_json(
     # Compute valid time = run_date + fh hours
     valid_time = run_date + timedelta(hours=fh)
 
-    kind = colorize_meta.get("kind", var_spec.get("type", "continuous"))
-    units = colorize_meta.get("units") or var_spec.get("units", "")
+    model_kind = getattr(var_spec_model, "kind", None) if var_spec_model is not None else None
+    model_units = getattr(var_spec_model, "units", None) if var_spec_model is not None else None
+
+    kind = model_kind or colorize_meta.get("kind", var_spec.get("type", "continuous"))
+    units = model_units or colorize_meta.get("units") or var_spec.get("units", "")
 
     # Build legend
     legend = _build_legend(kind, var_spec, colorize_meta)
@@ -654,6 +658,7 @@ def build_frame(
             run_date=run_date,
             colorize_meta=colorize_meta,
             var_spec=var_spec_colormap,
+            var_spec_model=var_spec_model,
             contours=contour_sidecar,
         )
         _write_json_atomic(sidecar_path, sidecar)

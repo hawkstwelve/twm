@@ -333,7 +333,7 @@ Response:
 
 Hover sampling can self-DOS the API if every pixel of mouse movement fires a request. These rules are defined once and not deferred.
 
-**Debounce:** 150ms trailing debounce on `mousemove`. No request fires until the cursor has been stationary for 150ms. This alone reduces request volume by ~90% during active mouse movement.
+**Debounce:** 80ms trailing debounce on `mousemove`. No request fires until the cursor has been stationary for 80ms. This alone reduces request volume by ~90% during active mouse movement.
 
 **Request coalescing (drop stale):** Each debounced sample call sets a generation counter. When the response arrives, if the generation has advanced (cursor moved again), the response is silently discarded — no tooltip update, no wasted render. Implementation:
 
@@ -1054,7 +1054,7 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 | RGBA overview quality for categorical vars (noise at low zoom) | Medium | Medium | Test nearest-only overviews; consider 2-layer approach from ROADMAP P1.4 |
 | Herbie upstream outages during build | Low | Low | Already handled with retry logic in fetch_engine.py |
 | GDAL version differences in overview behavior | Low | Medium | Pin GDAL version in Dockerfile; carry forward version-detection fallbacks |
-| Frontend hover self-DOS | Low | Medium | 150ms debounce + generation counter + 256-entry LRU cache (see "Sampling Cost Control") |
+| Frontend hover self-DOS | Low | Medium | 80ms debounce + generation counter + 256-entry LRU cache (see "Sampling Cost Control") |
 | Schema drift between sidecar JSON versions | Low | Medium | `contract_version` field enforced in all metadata |
 
 ---

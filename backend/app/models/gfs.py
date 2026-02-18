@@ -1,226 +1,96 @@
+"""GFS model plugin — V3 clean implementation.
+
+Provides VarSpec definitions, region specs, and forecast-hour schedule
+for the Global Forecast System (GFS) model.
+
+V3 design: this module is import-safe with zero external service dependencies.
+All runtime logic (xarray selection, cfgrib parsing, cycle management) that
+lived here in V2 has been removed — the V3 builder never calls those paths.
+Selection happens via Herbie search patterns (VarSpec.selectors.search).
+Derivation dispatch happens in builder/derive.py (Phase 2).
+"""
+
 from __future__ import annotations
-
-from pathlib import Path
-
-import numpy as np
-import xarray as xr
-
-from app.services.gfs_runs import GFSCacheConfig, enforce_cycle_retention
-from app.services.variable_registry import normalize_api_variable
 
 from .base import BaseModelPlugin, RegionSpec, VarSelectors, VarSpec
 
 
 class GFSPlugin(BaseModelPlugin):
-    _PRATE_TO_MM_PER_HOUR = 3600.0
-    _STRICT_SELECTION_VARS = {
-        "tmp2m",
-        "10u",
-        "10v",
-        "refc",
-        "precip_ptype",
-        "crain",
-        "csnow",
-        "cicep",
-        "cfrzr",
-    }
+    """V3-clean GFS plugin.
+
+    Inherits get_var() / get_region() from BaseModelPlugin.
+    Only overrides target_fhs() and normalize_var_id() — both
+    are dependency-free.
+    """
 
     def target_fhs(self, cycle_hour: int) -> list[int]:
-        del cycle_hour
+        """GFS forecast hours to build.
+
+        GFS runs 4×/day at 00/06/12/18z.  Initial V3 rollout builds
+        fh000–fh120 in 6-hour steps (same behaviour for all cycles).
+        Extend to fh384 in Phase 3 once CONUS is validated.
+        """
+        del cycle_hour  # all GFS cycles use the same FH set for now
         return list(GFS_INITIAL_FHS)
 
-    @classmethod
-    def _prate_mm_per_s_to_mm_per_hr(cls, values: np.ndarray) -> np.ndarray:
-        return values * cls._PRATE_TO_MM_PER_HOUR
-
     def normalize_var_id(self, var_id: str) -> str:
-        normalized = normalize_api_variable(var_id)
-        if normalized in {"t2m", "tmp2m", "2t"}:
-            return "tmp2m"
-        if normalized in {"refc", "cref"}:
-            return "refc"
-        if normalized == "wspd10m":
-            return "wspd10m"
-        if normalized == "10u":
-            return "10u"
-        if normalized == "10v":
-            return "10v"
-        if normalized == "qpf6h":
-            return "qpf6h"
-        return normalized
-
-    def _score_candidate(self, da: xr.DataArray, var_spec: VarSpec) -> int:
-        selectors = var_spec.selectors
-        hints = selectors.hints
-        filter_keys = selectors.filter_by_keys
-
-        score = 0
-
-        expected_cf = hints.get("cf_var")
-        if expected_cf and da.attrs.get("GRIB_cfVarName") == expected_cf:
-            score += 10
-
-        expected_short = hints.get("short_name")
-        if expected_short and da.attrs.get("GRIB_shortName") == expected_short:
-            score += 8
-
-        expected_tol = filter_keys.get("typeOfLevel")
-        if expected_tol and da.attrs.get("GRIB_typeOfLevel") == expected_tol:
-            score += 4
-
-        expected_level = filter_keys.get("level")
-        if expected_level is not None:
-            actual_level = da.attrs.get("GRIB_level")
-            try:
-                expected_level_i = int(expected_level)
-                actual_level_i = int(actual_level) if actual_level is not None else None
-            except (TypeError, ValueError):
-                expected_level_i = None
-                actual_level_i = None
-            if expected_level_i is not None and actual_level_i == expected_level_i:
-                score += 2
-
-        expected_upstream = hints.get("upstream_var")
-        if expected_upstream:
-            if da.attrs.get("GRIB_cfVarName") == expected_upstream:
-                score += 8
-            elif da.name == expected_upstream:
-                score += 6
-
-        return score
-
-    def _select_from_spec(self, ds: xr.Dataset, var_id: str) -> xr.DataArray:
-        var_spec = self.get_var(var_id)
-        if var_spec is None:
-            raise ValueError(f"Unknown GFS variable: {var_id}")
-
-        scored: list[tuple[int, str, xr.DataArray]] = []
-        for name in sorted(ds.data_vars):
-            da = ds[name]
-            score = self._score_candidate(da, var_spec)
-            if score > 0:
-                scored.append((score, name, da))
-
-        scored.sort(key=lambda item: item[0], reverse=True)
-
-        if scored:
-            top_score = scored[0][0]
-            top = [row for row in scored if row[0] == top_score]
-            if len(top) == 1:
-                return top[0][2]
-
-        if var_id in ds.data_vars:
-            return ds[var_id]
-
-        upstream = var_spec.selectors.hints.get("upstream_var")
-        if upstream and upstream in ds.data_vars:
-            return ds[upstream]
-
-        if var_id in self._STRICT_SELECTION_VARS:
-            available = ", ".join(sorted(ds.data_vars))
-            raise ValueError(
-                f"GFS strict selection failed for {var_id}; available={available}"
-            )
-
-        if len(ds.data_vars) == 1:
-            only_name = next(iter(ds.data_vars))
-            return ds[only_name]
-
-        available = ", ".join(sorted(ds.data_vars))
-        raise ValueError(
-            f"GFS variable selection failed for {var_id}; available={available}"
-        )
-
-    def select_dataarray(self, ds: object, var_id: str) -> object:
-        if not isinstance(ds, xr.Dataset):
-            raise TypeError("Expected xarray.Dataset for GFS selection")
-
-        normalized = self.normalize_var_id(var_id)
-        if normalized == "precip_ptype":
-            prate_da = self._select_from_spec(ds, "precip_ptype")
-            source_units = str(
-                prate_da.attrs.get("GRIB_units")
-                or prate_da.attrs.get("units")
-                or ""
-            ).strip().lower()
-            convert = "mm/hr" not in source_units and "mm h-1" not in source_units
-
-            values = np.asarray(prate_da.values, dtype=np.float32)
-            if convert:
-                values = self._prate_mm_per_s_to_mm_per_hr(values)
-
-            coords = {
-                dim: prate_da.coords[dim]
-                for dim in prate_da.dims
-                if dim in prate_da.coords
-            }
-            precip_da = xr.DataArray(
-                values.astype(np.float32),
-                dims=prate_da.dims,
-                coords=coords,
-                name="precip_ptype",
-            )
-            precip_da.attrs = dict(prate_da.attrs)
-            precip_da.attrs["GRIB_units"] = "mm/hr"
-            precip_da.attrs["units"] = "mm/hr"
-            return precip_da
-        if normalized == "wspd10m":
-            u_da = self._select_from_spec(ds, "10u")
-            v_da = self._select_from_spec(ds, "10v")
-            if "time" in u_da.dims:
-                u_da = u_da.isel(time=0)
-            if "time" in v_da.dims:
-                v_da = v_da.isel(time=0)
-            u_da = u_da.squeeze()
-            v_da = v_da.squeeze()
-            if u_da.shape != v_da.shape:
-                raise ValueError(
-                    f"wspd10m component shape mismatch: u_shape={u_da.shape} v_shape={v_da.shape}"
-                )
-
-            u_vals = np.asarray(u_da.values, dtype=np.float32)
-            v_vals = np.asarray(v_da.values, dtype=np.float32)
-            speed_vals = np.hypot(u_vals, v_vals) * 2.23694
-            coords = {dim: u_da.coords[dim] for dim in u_da.dims if dim in u_da.coords}
-            speed_mph = xr.DataArray(
-                speed_vals.astype(np.float32),
-                dims=u_da.dims,
-                coords=coords,
-                name="wspd10m",
-            )
-            speed_mph.name = "wspd10m"
-            speed_mph.attrs = dict(u_da.attrs)
-            speed_mph.attrs["GRIB_units"] = "mph"
-            return speed_mph
-        return self._select_from_spec(ds, normalized)
-
-    def ensure_latest_cycles(self, keep_cycles: int, *, cache_dir: Path | None = None) -> dict[str, int]:
-        cfg = GFSCacheConfig(base_dir=cache_dir or GFSCacheConfig().base_dir, keep_runs=keep_cycles)
-        return enforce_cycle_retention(cfg)
+        """Normalise common GFS variable aliases to canonical V3 IDs."""
+        _aliases: dict[str, str] = {
+            "t2m": "tmp2m",
+            "2t": "tmp2m",
+            "tmp2m": "tmp2m",
+            "refc": "refc",
+            "cref": "refc",
+            "wspd10m": "wspd10m",
+            "10u": "10u",
+            "u10": "10u",
+            "10v": "10v",
+            "v10": "10v",
+            "qpf6h": "qpf6h",
+            "precip_ptype": "precip_ptype",
+            "crain": "crain",
+            "csnow": "csnow",
+            "cicep": "cicep",
+            "cfrzr": "cfrzr",
+        }
+        return _aliases.get(var_id, var_id)
 
 
-PNW_BBOX_WGS84 = (-125.5, 41.5, -111.0, 49.5)
-
-# Initial rollout scope (M0): keep CONUS configured, but build/schedule only PNW.
-GFS_INITIAL_ROLLOUT_REGIONS: tuple[str, ...] = ("pnw",)
-GFS_INITIAL_FHS: tuple[int, ...] = tuple(range(0, 121, 6))
+# ---------------------------------------------------------------------------
+# Region definitions
+# ---------------------------------------------------------------------------
 
 GFS_REGIONS: dict[str, RegionSpec] = {
     "pnw": RegionSpec(
         id="pnw",
         name="Pacific Northwest",
-        bbox_wgs84=PNW_BBOX_WGS84,
+        bbox_wgs84=(-125.5, 41.5, -111.0, 49.5),
         clip=True,
     ),
     "conus": RegionSpec(
         id="conus",
         name="CONUS",
-        bbox_wgs84=None,
-        clip=False,
+        bbox_wgs84=(-125.0, 24.0, -66.5, 50.0),
+        clip=True,
     ),
 }
 
+# ---------------------------------------------------------------------------
+# Forecast-hour schedule
+# ---------------------------------------------------------------------------
+
+# Phase 3: extend to range(0, 385, 6) (fh384)
+GFS_INITIAL_FHS: tuple[int, ...] = tuple(range(0, 121, 6))  # fh000–fh120
+
+# Initial rollout: PNW only.  CONUS added in Phase 3 after scale validation.
+GFS_INITIAL_ROLLOUT_REGIONS: tuple[str, ...] = ("pnw",)
+
+# ---------------------------------------------------------------------------
+# Variable definitions
+# ---------------------------------------------------------------------------
+
 GFS_VARS: dict[str, VarSpec] = {
+    # ── Simple variables (Phase 1+) ─────────────────────────────────────────
     "tmp2m": VarSpec(
         id="tmp2m",
         name="2m Temp",
@@ -238,6 +108,7 @@ GFS_VARS: dict[str, VarSpec] = {
         ),
         primary=True,
     ),
+    # ── Wind components (fetched separately for wspd10m derivation) ─────────
     "10u": VarSpec(
         id="10u",
         name="10m U Wind",
@@ -270,6 +141,7 @@ GFS_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
+    # ── Derived: wind speed (Phase 2) ────────────────────────────────────────
     "wspd10m": VarSpec(
         id="wspd10m",
         name="10m Wind Speed",
@@ -281,6 +153,8 @@ GFS_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="wspd10m",
+        kind="continuous",
+        units="mph",
     ),
     "refc": VarSpec(
         id="refc",
@@ -297,9 +171,9 @@ GFS_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
-    "precip_ptype": VarSpec(
-        id="precip_ptype",
-        name="Precipitation Intensity + Type",
+    "prate": VarSpec(
+        id="prate",
+        name="Precipitation Rate",
         selectors=VarSelectors(
             search=[":PRATE:surface:"],
             filter_by_keys={
@@ -310,9 +184,16 @@ GFS_VARS: dict[str, VarSpec] = {
                 "upstream_var": "prate",
                 "cf_var": "prate",
                 "short_name": "prate",
-                "kind": "precip_ptype",
-                "units": "mm/hr",
-                "prate_component": "precip_ptype",
+            },
+        ),
+    ),
+    # ── Derived: precip type (Phase 2) ──────────────────────────────────────
+    "precip_ptype": VarSpec(
+        id="precip_ptype",
+        name="Precipitation Intensity + Type",
+        selectors=VarSelectors(
+            hints={
+                "prate_component": "prate",
                 "rain_component": "crain",
                 "snow_component": "csnow",
                 "sleet_component": "cicep",
@@ -322,6 +203,8 @@ GFS_VARS: dict[str, VarSpec] = {
         primary=True,
         derived=True,
         derive="precip_ptype_blend",
+        kind="precip_ptype",
+        units="mm/hr",
         normalize_units="mm/hr",
     ),
     "crain": VarSpec(
@@ -384,6 +267,7 @@ GFS_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
+    # ── QPF (Phase 3 candidate) ──────────────────────────────────────────────
     "qpf6h": VarSpec(
         id="qpf6h",
         name="6-hr Precip",
@@ -398,6 +282,9 @@ GFS_VARS: dict[str, VarSpec] = {
     ),
 }
 
+# ---------------------------------------------------------------------------
+# Plugin instance — imported by the model registry
+# ---------------------------------------------------------------------------
 
 GFS_MODEL = GFSPlugin(
     id="gfs",

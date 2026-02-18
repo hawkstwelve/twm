@@ -25,7 +25,7 @@ class HRRRPlugin(BaseModelPlugin):
             return "refc"
         if normalized == "wspd10m":
             return "wspd10m"
-        if normalized == "radar_ptype":
+        if normalized in {"radar_ptype", "radarptype"}:
             return "radar_ptype"
         return normalized
 
@@ -83,6 +83,8 @@ HRRR_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="wspd10m",
+        kind="continuous",
+        units="mph",
     ),
     "10u": VarSpec(
         id="10u",
@@ -189,6 +191,8 @@ HRRR_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="radar_ptype_combo",
+        kind="radar_ptype",
+        units="dBZ",
     ),
 }
 
