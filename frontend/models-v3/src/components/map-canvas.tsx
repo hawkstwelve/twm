@@ -32,6 +32,10 @@ const CONTINUOUS_CROSSFADE_MS = 120;
 const MICRO_CROSSFADE_MS = 60; // Very brief crossfade to avoid white flash
 const PREFETCH_BUFFER_COUNT = 4;
 const OVERLAY_UNDERLAY_OPACITY = 0.22;
+const OVERLAY_RASTER_CONTRAST = 0.08;
+const OVERLAY_RASTER_SATURATION = 0.08;
+const OVERLAY_RASTER_BRIGHTNESS_MIN = 0.02;
+const OVERLAY_RASTER_BRIGHTNESS_MAX = 0.98;
 
 // Keep hidden raster layers at a tiny opacity so MapLibre still requests/renders their tiles.
 // This helps avoid a one-frame "basemap flash" when swapping buffers.
@@ -74,6 +78,15 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
     : opacity;
+  const overlayPaint: any = {
+    "raster-opacity": overlayOpacity,
+    "raster-resampling": resamplingMode,
+    "raster-fade-duration": 0,
+    "raster-contrast": OVERLAY_RASTER_CONTRAST,
+    "raster-saturation": OVERLAY_RASTER_SATURATION,
+    "raster-brightness-min": OVERLAY_RASTER_BRIGHTNESS_MIN,
+    "raster-brightness-max": OVERLAY_RASTER_BRIGHTNESS_MAX,
+  };
   return {
     version: 8,
     sources: {
@@ -160,61 +173,37 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
         id: layerId("a"),
         type: "raster",
         source: sourceId("a"),
-        paint: {
-          "raster-opacity": overlayOpacity,
-          "raster-resampling": resamplingMode,
-          "raster-fade-duration": 0,
-        },
+        paint: overlayPaint,
       },
       {
         id: layerId("b"),
         type: "raster",
         source: sourceId("b"),
-        paint: {
-          "raster-opacity": overlayOpacity,
-          "raster-resampling": resamplingMode,
-          "raster-fade-duration": 0,
-        },
+        paint: overlayPaint,
       },
       {
         id: prefetchLayerId(1),
         type: "raster",
         source: prefetchSourceId(1),
-        paint: {
-          "raster-opacity": overlayOpacity,
-          "raster-resampling": resamplingMode,
-          "raster-fade-duration": 0,
-        },
+        paint: overlayPaint,
       },
       {
         id: prefetchLayerId(2),
         type: "raster",
         source: prefetchSourceId(2),
-        paint: {
-          "raster-opacity": overlayOpacity,
-          "raster-resampling": resamplingMode,
-          "raster-fade-duration": 0,
-        },
+        paint: overlayPaint,
       },
       {
         id: prefetchLayerId(3),
         type: "raster",
         source: prefetchSourceId(3),
-        paint: {
-          "raster-opacity": overlayOpacity,
-          "raster-resampling": resamplingMode,
-          "raster-fade-duration": 0,
-        },
+        paint: overlayPaint,
       },
       {
         id: prefetchLayerId(4),
         type: "raster",
         source: prefetchSourceId(4),
-        paint: {
-          "raster-opacity": overlayOpacity,
-          "raster-resampling": resamplingMode,
-          "raster-fade-duration": 0,
-        },
+        paint: overlayPaint,
       },
       {
         id: "twf-labels",

@@ -24,7 +24,7 @@ export const DEFAULTS = {
   variable: "tmp2m",
   center: [47.6, -122.3] as [number, number],
   zoom: 6,
-  overlayOpacity: 0.85,
+  overlayOpacity: 0.9,
 };
 
 export const ALLOWED_VARIABLES = new Set(["tmp2m", "wspd10m", "radar_ptype", "precip_ptype", "qpf6h"]);
