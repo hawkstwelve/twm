@@ -13,3 +13,6 @@ herbie_cache/
 
 # OS
 .DS_Store
+
+# Additional files to ignore
+extract_pivotal_bar.py
