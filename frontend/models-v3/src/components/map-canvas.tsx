@@ -85,32 +85,32 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
       [sourceId("a")]: {
         type: "raster",
         tiles: [overlayUrl],
-        tileSize: 256,
+        tileSize: 512,
       },
       [sourceId("b")]: {
         type: "raster",
         tiles: [overlayUrl],
-        tileSize: 256,
+        tileSize: 512,
       },
       [prefetchSourceId(1)]: {
         type: "raster",
         tiles: [overlayUrl],
-        tileSize: 256,
+        tileSize: 512,
       },
       [prefetchSourceId(2)]: {
         type: "raster",
         tiles: [overlayUrl],
-        tileSize: 256,
+        tileSize: 512,
       },
       [prefetchSourceId(3)]: {
         type: "raster",
         tiles: [overlayUrl],
-        tileSize: 256,
+        tileSize: 512,
       },
       [prefetchSourceId(4)]: {
         type: "raster",
         tiles: [overlayUrl],
-        tileSize: 256,
+        tileSize: 512,
       },
       "twf-labels": {
         type: "raster",

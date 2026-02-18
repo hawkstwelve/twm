@@ -99,7 +99,7 @@ def get_tile(
 
     try:
         with Reader(str(cog_path)) as cog:
-            tile = cog.tile(x, y, z, indexes=(1, 2, 3, 4))
+            tile = cog.tile(x, y, z, indexes=(1, 2, 3, 4), tilesize=512)
 
         content = tile.render(img_format="PNG", add_mask=False)
         return Response(
