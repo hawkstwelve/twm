@@ -14,7 +14,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
-from rio_tiler.io import Reader
+from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
 
 logger = logging.getLogger(__name__)
