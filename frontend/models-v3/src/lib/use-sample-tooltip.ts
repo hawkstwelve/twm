@@ -56,7 +56,7 @@ function cacheKey(
 
 // ── Debounce interval (ms) ───────────────────────────────────────────
 
-const DEBOUNCE_MS = 150;
+const DEBOUNCE_MS = 80;
 
 // ── Hook ─────────────────────────────────────────────────────────────
 

@@ -6,11 +6,14 @@ import json
 import logging
 import os
 import re
+import threading
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 import rasterio
+from rasterio.windows import Window
 from fastapi import FastAPI, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pyproj import Transformer
@@ -41,6 +44,43 @@ app.add_middleware(
 
 # Reusable WGS84 → Web Mercator transformer (thread-safe, cached)
 _wgs84_to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+
+# ---------------------------------------------------------------------------
+# Caches — keep COG datasets + sidecar JSON hot for hover sampling
+# ---------------------------------------------------------------------------
+
+_ds_cache: dict[str, rasterio.DatasetReader] = {}  # path → open dataset
+_ds_cache_lock = threading.Lock()
+_DS_CACHE_MAX = 16  # keep at most 16 open datasets
+
+
+def _get_cached_dataset(path: Path) -> rasterio.DatasetReader:
+    """Return an open rasterio dataset, reusing from cache if possible."""
+    key = str(path)
+    with _ds_cache_lock:
+        ds = _ds_cache.get(key)
+        if ds is not None and not ds.closed:
+            return ds
+        # Evict oldest if at capacity
+        if len(_ds_cache) >= _DS_CACHE_MAX:
+            evict_key = next(iter(_ds_cache))
+            try:
+                _ds_cache.pop(evict_key).close()
+            except Exception:
+                _ds_cache.pop(evict_key, None)
+        ds = rasterio.open(path)
+        _ds_cache[key] = ds
+        return ds
+
+
+@lru_cache(maxsize=128)
+def _cached_sidecar(path_str: str) -> dict | None:
+    """Read and cache sidecar JSON. Keyed by string path for lru_cache."""
+    try:
+        return json.loads(Path(path_str).read_text())
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -218,16 +258,13 @@ def _resolve_val_cog(model: str, region: str, run: str, var: str, fh: int) -> Pa
 
 
 def _resolve_sidecar(model: str, region: str, run: str, var: str, fh: int) -> dict | None:
-    """Load sidecar JSON for units/metadata (published first, then staging)."""
+    """Load sidecar JSON for units/metadata (published first, then staging). Cached."""
     resolved = _resolve_run(model, region, run) or run
     filename = f"fh{fh:03d}.json"
     for prefix in ("published", "staging"):
         candidate = DATA_ROOT / prefix / model / region / resolved / var / filename
         if candidate.is_file():
-            try:
-                return json.loads(candidate.read_text())
-            except Exception:
-                return None
+            return _cached_sidecar(str(candidate))
     return None
 
 
@@ -260,21 +297,21 @@ def sample(
         # Project WGS84 → Web Mercator
         mx, my = _wgs84_to_3857.transform(lon, lat)
 
-        with rasterio.open(val_cog) as ds:
-            # Convert map coordinates to pixel row/col
-            row, col = ds.index(mx, my)
+        ds = _get_cached_dataset(val_cog)
+        # Convert map coordinates to pixel row/col
+        row, col = ds.index(mx, my)
 
-            # Bounds check
-            if row < 0 or row >= ds.height or col < 0 or col >= ds.width:
-                return Response(
-                    status_code=204,
-                    headers={"Cache-Control": "public, max-age=15"},
-                )
+        # Bounds check
+        if row < 0 or row >= ds.height or col < 0 or col >= ds.width:
+            return Response(
+                status_code=204,
+                headers={"Cache-Control": "public, max-age=15"},
+            )
 
-            # Read single pixel
-            window = rasterio.windows.Window(col, row, 1, 1)
-            pixel = ds.read(1, window=window)
-            value = float(pixel[0, 0])
+        # Read single pixel
+        window = Window(col, row, 1, 1)  # type: ignore[call-arg]
+        pixel = ds.read(1, window=window)
+        value = float(pixel[0, 0])
 
         # NaN / nodata → 204
         if np.isnan(value):
