@@ -12,9 +12,7 @@ class HRRRPlugin(BaseModelPlugin):
         return list(range(0, 19))
 
     def normalize_var_id(self, var_id: str) -> str:
-        from app.services.variable_registry import normalize_api_variable
-
-        normalized = normalize_api_variable(var_id)
+        normalized = var_id.strip().lower()
         if normalized in {"t2m", "tmp2m", "2t"}:
             return "tmp2m"
         if normalized in {"10u", "u10"}:
@@ -182,6 +180,7 @@ HRRR_VARS: dict[str, VarSpec] = {
         name="Composite Reflectivity + P-Type",
         selectors=VarSelectors(
             hints={
+                "display_kind": "radar_ptype",
                 "refl_component": "refc",
                 "rain_component": "crain",
                 "snow_component": "csnow",
@@ -191,7 +190,7 @@ HRRR_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="radar_ptype_combo",
-        kind="radar_ptype",
+        kind="discrete",
         units="dBZ",
     ),
 }

@@ -510,10 +510,9 @@ def build_frame(
         logger.error("No colormap spec (VAR_SPECS) for var_id=%r", var_id)
         return None
 
-    kind = var_spec_colormap.get("type", "continuous")
-
     # Get GRIB search pattern from model plugin
     var_spec_model = _resolve_model_var_spec(model, var_id, model_plugin)
+    kind = getattr(var_spec_model, "kind", None) or var_spec_colormap.get("type", "continuous")
     search_pattern = _get_search_pattern(var_spec_model)
 
     # --- Staging directory ---

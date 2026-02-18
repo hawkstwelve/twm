@@ -193,6 +193,7 @@ GFS_VARS: dict[str, VarSpec] = {
         name="Precipitation Intensity + Type",
         selectors=VarSelectors(
             hints={
+                "display_kind": "precip_ptype",
                 "prate_component": "prate",
                 "rain_component": "crain",
                 "snow_component": "csnow",
@@ -203,7 +204,7 @@ GFS_VARS: dict[str, VarSpec] = {
         primary=True,
         derived=True,
         derive="precip_ptype_blend",
-        kind="precip_ptype",
+        kind="discrete",
         units="mm/hr",
         normalize_units="mm/hr",
     ),
