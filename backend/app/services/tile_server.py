@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import traceback
 from pathlib import Path
 
@@ -20,6 +21,9 @@ from rio_tiler.errors import TileOutsideBounds
 logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
+
+# Regex to match run IDs like 20260217_20z
+_RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 
 # Cache headers per the caching strategy in ROADMAP_V3
 CACHE_HIT = "public, max-age=31536000, immutable"
@@ -35,17 +39,38 @@ app.add_middleware(
 )
 
 
+def _resolve_latest_run(model: str, region: str) -> str | None:
+    """Find the latest (lexicographically greatest) run ID for a model/region."""
+    runs: list[str] = []
+    for prefix in ("published", "staging"):
+        d = DATA_ROOT / prefix / model / region
+        if d.is_dir():
+            for child in d.iterdir():
+                if child.is_dir() and _RUN_ID_RE.match(child.name):
+                    runs.append(child.name)
+    if not runs:
+        return None
+    return sorted(set(runs))[-1]
+
+
 def _resolve_cog_path(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
     """Find the RGBA COG on disk.
 
+    Resolves 'latest' to the actual latest run directory.
     Checks published/ first, then staging/.  Returns the first path that
     exists, or None if the COG cannot be found.
     """
+    resolved = run
+    if run == "latest":
+        resolved = _resolve_latest_run(model, region)
+        if resolved is None:
+            return None
+
     fh_str = f"fh{fh:03d}"
     filename = f"{fh_str}.rgba.cog.tif"
 
     for prefix in ("published", "staging"):
-        candidate = DATA_ROOT / prefix / model / region / run / var / filename
+        candidate = DATA_ROOT / prefix / model / region / resolved / var / filename
         if candidate.is_file():
             return candidate
     return None
