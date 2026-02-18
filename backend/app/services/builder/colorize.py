@@ -17,6 +17,7 @@ import numpy as np
 from app.services.colormaps import (
     VAR_SPECS,
     build_continuous_lut,
+    build_continuous_lut_from_stops,
     build_discrete_lut,
 )
 
@@ -77,7 +78,6 @@ def _colorize_continuous(
     var_key: str,
     spec: dict[str, Any],
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    colors: list[str] = spec["colors"]
     range_vals = spec.get("range")
     if not range_vals or len(range_vals) != 2:
         raise ValueError(f"Continuous spec for {var_key!r} must include range (min, max)")
@@ -85,8 +85,23 @@ def _colorize_continuous(
     if range_max == range_min:
         raise ValueError(f"Continuous spec for {var_key!r} has zero-width range")
 
-    # Build 256-entry RGBA LUT from the color ramp
-    lut = build_continuous_lut(colors, n=256)  # (256, 4) uint8
+    anchors = spec.get("color_anchors") or spec.get("anchors")
+    if anchors:
+        # Build 256-entry LUT directly from value→color anchors.
+        lut = build_continuous_lut_from_stops(
+            [(float(value), str(color)) for value, color in anchors],
+            n=256,
+            range_vals=(range_min, range_max),
+        )
+    else:
+        colors: list[str] | None = spec.get("colors")
+        if not colors:
+            raise ValueError(
+                f"Continuous spec for {var_key!r} must include either "
+                f"'color_anchors'/'anchors' or 'colors'"
+            )
+        # Build 256-entry RGBA LUT from evenly spaced color ramp stops.
+        lut = build_continuous_lut(colors, n=256)  # (256, 4) uint8
 
     # Scale float values → 0–255 index
     finite_mask = np.isfinite(data)
@@ -239,6 +254,9 @@ def _build_meta(
         range_vals = spec["range"]
         meta["range"] = [float(range_vals[0]), float(range_vals[1])]
         meta["colors"] = list(spec.get("colors", []))
+        anchors = spec.get("color_anchors") or spec.get("anchors")
+        if anchors:
+            meta["legend_stops"] = [[float(value), color] for value, color in anchors]
     elif kind in ("discrete", "indexed"):
         if "levels" in spec:
             meta["levels"] = list(spec["levels"])

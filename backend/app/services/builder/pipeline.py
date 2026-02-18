@@ -305,20 +305,30 @@ def _build_legend(
             # legend_stops is a list of (value, hex_color) tuples
             stops = [[float(v), c] for v, c in legend_stops]
         else:
-            # Generate stops from range + colors
-            spec_range = var_spec.get("range", colorize_meta.get("range", [0, 1]))
-            colors = var_spec.get("colors", colorize_meta.get("colors", []))
-            if not colors:
-                raise ValueError(
-                    f"Continuous var spec requires 'colors' but got none "
-                    f"(var_spec keys: {sorted(var_spec.keys())})"
-                )
-            rmin, rmax = float(spec_range[0]), float(spec_range[1])
-            n = len(colors)
-            stops = []
-            for i, color in enumerate(colors):
-                val = rmin + (rmax - rmin) * i / max(n - 1, 1)
-                stops.append([round(val, 1), color])
+            anchors = (
+                var_spec.get("color_anchors")
+                or var_spec.get("anchors")
+                or colorize_meta.get("color_anchors")
+                or colorize_meta.get("anchors")
+            )
+            if anchors:
+                # Anchors are already value→color stops.
+                stops = [[float(v), c] for v, c in anchors]
+            else:
+                # Generate stops from range + colors
+                spec_range = var_spec.get("range", colorize_meta.get("range", [0, 1]))
+                colors = var_spec.get("colors", colorize_meta.get("colors", []))
+                if not colors:
+                    raise ValueError(
+                        f"Continuous var spec requires 'colors' but got none "
+                        f"(var_spec keys: {sorted(var_spec.keys())})"
+                    )
+                rmin, rmax = float(spec_range[0]), float(spec_range[1])
+                n = len(colors)
+                stops = []
+                for i, color in enumerate(colors):
+                    val = rmin + (rmax - rmin) * i / max(n - 1, 1)
+                    stops.append([round(val, 1), color])
 
         return {"type": "gradient", "stops": stops}
 

@@ -195,16 +195,31 @@ def _build_radar_ptype_flat_palette() -> tuple[list[float], list[str], dict[str,
 RADAR_PTYPE_LEVELS, RADAR_PTYPE_COLORS, RADAR_PTYPE_BREAKS = _build_radar_ptype_flat_palette()
 
 # 2m temperature (°F) palette
-temp_colors = [
-    "#e8d0d8", "#d8b0c8", "#c080b0", "#9050a0", "#703090",
-    "#a070b0", "#c8a0d0", "#e8e0f0", "#d0e0f0", "#a0c0e0",
-    "#7090c0", "#4070b0", "#2050a0", "#103070",
-    "#204048", "#406058", "#709078", "#a0c098", "#d0e0b0",
-    "#f0f0c0", "#e0d0a0", "#c0b080", "#a08060", "#805040",
-    "#602018", "#801010", "#a01010", "#702020",
-    "#886666", "#a08888", "#c0a0a0", "#d8c8c8", "#e8e0e0",
-    "#b0a0a0", "#807070", "#504040",
+TMP2M_F_COLOR_ANCHORS = [
+    (-60.0, "#1e546d"),
+    (-50.0, "#3f8aa4"),
+    (-40.0, "#5cc0db"),
+    (-30.0, "#7af1ff"),
+    (-20.0, "#97ffff"),
+    (-10.0, "#b5ffff"),
+    (0.0,   "#d3ffff"),
+    (15.0,  "#ffffff"),
+    (30.0,  "#ffbbff"),
+
+    # Freezing breakpoint (intentional discontinuity)
+    (31.99,  "#ffbbff"),   # last “cold-side” color
+    (32.0,  "#163ca2"),   # first “warm-side” color (or vice versa, depending on your scheme)
+    (32.01,  "#1c40a7"),
+
+    (40.0,  "#3f60c6"),
+    (60.0,  "#a3c1ff"),
+    (80.0,  "#e2ffc6"),
+    (100.0, "#f6ff35"),
+    (107.0, "#ffff00"),
+    (120.0, "#ff8a00"),
 ]
+
+TMP2M_F_RANGE = (-60.0, 120.0)
 
 # Total precipitation (inches)
 precip_colors = [
@@ -404,8 +419,8 @@ VAR_SPECS = {
     "tmp2m": {
         "type": "continuous",
         "units": "F",
-        "range": (-40.0, 122.5),
-        "colors": temp_colors,
+        "range": TMP2M_F_RANGE,
+        "anchors": TMP2M_F_COLOR_ANCHORS,
         "display_name": "2m Temperature",
         "legend_title": "Temperature (°F)",
     },
@@ -431,6 +446,20 @@ VAR_SPECS = {
 }
 
 _LUT_CACHE: dict[str, np.ndarray] = {}
+
+
+def _fail_if_legacy_builder_with_anchors(
+    var_key: str,
+    spec: dict,
+    *,
+    caller: str,
+) -> None:
+    anchors = spec.get("color_anchors") or spec.get("anchors")
+    if anchors:
+        raise RuntimeError(
+            f"Legacy colormap path '{caller}' does not support anchored continuous specs "
+            f"for var '{var_key}'. Use V3 builder colorization/sidecar pipeline instead."
+        )
 
 
 def hex_to_rgba_u8(hex_color: str, alpha: int = 255) -> tuple[int, int, int, int]:
@@ -514,6 +543,7 @@ def get_lut(var_key: str) -> np.ndarray:
     spec = VAR_SPECS.get(var_key)
     if not spec:
         raise KeyError(f"Unknown var_key: {var_key}")
+    _fail_if_legacy_builder_with_anchors(var_key, spec, caller="get_lut")
     colors = spec["colors"]
     if spec["type"] == "discrete":
         lut = build_discrete_lut(colors)
@@ -531,6 +561,7 @@ def encode_to_byte_and_alpha(
     spec = VAR_SPECS.get(var_key)
     if not spec:
         raise KeyError(f"Unknown var_key: {var_key}")
+    _fail_if_legacy_builder_with_anchors(var_key, spec, caller="encode_to_byte_and_alpha")
     kind = spec.get("type")
     if kind not in {"discrete", "continuous"}:
         raise ValueError(f"Unsupported var spec type for {var_key}: {kind}")
