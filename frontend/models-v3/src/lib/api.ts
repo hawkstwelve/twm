@@ -21,6 +21,15 @@ export type LegendMeta = {
   ptype_levels?: Record<string, number[]>;
   range?: [number, number];
   bins_per_ptype?: number;
+  contours?: Record<
+    string,
+    {
+      format?: string;
+      path?: string;
+      srs?: string;
+      level?: number;
+    }
+  >;
 };
 
 export type FrameRow = {
@@ -128,4 +137,16 @@ export async function fetchSample(params: {
     throw new Error(`Sample request failed: ${response.status}`);
   }
   return response.json() as Promise<SampleResult>;
+}
+
+export function buildContourUrl(params: {
+  model: string;
+  region: string;
+  run: string;
+  varKey: string;
+  fh: number;
+  key: string;
+}): string {
+  const enc = encodeURIComponent;
+  return `${API_BASE}/${enc(params.model)}/${enc(params.region)}/${enc(params.run)}/${enc(params.varKey)}/${enc(params.fh)}/contours/${enc(params.key)}`;
 }

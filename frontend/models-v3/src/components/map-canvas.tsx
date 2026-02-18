@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
+import type { GeoJSON } from "geojson";
 
 import { DEFAULTS } from "@/lib/config";
 
@@ -40,6 +41,12 @@ const OVERLAY_RASTER_BRIGHTNESS_MAX = 0.98;
 // Keep hidden raster layers at a tiny opacity so MapLibre still requests/renders their tiles.
 // This helps avoid a one-frame "basemap flash" when swapping buffers.
 const HIDDEN_OPACITY = 0.001;
+const CONTOUR_SOURCE_ID = "twf-contours";
+const CONTOUR_LAYER_ID = "twf-contours";
+const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
+  type: "FeatureCollection",
+  features: [],
+};
 
 type OverlayBuffer = "a" | "b";
 type PlaybackMode = "autoplay" | "scrub";
@@ -73,7 +80,13 @@ function getResamplingMode(variable?: string): "nearest" | "linear" {
   return "linear";
 }
 
-function styleFor(overlayUrl: string, opacity: number, variable?: string, model?: string): StyleSpecification {
+function styleFor(
+  overlayUrl: string,
+  opacity: number,
+  variable?: string,
+  model?: string,
+  contourGeoJsonUrl?: string | null
+): StyleSpecification {
   const resamplingMode = getResamplingMode(variable);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
@@ -153,6 +166,10 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
         tiles: CARTO_LIGHT_LABEL_TILES,
         tileSize: 256,
       },
+      [CONTOUR_SOURCE_ID]: {
+        type: "geojson",
+        data: contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION,
+      },
     },
     layers: [
       {
@@ -206,6 +223,20 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
         paint: overlayPaint,
       },
       {
+        id: CONTOUR_LAYER_ID,
+        type: "line",
+        source: CONTOUR_SOURCE_ID,
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
+        paint: {
+          "line-color": "#00e5ff",
+          "line-opacity": 0.9,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 8, 2, 12, 3],
+        },
+      },
+      {
         id: "twf-labels",
         type: "raster",
         source: "twf-labels",
@@ -216,6 +247,7 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
 
 type MapCanvasProps = {
   tileUrl: string;
+  contourGeoJsonUrl?: string | null;
   region: string;
   opacity: number;
   mode: PlaybackMode;
@@ -232,6 +264,7 @@ type MapCanvasProps = {
 
 export function MapCanvas({
   tileUrl,
+  contourGeoJsonUrl,
   region,
   opacity,
   mode,
@@ -479,7 +512,7 @@ export function MapCanvas({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleFor(tileUrl, opacity, variable, model),
+      style: styleFor(tileUrl, opacity, variable, model, contourGeoJsonUrl),
       center: view.center,
       zoom: view.zoom,
       minZoom: 3,
@@ -505,6 +538,18 @@ export function MapCanvas({
       setIsLoaded(false);
     };
   }, [cancelCrossfade]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) {
+      return;
+    }
+    const source = map.getSource(CONTOUR_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (!source || typeof source.setData !== "function") {
+      return;
+    }
+    source.setData((contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION) as any);
+  }, [contourGeoJsonUrl, isLoaded]);
 
   useEffect(() => {
     const map = mapRef.current;

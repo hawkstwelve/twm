@@ -6,6 +6,7 @@ import { MapCanvas } from "@/components/map-canvas";
 import { type LegendPayload, MapLegend } from "@/components/map-legend";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
+  buildContourUrl,
   type FrameRow,
   type LegendMeta,
   type VarRow,
@@ -286,6 +287,22 @@ export default function App() {
   const tileUrl = useMemo(() => {
     return tileUrlForHour(forecastHour);
   }, [tileUrlForHour, forecastHour]);
+
+  const contourGeoJsonUrl = useMemo(() => {
+    const frameMeta = extractLegendMeta(currentFrame);
+    const contourSpec = frameMeta?.contours?.iso32f;
+    if (!contourSpec) {
+      return null;
+    }
+    return buildContourUrl({
+      model,
+      region,
+      run: resolvedRunForRequests,
+      varKey: variable,
+      fh: forecastHour,
+      key: "iso32f",
+    });
+  }, [currentFrame, model, region, resolvedRunForRequests, variable, forecastHour]);
 
   const legend = useMemo(() => {
     const normalizedMeta = extractLegendMeta(currentFrame) ?? extractLegendMeta(frameRows[0] ?? null);
@@ -628,6 +645,7 @@ export default function App() {
       <div className="relative flex-1 overflow-hidden">
         <MapCanvas
           tileUrl={tileUrl}
+          contourGeoJsonUrl={contourGeoJsonUrl}
           region={region}
           opacity={opacity}
           mode={isPlaying ? "autoplay" : "scrub"}
