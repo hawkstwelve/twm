@@ -1,5 +1,5 @@
 [Unit]
-Description=TWF V3 Scheduler (HRRR CONUS)
+Description=TWF V3 Scheduler (HRRR PNW)
 Wants=network-online.target
 After=network-online.target
 
@@ -12,7 +12,7 @@ LimitNOFILE=65536
 WorkingDirectory=/opt/twf_v3/backend
 EnvironmentFile=-/etc/twf-v3/scheduler.env
 Environment=PATH=/opt/twf_v3/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-ExecStart=/opt/twf_v3/.venv/bin/python -m app.services.scheduler --model hrrr --region conus
+ExecStart=/opt/twf_v3/.venv/bin/python -m app.services.scheduler --model hrrr --region pnw
 Restart=always
 RestartSec=5
 StandardOutput=journal
