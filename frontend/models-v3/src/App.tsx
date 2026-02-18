@@ -131,8 +131,10 @@ function buildLegend(meta: LegendMeta | null | undefined, opacity: number): Lege
     bins_per_ptype: metaWithIds.bins_per_ptype,
   };
 
-  if (Array.isArray(meta.legend_stops) && meta.legend_stops.length > 0) {
-    const entries = meta.legend_stops
+  // V3 sidecar format: meta.legend.stops = [[value, color], ...]
+  const resolvedStops = meta.legend_stops ?? meta.legend?.stops;
+  if (Array.isArray(resolvedStops) && resolvedStops.length > 0) {
+    const entries = resolvedStops
       .map(([value, color]) => ({ value: Number(value), color }))
       .filter((entry) => Number.isFinite(entry.value));
     if (entries.length === 0) {

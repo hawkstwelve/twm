@@ -13,6 +13,7 @@ export type LegendMeta = {
   legend_title?: string;
   units?: string;
   legend_stops?: LegendStops;
+  legend?: { type?: string; stops?: LegendStops };
   colors?: string[];
   levels?: number[];
   ptype_order?: string[];
