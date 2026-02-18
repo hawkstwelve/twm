@@ -31,6 +31,7 @@ const SETTLE_TIMEOUT_MS = 1200;
 const CONTINUOUS_CROSSFADE_MS = 120;
 const MICRO_CROSSFADE_MS = 60; // Very brief crossfade to avoid white flash
 const PREFETCH_BUFFER_COUNT = 4;
+const OVERLAY_UNDERLAY_OPACITY = 0.22;
 
 // Keep hidden raster layers at a tiny opacity so MapLibre still requests/renders their tiles.
 // This helps avoid a one-frame "basemap flash" when swapping buffers.
@@ -82,6 +83,28 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
         tileSize: 256,
         attribution: BASEMAP_ATTRIBUTION,
       },
+      "twf-underlay": {
+        type: "geojson",
+        data: {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              properties: {},
+              geometry: {
+                type: "Polygon",
+                coordinates: [[
+                  [-180, -85],
+                  [180, -85],
+                  [180, 85],
+                  [-180, 85],
+                  [-180, -85],
+                ]],
+              },
+            },
+          ],
+        },
+      },
       [sourceId("a")]: {
         type: "raster",
         tiles: [overlayUrl],
@@ -123,6 +146,15 @@ function styleFor(overlayUrl: string, opacity: number, variable?: string, model?
         id: "twf-basemap",
         type: "raster",
         source: "twf-basemap",
+      },
+      {
+        id: "twf-underlay",
+        type: "fill",
+        source: "twf-underlay",
+        paint: {
+          "fill-color": "#000000",
+          "fill-opacity": OVERLAY_UNDERLAY_OPACITY,
+        },
       },
       {
         id: layerId("a"),
