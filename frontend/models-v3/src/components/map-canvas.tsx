@@ -60,12 +60,12 @@ function prefetchLayerId(index: number): string {
 }
 
 function getResamplingMode(variable?: string): "nearest" | "linear" {
-  // radar_ptype needs bilinear/linear for better clarity
-  // All other variables use nearest to preserve discrete data
-  if (variable && (variable.includes("radar") || variable.includes("ptype"))) {
-    return "linear";
+  // Discrete/categorical variables use nearest to preserve exact values.
+  // Continuous variables (tmp2m, wspd10m, etc.) use linear for smooth display.
+  if (variable && (variable.includes("radar") || variable.includes("ptype") || variable === "refc")) {
+    return "nearest";
   }
-  return "nearest";
+  return "linear";
 }
 
 function styleFor(overlayUrl: string, opacity: number, variable?: string, model?: string): StyleSpecification {

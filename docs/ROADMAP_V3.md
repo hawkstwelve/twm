@@ -318,7 +318,7 @@ Response:
 **Carried forward from current frontend (already implemented):**
 - Double-buffer overlay swap (buffer A/B) with micro-crossfade
 - 4-layer prefetch for upcoming frames
-- Per-variable resampling (linear for radar/ptype, nearest for others)
+- Per-variable resampling (nearest for categorical (radar/ptype), linear for others)
 - Discovery chain: models → regions → runs → vars → frames
 - Autoplay with readiness-aware advancement
 - Dark toolbar, legend component (gradient + discrete + ptype segmented)
@@ -914,7 +914,7 @@ Carried forward from current implementation with minor refinements:
 2. **Double-buffer layer swap** (buffer A/B with micro-crossfade) — keep as-is
 3. `raster-fade-duration: 0` — already set
 4. **Autoplay pacing** (400ms tick, 1000ms hold for readiness) — keep as-is
-5. **Per-variable resampling** (linear for radar/ptype, nearest for continuous) — keep as-is
+5. **Per-variable resampling** (nearest for categorical (radar/ptype), linear for continuous) — keep as-is
 6. **GFS fade-out at high zoom** (opacity → 0 above z7) — keep, revisit threshold for CONUS
 
 No fundamental animation changes needed — the current frontend already implements the target behavior.
