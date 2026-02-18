@@ -231,7 +231,7 @@ function styleFor(
           "line-cap": "round",
         },
         paint: {
-          "line-color": "#00e5ff",
+          "line-color": "#000000",
           "line-opacity": 0.9,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 8, 2, 12, 3],
         },
