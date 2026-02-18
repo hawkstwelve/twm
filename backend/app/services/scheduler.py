@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from app.models.registry import MODEL_REGISTRY
+from app.services.builder.fetch import fetch_variable
 from app.services.builder.pipeline import build_frame
 
 logger = logging.getLogger(__name__)
@@ -23,10 +24,14 @@ DEFAULT_PRIMARY_VAR = "tmp2m"
 DEFAULT_VARS = "tmp2m,wspd10m,refc,radar_ptype"
 DEFAULT_POLL_SECONDS = 300
 DEFAULT_PROMOTION_FHS = (0, 1, 2)
+DEFAULT_PROBE_VAR = "tmp2m"
+DEFAULT_HRRR_PROBE_ATTEMPTS = 4
+MAX_HRRR_PROBE_ATTEMPTS = 6
 ENV_DEFAULT_VARS = "TWF_V3_SCHEDULER_VARS"
 ENV_DEFAULT_PRIMARY_VARS = "TWF_V3_SCHEDULER_PRIMARY_VARS"
 ENV_DEFAULT_POLL_SECONDS = "TWF_V3_SCHEDULER_POLL_SECONDS"
 ENV_DEFAULT_KEEP_RUNS = "TWF_V3_SCHEDULER_KEEP_RUNS"
+ENV_PROBE_VAR = "TWF_V3_SCHEDULER_PROBE_VAR"
 
 
 class SchedulerConfigError(RuntimeError):
@@ -133,11 +138,66 @@ def _resolve_vars_to_schedule(plugin, requested: list[str]) -> list[str]:
     return _dedupe_preserve_order(resolved)
 
 
-def _resolve_latest_run_dt(model_id: str) -> datetime:
+def _probe_search_pattern(plugin: Any, probe_var: str) -> str:
+    probe_var_id = plugin.normalize_var_id(probe_var)
+    probe_spec = plugin.get_var(probe_var_id)
+    if probe_spec is None:
+        raise SchedulerConfigError(f"Probe var {probe_var!r} not found for model={plugin.id}")
+
+    selectors = getattr(probe_spec, "selectors", None)
+    searches = getattr(selectors, "search", None) if selectors is not None else None
+    if not searches:
+        raise SchedulerConfigError(
+            f"Probe var {probe_var_id!r} has no search pattern and cannot be used for run probing"
+        )
+    return str(searches[0])
+
+
+def _probe_run_exists(*, plugin: Any, run_dt: datetime, probe_var: str) -> bool:
+    search_pattern = _probe_search_pattern(plugin, probe_var)
+    try:
+        fetch_variable(
+            model_id=plugin.id,
+            product=getattr(plugin, "product", "sfc"),
+            search_pattern=search_pattern,
+            run_date=run_dt,
+            fh=0,
+        )
+        logger.info(
+            "Run probe success: model=%s run=%s probe_var=%s",
+            plugin.id,
+            _run_id_from_dt(run_dt),
+            plugin.normalize_var_id(probe_var),
+        )
+        return True
+    except Exception as exc:
+        logger.info(
+            "Run probe miss: model=%s run=%s probe_var=%s (%s)",
+            plugin.id,
+            _run_id_from_dt(run_dt),
+            plugin.normalize_var_id(probe_var),
+            exc,
+        )
+        return False
+
+
+def _resolve_latest_run_dt(model_id: str, *, plugin: Any, probe_var: str) -> datetime:
     now = datetime.now(timezone.utc)
     if model_id == "hrrr":
+        base = now.replace(minute=0, second=0, microsecond=0)
+        attempts = min(max(DEFAULT_HRRR_PROBE_ATTEMPTS, 1), MAX_HRRR_PROBE_ATTEMPTS)
+        for offset in range(attempts):
+            candidate = base - timedelta(hours=offset)
+            if _probe_run_exists(plugin=plugin, run_dt=candidate, probe_var=probe_var):
+                return candidate
         target = now - timedelta(hours=2)
-        return target.replace(minute=0, second=0, microsecond=0)
+        fallback = target.replace(minute=0, second=0, microsecond=0)
+        logger.warning(
+            "HRRR probe failed after %d attempts; falling back to heuristic run=%s",
+            attempts,
+            _run_id_from_dt(fallback),
+        )
+        return fallback
     if model_id == "gfs":
         target = now - timedelta(hours=5)
         cycle_hour = (target.hour // 6) * 6
@@ -146,7 +206,7 @@ def _resolve_latest_run_dt(model_id: str) -> datetime:
     return target.replace(minute=0, second=0, microsecond=0)
 
 
-def _resolve_run_dt(run_arg: str | None, model_id: str) -> datetime:
+def _resolve_run_dt(run_arg: str | None, model_id: str, *, plugin: Any, probe_var: str) -> datetime:
     if run_arg:
         parsed = _parse_run_id_datetime(run_arg)
         if parsed is None:
@@ -154,7 +214,7 @@ def _resolve_run_dt(run_arg: str | None, model_id: str) -> datetime:
                 f"Invalid --run value {run_arg!r}. Expected YYYYMMDD_HHz (e.g. 20260217_06z)."
             )
         return parsed
-    return _resolve_latest_run_dt(model_id)
+    return _resolve_latest_run_dt(model_id, plugin=plugin, probe_var=probe_var)
 
 
 def _scheduled_targets_for_cycle(plugin, vars_to_build: list[str], cycle_hour: int) -> list[tuple[str, int]]:
@@ -439,6 +499,7 @@ def run_scheduler(
     poll_seconds: int,
     run_arg: str | None,
     once: bool,
+    probe_var: str,
 ) -> int:
     plugin = _resolve_model(model)
     if plugin.get_region(region) is None:
@@ -462,18 +523,19 @@ def run_scheduler(
             resolved_primary = [normalized_vars[0]]
 
     logger.info(
-        "Scheduler starting model=%s region=%s vars=%s primary=%s data_root=%s workers=%d",
+        "Scheduler starting model=%s region=%s vars=%s primary=%s probe_var=%s data_root=%s workers=%d",
         model,
         region,
         normalized_vars,
         resolved_primary,
+        plugin.normalize_var_id(probe_var),
         data_root,
         workers,
     )
 
     last_run_id: str | None = None
     while True:
-        run_dt = _resolve_run_dt(run_arg, model)
+        run_dt = _resolve_run_dt(run_arg, model, plugin=plugin, probe_var=probe_var)
         run_id = _run_id_from_dt(run_dt)
 
         if last_run_id == run_id and not run_arg:
@@ -511,6 +573,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=None, help="Parallel frame workers")
     parser.add_argument("--keep-runs", type=int, default=None, help="Retention count for staging/published runs")
     parser.add_argument("--poll-seconds", type=int, default=None, help="Poll interval in loop mode")
+    parser.add_argument("--probe-var", default=None, help="Var id used to probe run availability (default: tmp2m)")
     parser.add_argument("--run", default=None, help="Explicit run id YYYYMMDD_HHz; implies one-shot")
     parser.add_argument("--once", action="store_true", help="Build one cycle then exit")
     return parser.parse_args(argv)
@@ -538,6 +601,11 @@ def main(argv: list[str] | None = None) -> int:
         if args.keep_runs is not None
         else _int_from_env(ENV_DEFAULT_KEEP_RUNS, 2, min_value=1)
     )
+    probe_var = (
+        args.probe_var
+        if isinstance(args.probe_var, str) and args.probe_var.strip()
+        else os.getenv(ENV_PROBE_VAR, DEFAULT_PROBE_VAR)
+    )
 
     vars_list = _parse_vars(vars_raw)
     primary_list = _parse_vars(primary_raw)
@@ -554,6 +622,7 @@ def main(argv: list[str] | None = None) -> int:
             poll_seconds=max(15, poll_seconds),
             run_arg=args.run.strip().lower() if isinstance(args.run, str) and args.run.strip() else None,
             once=bool(args.once),
+            probe_var=probe_var,
         )
     except SchedulerConfigError as exc:
         logger.error("Scheduler configuration error: %s", exc)
