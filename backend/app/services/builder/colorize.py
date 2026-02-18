@@ -19,6 +19,7 @@ from app.services.colormaps import (
     build_continuous_lut,
     build_continuous_lut_from_stops,
     build_discrete_lut,
+    hex_to_rgba_u8,
 )
 
 
@@ -66,6 +67,88 @@ def float_to_rgba(
         raise ValueError(f"Unsupported spec type for {var_key!r}: {kind!r}")
 
     return rgba, meta
+
+
+def overlay_contour_line(
+    values: np.ndarray,
+    rgba: np.ndarray,
+    *,
+    threshold: float,
+    color_hex: str,
+    thickness_px: int = 1,
+) -> np.ndarray:
+    """Burn a contour line for a threshold crossing into a band-first RGBA raster.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        2-D scalar field (H, W) used to detect threshold crossings.
+    rgba : np.ndarray
+        3-D RGBA array in band-first order (4, H, W), uint8.
+    threshold : float
+        Contour threshold in the same units as values.
+    color_hex : str
+        Hex color for the contour line.
+    thickness_px : int
+        Desired thickness in pixels (1–3 recommended).
+
+    Returns
+    -------
+    np.ndarray
+        The same rgba array with contour pixels painted.
+    """
+    if values.ndim != 2:
+        raise ValueError(f"values must be 2-D, got shape {values.shape}")
+    if rgba.ndim != 3 or rgba.shape[0] != 4:
+        raise ValueError(f"rgba must be band-first (4, H, W), got shape {rgba.shape}")
+    if rgba.shape[1:] != values.shape:
+        raise ValueError(
+            f"rgba/value shape mismatch: rgba spatial={rgba.shape[1:]}, values={values.shape}"
+        )
+
+    finite = np.isfinite(values)
+    warm_side = finite & (values >= float(threshold))
+
+    edge = np.zeros(values.shape, dtype=bool)
+
+    vertical_valid = finite[1:, :] & finite[:-1, :]
+    vertical_cross = (warm_side[1:, :] != warm_side[:-1, :]) & vertical_valid
+    edge[1:, :] |= vertical_cross
+    edge[:-1, :] |= vertical_cross
+
+    horizontal_valid = finite[:, 1:] & finite[:, :-1]
+    horizontal_cross = (warm_side[:, 1:] != warm_side[:, :-1]) & horizontal_valid
+    edge[:, 1:] |= horizontal_cross
+    edge[:, :-1] |= horizontal_cross
+
+    thickness = max(1, int(thickness_px))
+    for _ in range(thickness - 1):
+        edge = _dilate_mask(edge)
+
+    if not edge.any():
+        return rgba
+
+    r, g, b, _ = hex_to_rgba_u8(color_hex, alpha=255)
+    rgba[0, edge] = r
+    rgba[1, edge] = g
+    rgba[2, edge] = b
+    rgba[3, edge] = 255
+    return rgba
+
+
+def _dilate_mask(mask: np.ndarray) -> np.ndarray:
+    padded = np.pad(mask, 1, mode="constant", constant_values=False)
+    return (
+        padded[1:-1, 1:-1]
+        | padded[:-2, 1:-1]
+        | padded[2:, 1:-1]
+        | padded[1:-1, :-2]
+        | padded[1:-1, 2:]
+        | padded[:-2, :-2]
+        | padded[:-2, 2:]
+        | padded[2:, :-2]
+        | padded[2:, 2:]
+    )
 
 
 # ---------------------------------------------------------------------------

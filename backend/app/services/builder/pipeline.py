@@ -41,6 +41,7 @@ from app.services.builder.cog_writer import (
     warp_to_target_grid,
 )
 from app.services.builder.colorize import float_to_rgba
+from app.services.builder.colorize import overlay_contour_line
 from app.services.builder.fetch import convert_units, fetch_variable
 from app.services.colormaps import VAR_SPECS
 
@@ -486,6 +487,19 @@ def build_frame(
         # --- Step 4: Colorize ---
         logger.info("Step 4/6: Colorizing")
         rgba, colorize_meta = float_to_rgba(warped_data, var_id)
+
+        contour_value = var_spec_colormap.get("contour_value")
+        if contour_value is not None:
+            contour_color = str(var_spec_colormap.get("contour_color", "#111111"))
+            contour_thickness = int(var_spec_colormap.get("contour_thickness_px", 1))
+            contour_thickness = max(1, min(3, contour_thickness))
+            rgba = overlay_contour_line(
+                warped_data,
+                rgba,
+                threshold=float(contour_value),
+                color_hex=contour_color,
+                thickness_px=contour_thickness,
+            )
 
         # --- Step 5: Write COGs ---
         logger.info("Step 5/6: Writing COGs")

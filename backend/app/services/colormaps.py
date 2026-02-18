@@ -196,27 +196,23 @@ RADAR_PTYPE_LEVELS, RADAR_PTYPE_COLORS, RADAR_PTYPE_BREAKS = _build_radar_ptype_
 
 # 2m temperature (°F) palette
 TMP2M_F_COLOR_ANCHORS = [
-    (-60.0, "#1e546d"),
-    (-50.0, "#3f8aa4"),
-    (-40.0, "#5cc0db"),
-    (-30.0, "#7af1ff"),
-    (-20.0, "#97ffff"),
-    (-10.0, "#b5ffff"),
-    (0.0,   "#d3ffff"),
-    (15.0,  "#ffffff"),
-    (30.0,  "#ffbbff"),
+    (-60, "#4b0082"),  # deep cold purple
+    (-40, "#2f4ea8"),
+    (-20, "#2f6bc9"),
+    (0,   "#3f92ff"),
+    (15,  "#6fc3ff"),
+    (30,  "#8fd8ff"),
 
-    # Freezing breakpoint (intentional discontinuity)
-    (31.99,  "#ffbbff"),   # last “cold-side” color
-    (32.0,  "#163ca2"),   # first “warm-side” color (or vice versa, depending on your scheme)
-    (32.01,  "#1c40a7"),
+    # freezing emphasis (tight slope, not discontinuity)
+    (31.5, "#7bb8ff"),
+    (32.0, "#4f86e8"),
+    (33.0, "#3a75d8"),
 
-    (40.0,  "#3f60c6"),
-    (60.0,  "#a3c1ff"),
-    (80.0,  "#e2ffc6"),
-    (100.0, "#f6ff35"),
-    (107.0, "#ffff00"),
-    (120.0, "#ff8a00"),
+    (40,  "#4caf50"),
+    (60,  "#d4e157"),
+    (80,  "#ffb300"),
+    (100, "#ef6c00"),
+    (120, "#b71c1c"),
 ]
 
 TMP2M_F_RANGE = (-60.0, 120.0)
@@ -421,6 +417,9 @@ VAR_SPECS = {
         "units": "F",
         "range": TMP2M_F_RANGE,
         "anchors": TMP2M_F_COLOR_ANCHORS,
+        "contour_value": 32.0,
+        "contour_color": "#111111",
+        "contour_thickness_px": 2,
         "display_name": "2m Temperature",
         "legend_title": "Temperature (°F)",
     },
