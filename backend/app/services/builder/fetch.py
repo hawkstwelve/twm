@@ -40,6 +40,10 @@ ENV_HERBIE_RETRIES = "TWF_HERBIE_SUBSET_RETRIES"
 ENV_HERBIE_RETRY_SLEEP = "TWF_HERBIE_RETRY_SLEEP_SECONDS"
 
 
+class HerbieTransientUnavailableError(RuntimeError):
+    """Raised when all Herbie attempts fail due to transient source/index availability."""
+
+
 def _priority_candidates(herbie_kwargs: dict[str, Any] | None) -> list[str]:
     if herbie_kwargs and herbie_kwargs.get("priority"):
         return [str(herbie_kwargs["priority"]).strip()]
@@ -68,6 +72,94 @@ def _retry_sleep_seconds() -> float:
     except ValueError:
         return 0.6
     return max(0.0, value)
+
+
+def _is_missing_index_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "no index file was found for none" in text
+
+
+def _precheck_subset_available(
+    H: Any,
+    *,
+    model_id: str,
+    fh: int,
+    search_pattern: str,
+    priority: str,
+    attempt_idx: int,
+    retries: int,
+) -> bool:
+    try:
+        idx_ref = getattr(H, "idx", None)
+    except Exception as exc:
+        if _is_missing_index_error(exc):
+            logger.warning(
+                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): missing index",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                attempt_idx,
+                retries,
+            )
+            return False
+        logger.debug(
+            "Herbie precheck idx introspection failed (%s fh%03d %s; priority=%s): %s",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            exc,
+        )
+        return True
+
+    if not idx_ref:
+        logger.warning(
+            "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): no idx",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            attempt_idx,
+            retries,
+        )
+        return False
+
+    try:
+        inventory = H.inventory(search_pattern)
+        if inventory is None or len(inventory) == 0:
+            logger.warning(
+                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): no inventory match",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                attempt_idx,
+                retries,
+            )
+            return False
+        return True
+    except Exception as exc:
+        if _is_missing_index_error(exc):
+            logger.warning(
+                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): missing index",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                attempt_idx,
+                retries,
+            )
+            return False
+        logger.debug(
+            "Herbie precheck inventory check failed; continuing with subset download (%s fh%03d %s; priority=%s): %s",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            exc,
+        )
+        return True
 
 
 def fetch_variable(
@@ -135,6 +227,8 @@ def fetch_variable(
     sleep_s = _retry_sleep_seconds()
 
     last_exc: Exception | None = None
+    saw_missing_index = False
+    saw_non_transient_failure = False
     grib_path: Path | None = None
     for priority in priority_list:
         for attempt_idx in range(1, retries + 1):
@@ -142,8 +236,22 @@ def fetch_variable(
             run_kwargs["priority"] = priority
             try:
                 H = Herbie(herbie_date, **run_kwargs)
+                if not _precheck_subset_available(
+                    H,
+                    model_id=model_id,
+                    fh=fh,
+                    search_pattern=search_pattern,
+                    priority=priority,
+                    attempt_idx=attempt_idx,
+                    retries=retries,
+                ):
+                    saw_missing_index = True
+                    if sleep_s > 0 and attempt_idx < retries:
+                        time.sleep(sleep_s)
+                    continue
                 subset_path = H.download(search_pattern)
                 if subset_path is None:
+                    saw_non_transient_failure = True
                     raise RuntimeError(
                         f"Herbie subset download returned None ({model_id} fh{fh:03d} {search_pattern!r})"
                     )
@@ -161,6 +269,21 @@ def fetch_variable(
                 break
             except Exception as exc:
                 last_exc = exc
+                if _is_missing_index_error(exc):
+                    saw_missing_index = True
+                    logger.warning(
+                        "Herbie subset unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): missing index",
+                        model_id,
+                        fh,
+                        search_pattern,
+                        priority,
+                        attempt_idx,
+                        retries,
+                    )
+                    if sleep_s > 0 and attempt_idx < retries:
+                        time.sleep(sleep_s)
+                    continue
+                saw_non_transient_failure = True
                 logger.warning(
                     "Herbie subset fetch failed (%s fh%03d %s; priority=%s; attempt=%d/%d): %s",
                     model_id,
@@ -177,6 +300,11 @@ def fetch_variable(
             break
 
     if grib_path is None:
+        if saw_missing_index and not saw_non_transient_failure:
+            raise HerbieTransientUnavailableError(
+                f"Herbie subset transiently unavailable after priorities={priority_list} "
+                f"for {model_id} fh{fh:03d} pattern={search_pattern!r}"
+            ) from last_exc
         raise RuntimeError(
             f"Herbie subset download failed after trying priorities={priority_list} "
             f"for {model_id} fh{fh:03d} pattern={search_pattern!r}"

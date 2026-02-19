@@ -43,7 +43,11 @@ from app.services.builder.cog_writer import (
 )
 from app.services.builder.colorize import float_to_rgba
 from app.services.builder.derive import derive_variable
-from app.services.builder.fetch import convert_units, fetch_variable
+from app.services.builder.fetch import (
+    HerbieTransientUnavailableError,
+    convert_units,
+    fetch_variable,
+)
 from app.services.colormaps import VAR_SPECS
 
 logger = logging.getLogger(__name__)
@@ -724,6 +728,19 @@ def build_frame(
             _file_size_str(sidecar_path),
         )
         return staging_dir
+
+    except HerbieTransientUnavailableError as exc:
+        logger.warning(
+            "Build transiently unavailable for %s/%s/%s/%s/%s: %s",
+            model,
+            region,
+            run_id,
+            var_id,
+            fh_str,
+            exc,
+        )
+        _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
+        return None
 
     except Exception:
         logger.exception(
