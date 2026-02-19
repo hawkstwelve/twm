@@ -143,6 +143,7 @@ def _derive_radar_ptype_combo(
     var_spec_model: Any,
     model_plugin: Any,
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+    min_visible_dbz = 10.0
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     refl_id = hints.get("refl_component", "refc")
     rain_id = hints.get("rain_component", "crain")
@@ -179,7 +180,7 @@ def _derive_radar_ptype_combo(
         offset = int(breaks["offset"])
         count = bins_per_type[code]
         local_bin = np.clip(np.rint(normalized * (count - 1)), 0, count - 1).astype(np.int32)
-        selector = (ptype == code) & np.isfinite(refl_safe) & (mask_max > 0)
+        selector = (ptype == code) & np.isfinite(refl_safe) & (mask_max > 0) & (refl_safe >= min_visible_dbz)
         indexed[selector] = (offset + local_bin[selector]).astype(np.float32)
 
     return indexed, src_crs, src_transform

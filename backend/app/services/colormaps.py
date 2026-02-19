@@ -394,6 +394,7 @@ VAR_SPECS = {
     "radar_ptype": {
         "type": "indexed",
         "units": "dBZ",
+        "transparent_zero": True,
         "levels": RADAR_PTYPE_LEVELS,
         "colors": RADAR_PTYPE_COLORS,
         "display_name": "Composite Reflectivity + P-Type",
