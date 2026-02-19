@@ -13,7 +13,6 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from app.models.registry import MODEL_REGISTRY
-from app.services.builder.fetch import fetch_variable
 from app.services.builder.pipeline import build_frame
 
 logger = logging.getLogger(__name__)
@@ -32,6 +31,7 @@ ENV_DEFAULT_PRIMARY_VARS = "TWF_V3_SCHEDULER_PRIMARY_VARS"
 ENV_DEFAULT_POLL_SECONDS = "TWF_V3_SCHEDULER_POLL_SECONDS"
 ENV_DEFAULT_KEEP_RUNS = "TWF_V3_SCHEDULER_KEEP_RUNS"
 ENV_PROBE_VAR = "TWF_V3_SCHEDULER_PROBE_VAR"
+ENV_HERBIE_PRIORITY = "TWF_HERBIE_PRIORITY"
 
 
 class SchedulerConfigError(RuntimeError):
@@ -154,31 +154,49 @@ def _probe_search_pattern(plugin: Any, probe_var: str) -> str:
 
 
 def _probe_run_exists(*, plugin: Any, run_dt: datetime, probe_var: str) -> bool:
+    from herbie.core import Herbie
+
     search_pattern = _probe_search_pattern(plugin, probe_var)
-    try:
-        fetch_variable(
-            model_id=plugin.id,
-            product=getattr(plugin, "product", "sfc"),
-            search_pattern=search_pattern,
-            run_date=run_dt,
-            fh=0,
-        )
-        logger.info(
-            "Run probe success: model=%s run=%s probe_var=%s",
-            plugin.id,
-            _run_id_from_dt(run_dt),
-            plugin.normalize_var_id(probe_var),
-        )
-        return True
-    except Exception as exc:
-        logger.info(
-            "Run probe miss: model=%s run=%s probe_var=%s (%s)",
-            plugin.id,
-            _run_id_from_dt(run_dt),
-            plugin.normalize_var_id(probe_var),
-            exc,
-        )
-        return False
+    priority_raw = os.getenv(ENV_HERBIE_PRIORITY, "aws,nomads,google,azure,pando,pando2")
+    priorities = [item.strip().lower() for item in priority_raw.split(",") if item.strip()]
+    if not priorities:
+        priorities = ["aws", "nomads", "google", "azure", "pando", "pando2"]
+
+    herbie_date = run_dt.replace(tzinfo=None) if run_dt.tzinfo else run_dt
+    probe_var_id = plugin.normalize_var_id(probe_var)
+    last_exc: Exception | None = None
+    for priority in priorities:
+        try:
+            H = Herbie(
+                herbie_date,
+                model=plugin.id,
+                product=getattr(plugin, "product", "sfc"),
+                fxx=0,
+                priority=priority,
+            )
+            inventory = H.inventory(search_pattern)
+            if inventory is not None and len(inventory) > 0:
+                logger.info(
+                    "Run probe success: model=%s run=%s probe_var=%s priority=%s",
+                    plugin.id,
+                    _run_id_from_dt(run_dt),
+                    probe_var_id,
+                    priority,
+                )
+                return True
+        except Exception as exc:
+            last_exc = exc
+            continue
+
+    logger.info(
+        "Run probe miss: model=%s run=%s probe_var=%s priorities=%s (%s)",
+        plugin.id,
+        _run_id_from_dt(run_dt),
+        probe_var_id,
+        priorities,
+        last_exc,
+    )
+    return False
 
 
 def _resolve_latest_run_dt(model_id: str, *, plugin: Any, probe_var: str) -> datetime:
