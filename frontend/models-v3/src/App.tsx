@@ -261,6 +261,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [settledTileUrl, setSettledTileUrl] = useState<string | null>(null);
+  const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
   const [showZoomHint, setShowZoomHint] = useState(false);
   const latestTileUrlRef = useRef<string>("");
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
@@ -393,6 +394,13 @@ export default function App() {
     setSettledTileUrl(isTileReady(tileUrl) ? tileUrl : null);
   }, [tileUrl, isTileReady]);
 
+  const isScrubLoading = useMemo(() => {
+    if (isPlaying) {
+      return false;
+    }
+    return Boolean(mapLoadingTileUrl && mapLoadingTileUrl === tileUrl && settledTileUrl !== tileUrl);
+  }, [isPlaying, mapLoadingTileUrl, tileUrl, settledTileUrl]);
+
   const handleFrameSettled = useCallback((loadedTileUrl: string) => {
     markTileReady(loadedTileUrl);
     if (loadedTileUrl === latestTileUrlRef.current) {
@@ -406,6 +414,14 @@ export default function App() {
       setSettledTileUrl(loadedTileUrl);
     }
   }, [markTileReady]);
+
+  const handleFrameLoadingChange = useCallback((loadingTileUrl: string, isLoadingValue: boolean) => {
+    if (isLoadingValue) {
+      setMapLoadingTileUrl(loadingTileUrl);
+      return;
+    }
+    setMapLoadingTileUrl((current) => (current === loadingTileUrl ? null : current));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -571,7 +587,6 @@ export default function App() {
       const currentIndex = frameHours.indexOf(forecastHour);
       if (currentIndex < 0) return;
 
-      const isRadarLike = variable.includes("radar") || variable.includes("ptype");
       const nextIndex = currentIndex + 1;
       if (nextIndex >= frameHours.length) {
         setIsPlaying(false);
@@ -590,33 +605,12 @@ export default function App() {
         return;
       }
 
-      autoplayHoldMsRef.current = 0;
-
-      // For radar/ptype, do NOT skip ahead; hold on current frame until next is ready
-      if (isRadarLike) {
-        // Do not advance; stay on current frame and retry next tick
-        return;
-      }
-
-      const searchDepth = Math.min(frameHours.length - 1, 6);
-      for (let step = 2; step <= searchDepth; step += 1) {
-        const candidateIndex = currentIndex + step;
-        if (candidateIndex >= frameHours.length) {
-          break;
-        }
-        const candidateHour = frameHours[candidateIndex];
-        const candidateUrl = tileUrlForHour(candidateHour);
-        if (isTileReady(candidateUrl)) {
-          setTargetForecastHour(candidateHour);
-          return;
-        }
-      }
-
-      setTargetForecastHour(nextHour);
+      // Hold current frame until the exact next frame is ready.
+      autoplayHoldMsRef.current = AUTOPLAY_MAX_HOLD_MS;
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, variable]);
+  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour]);
 
   useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
@@ -673,10 +667,18 @@ export default function App() {
           crossfade={false}
           onFrameSettled={handleFrameSettled}
           onTileReady={handleTileReady}
+          onFrameLoadingChange={handleFrameLoadingChange}
           onZoomHint={setShowZoomHint}
           onMapHover={onHover}
           onMapHoverEnd={onHoverEnd}
         />
+
+        {isScrubLoading && (
+          <div className="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Loading...
+          </div>
+        )}
 
         {tooltip && (
           <div
