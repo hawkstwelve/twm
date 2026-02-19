@@ -23,6 +23,7 @@ import { useSampleTooltip } from "@/lib/use-sample-tooltip";
 
 const AUTOPLAY_TICK_MS = 400;
 const AUTOPLAY_MAX_HOLD_MS = 1000;
+const FRAME_UNAVAILABLE_BADGE_MS = 900;
 const READY_URL_TTL_MS = 30_000;
 const READY_URL_LIMIT = 160;
 
@@ -262,10 +263,13 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [settledTileUrl, setSettledTileUrl] = useState<string | null>(null);
   const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
+  const [frameStatusMessage, setFrameStatusMessage] = useState<string | null>(null);
   const [showZoomHint, setShowZoomHint] = useState(false);
   const latestTileUrlRef = useRef<string>("");
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
   const autoplayHoldMsRef = useRef(0);
+  const unavailableTimerRef = useRef<number | null>(null);
+  const pendingAdvanceHourRef = useRef<number | null>(null);
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -421,6 +425,28 @@ export default function App() {
       return;
     }
     setMapLoadingTileUrl((current) => (current === loadingTileUrl ? null : current));
+  }, []);
+
+  const clearUnavailableTimer = useCallback(() => {
+    if (unavailableTimerRef.current !== null) {
+      window.clearTimeout(unavailableTimerRef.current);
+      unavailableTimerRef.current = null;
+    }
+    pendingAdvanceHourRef.current = null;
+  }, []);
+
+  const scheduleUnavailableAdvance = useCallback((missingHour: number, nextAvailableHour: number) => {
+    if (pendingAdvanceHourRef.current !== null) {
+      return;
+    }
+    pendingAdvanceHourRef.current = nextAvailableHour;
+    setFrameStatusMessage(`Frame unavailable (FH ${missingHour})`);
+    unavailableTimerRef.current = window.setTimeout(() => {
+      unavailableTimerRef.current = null;
+      pendingAdvanceHourRef.current = null;
+      setFrameStatusMessage(null);
+      setTargetForecastHour(nextAvailableHour);
+    }, FRAME_UNAVAILABLE_BADGE_MS);
   }, []);
 
   useEffect(() => {
@@ -596,6 +622,8 @@ export default function App() {
       const nextUrl = tileUrlForHour(nextHour);
       if (isTileReady(nextUrl)) {
         autoplayHoldMsRef.current = 0;
+        clearUnavailableTimer();
+        setFrameStatusMessage(null);
         setTargetForecastHour(nextHour);
         return;
       }
@@ -607,10 +635,24 @@ export default function App() {
 
       // Hold current frame until the exact next frame is ready.
       autoplayHoldMsRef.current = AUTOPLAY_MAX_HOLD_MS;
+
+      const searchDepth = Math.min(frameHours.length - 1, 6);
+      for (let step = 2; step <= searchDepth; step += 1) {
+        const candidateIndex = currentIndex + step;
+        if (candidateIndex >= frameHours.length) {
+          break;
+        }
+        const candidateHour = frameHours[candidateIndex];
+        const candidateUrl = tileUrlForHour(candidateHour);
+        if (isTileReady(candidateUrl)) {
+          scheduleUnavailableAdvance(nextHour, candidateHour);
+          return;
+        }
+      }
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour]);
+  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, clearUnavailableTimer, scheduleUnavailableAdvance]);
 
   useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
@@ -621,8 +663,16 @@ export default function App() {
   useEffect(() => {
     if (!isPlaying) {
       autoplayHoldMsRef.current = 0;
+      clearUnavailableTimer();
+      setFrameStatusMessage(null);
     }
-  }, [isPlaying]);
+  }, [isPlaying, clearUnavailableTimer]);
+
+  useEffect(() => {
+    return () => {
+      clearUnavailableTimer();
+    };
+  }, [clearUnavailableTimer]);
 
   useEffect(() => {
     if (frameHours.length === 0) {
@@ -716,6 +766,7 @@ export default function App() {
           setIsPlaying={setIsPlaying}
           runDateTimeISO={runDateTimeISO}
           disabled={loading}
+          transientStatus={frameStatusMessage}
         />
       </div>
     </div>

@@ -18,6 +18,7 @@ type BottomForecastControlsProps = {
   setIsPlaying: (value: boolean) => void;
   runDateTimeISO: string | null;
   disabled: boolean;
+  transientStatus?: string | null;
 };
 
 function formatValidTime(runDateISO: string | null, forecastHour: number): {
@@ -58,6 +59,7 @@ export function BottomForecastControls({
   setIsPlaying,
   runDateTimeISO,
   disabled,
+  transientStatus,
 }: BottomForecastControlsProps) {
   const DRAG_UPDATE_MS = 90;
   const [previewHour, setPreviewHour] = useState<number | null>(null);
@@ -157,6 +159,12 @@ export function BottomForecastControls({
           </div>
 
           <div className="flex shrink-0 flex-col items-end gap-1 border-l border-border/30 pl-5 sm:min-w-[220px]">
+            {transientStatus ? (
+              <div className="flex items-center gap-1.5 rounded-md border border-border/40 bg-background/40 px-2 py-1 text-[10px] text-foreground/90">
+                <AlertCircle className="h-3 w-3" />
+                {transientStatus}
+              </div>
+            ) : null}
             {validTime ? (
               <>
                 <span className="text-sm font-semibold leading-tight tracking-tight text-foreground transition-all duration-200">
