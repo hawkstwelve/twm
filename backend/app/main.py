@@ -21,6 +21,7 @@ from pyproj import Transformer
 logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
+PUBLISHED_ROOT = DATA_ROOT / "published"
 
 # Model display names
 MODEL_NAMES = {
@@ -88,30 +89,56 @@ def _cached_sidecar(path_str: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 def _scan_subdirs(parent: Path) -> list[str]:
-    """Return sorted list of immediate subdirectory names under *parent*,
-    checking both published/ and staging/ prefixes."""
-    names: set[str] = set()
-    for prefix in ("published", "staging"):
-        d = DATA_ROOT / prefix / parent
-        if d.is_dir():
-            for child in d.iterdir():
-                if child.is_dir():
-                    names.add(child.name)
-    return sorted(names)
+    """Return sorted list of immediate subdirectory names under published/*parent*."""
+    d = PUBLISHED_ROOT / parent
+    if not d.is_dir():
+        return []
+    return sorted(child.name for child in d.iterdir() if child.is_dir())
+
+
+def _latest_run_from_pointer(model: str, region: str) -> str | None:
+    """Return run_id from published LATEST.json if valid and present on disk."""
+    latest_path = PUBLISHED_ROOT / model / region / "LATEST.json"
+    if not latest_path.is_file():
+        return None
+    try:
+        payload = json.loads(latest_path.read_text())
+    except Exception:
+        logger.warning("Failed reading LATEST.json at %s", latest_path)
+        return None
+
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        logger.warning("Invalid run_id in LATEST.json at %s: %r", latest_path, run_id)
+        return None
+
+    run_dir = PUBLISHED_ROOT / model / region / run_id
+    if not run_dir.is_dir():
+        logger.warning("LATEST.json run_id does not exist on disk: %s", run_dir)
+        return None
+    return run_id
 
 
 def _resolve_latest_run(model: str, region: str) -> str | None:
-    """Find the latest (lexicographically greatest) run ID for a model/region.
+    """Find latest published run ID for model/region.
 
-    Checks published/ first, then staging/.  Run dirs match YYYYMMDD_HHz pattern.
+    Preference order:
+    1) published/{model}/{region}/LATEST.json run_id (if valid)
+    2) lexicographically greatest run directory in published/
     """
-    runs: list[str] = []
-    for prefix in ("published", "staging"):
-        d = DATA_ROOT / prefix / model / region
-        if d.is_dir():
-            for child in d.iterdir():
-                if child.is_dir() and _RUN_ID_RE.match(child.name):
-                    runs.append(child.name)
+    pointed = _latest_run_from_pointer(model, region)
+    if pointed is not None:
+        return pointed
+
+    d = PUBLISHED_ROOT / model / region
+    if not d.is_dir():
+        return None
+
+    runs = [
+        child.name
+        for child in d.iterdir()
+        if child.is_dir() and _RUN_ID_RE.match(child.name)
+    ]
     if not runs:
         return None
     return sorted(set(runs))[-1]  # Latest by lexicographic sort (YYYYMMDD_HHz)
@@ -156,14 +183,16 @@ def list_regions(model: str):
 
 @app.get("/api/v3/{model}/{region}/runs")
 def list_runs(model: str, region: str):
-    """List available runs for a model/region, newest first."""
-    runs: list[str] = []
-    for prefix in ("published", "staging"):
-        d = DATA_ROOT / prefix / model / region
-        if d.is_dir():
-            for child in d.iterdir():
-                if child.is_dir() and _RUN_ID_RE.match(child.name):
-                    runs.append(child.name)
+    """List available published runs for a model/region, newest first."""
+    d = PUBLISHED_ROOT / model / region
+    if not d.is_dir():
+        return []
+
+    runs = [
+        child.name
+        for child in d.iterdir()
+        if child.is_dir() and _RUN_ID_RE.match(child.name)
+    ]
     return sorted(set(runs), reverse=True)  # newest first
 
 
@@ -176,12 +205,11 @@ def list_vars(model: str, region: str, run: str):
                         media_type="application/json")
 
     var_ids: set[str] = set()
-    for prefix in ("published", "staging"):
-        d = DATA_ROOT / prefix / model / region / resolved
-        if d.is_dir():
-            for child in d.iterdir():
-                if child.is_dir():
-                    var_ids.add(child.name)
+    d = PUBLISHED_ROOT / model / region / resolved
+    if d.is_dir():
+        for child in d.iterdir():
+            if child.is_dir():
+                var_ids.add(child.name)
 
     # Import VAR_SPECS for display names
     from .services.colormaps import VAR_SPECS
@@ -207,10 +235,8 @@ def list_frames(model: str, region: str, run: str, var: str):
     frames: list[dict] = []
     seen_fh: set[int] = set()
 
-    for prefix in ("published", "staging"):
-        d = DATA_ROOT / prefix / model / region / resolved / var
-        if not d.is_dir():
-            continue
+    d = PUBLISHED_ROOT / model / region / resolved / var
+    if d.is_dir():
         for f in d.iterdir():
             if not f.name.endswith(".rgba.cog.tif"):
                 continue
@@ -247,41 +273,37 @@ def list_frames(model: str, region: str, run: str, var: str):
 # ---------------------------------------------------------------------------
 
 def _resolve_val_cog(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
-    """Find the float32 value COG on disk (published first, then staging)."""
+    """Find the float32 value COG on disk in published."""
     resolved = _resolve_run(model, region, run) or run
     filename = f"fh{fh:03d}.val.cog.tif"
-    for prefix in ("published", "staging"):
-        candidate = DATA_ROOT / prefix / model / region / resolved / var / filename
-        if candidate.is_file():
-            return candidate
+    candidate = PUBLISHED_ROOT / model / region / resolved / var / filename
+    if candidate.is_file():
+        return candidate
     return None
 
 
 def _resolve_sidecar(model: str, region: str, run: str, var: str, fh: int) -> dict | None:
-    """Load sidecar JSON for units/metadata (published first, then staging). Cached."""
+    """Load sidecar JSON for units/metadata from published. Cached."""
     resolved = _resolve_run(model, region, run) or run
     filename = f"fh{fh:03d}.json"
-    for prefix in ("published", "staging"):
-        candidate = DATA_ROOT / prefix / model / region / resolved / var / filename
-        if candidate.is_file():
-            return _cached_sidecar(str(candidate))
+    candidate = PUBLISHED_ROOT / model / region / resolved / var / filename
+    if candidate.is_file():
+        return _cached_sidecar(str(candidate))
     return None
 
 
 def _resolve_frame_var_dir(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
     """Resolve the directory containing the requested frame artifacts.
 
-    Uses the same precedence as frame discovery: published first, then staging.
+    Uses the same precedence as frame discovery: published only.
     """
     resolved = _resolve_run(model, region, run)
     if resolved is None:
         return None
 
     fh_str = f"fh{fh:03d}"
-    for prefix in ("published", "staging"):
-        var_dir = DATA_ROOT / prefix / model / region / resolved / var
-        if not var_dir.is_dir():
-            continue
+    var_dir = PUBLISHED_ROOT / model / region / resolved / var
+    if var_dir.is_dir():
         frame_cog = var_dir / f"{fh_str}.rgba.cog.tif"
         if frame_cog.is_file():
             return var_dir
@@ -377,7 +399,7 @@ def get_contour_geojson(
 ):
     """Return a precomputed contour GeoJSON for a frame.
 
-    Resolves the frame directory using published/staging precedence, then loads
+    Resolves the frame directory using published-only lookup, then loads
     sidecar + contour path from that exact var directory.
     """
     var_dir = _resolve_frame_var_dir(model, region, run, var, fh)

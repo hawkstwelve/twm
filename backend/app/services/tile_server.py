@@ -7,6 +7,7 @@ It reads 4-band RGBA COGs and returns PNG tiles. That's it.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -18,17 +19,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
 
-try:
-    from backend.app.services.colormaps import VAR_SPECS
-except ModuleNotFoundError:
-    try:
-        from app.services.colormaps import VAR_SPECS
-    except ModuleNotFoundError:
-        from .colormaps import VAR_SPECS
-
 logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
+PUBLISHED_ROOT = DATA_ROOT / "published"
 
 # Regex to match run IDs like 20260217_20z
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
@@ -47,28 +41,12 @@ app.add_middleware(
 )
 
 
-def _tile_resampling_for_var(var: str) -> tuple[str, str]:
-    """Return (resampling_method, reproject_method) for tile reads.
-
-    Explicitly set behavior by variable kind instead of relying on rio-tiler
-    defaults. This keeps categorical products crisp while allowing smooth
-    continuous interpolation.
-    """
-    spec = VAR_SPECS.get(var, {})
-    kind = str(spec.get("type", "")).strip().lower()
-    if kind in {"discrete", "indexed", "categorical"}:
-        return "nearest", "nearest"
-    return "bilinear", "bilinear"
-
-
 def _read_tile_compat(
     cog: Reader,
     *,
     x: int,
     y: int,
     z: int,
-    resampling_method: str,
-    reproject_method: str,
 ):
     """Read a tile with compatibility across rio-tiler versions.
 
@@ -87,8 +65,6 @@ def _read_tile_compat(
             y,
             z,
             **common_args,
-            resampling_method=resampling_method,
-            reproject_method=reproject_method,
         )
     except TileOutsideBounds:
         raise
@@ -121,15 +97,50 @@ def _render_png_compat(tile) -> bytes:
         return tile.render(img_format="PNG")
 
 
+def _latest_run_from_pointer(model: str, region: str) -> str | None:
+    """Return run_id from published LATEST.json if valid and present on disk."""
+    latest_path = PUBLISHED_ROOT / model / region / "LATEST.json"
+    if not latest_path.is_file():
+        return None
+
+    try:
+        payload = json.loads(latest_path.read_text())
+    except Exception:
+        logger.warning("Failed reading LATEST.json at %s", latest_path)
+        return None
+
+    run_id = payload.get("run_id")
+    if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
+        logger.warning("Invalid run_id in LATEST.json at %s: %r", latest_path, run_id)
+        return None
+
+    run_dir = PUBLISHED_ROOT / model / region / run_id
+    if not run_dir.is_dir():
+        logger.warning("LATEST.json run_id does not exist on disk: %s", run_dir)
+        return None
+    return run_id
+
+
 def _resolve_latest_run(model: str, region: str) -> str | None:
-    """Find the latest (lexicographically greatest) run ID for a model/region."""
-    runs: list[str] = []
-    for prefix in ("published", "staging"):
-        d = DATA_ROOT / prefix / model / region
-        if d.is_dir():
-            for child in d.iterdir():
-                if child.is_dir() and _RUN_ID_RE.match(child.name):
-                    runs.append(child.name)
+    """Find latest published run ID for model/region.
+
+    Preference order:
+    1) published/{model}/{region}/LATEST.json run_id (if valid)
+    2) lexicographically greatest run directory in published/
+    """
+    pointed = _latest_run_from_pointer(model, region)
+    if pointed is not None:
+        return pointed
+
+    d = PUBLISHED_ROOT / model / region
+    if not d.is_dir():
+        return None
+
+    runs = [
+        child.name
+        for child in d.iterdir()
+        if child.is_dir() and _RUN_ID_RE.match(child.name)
+    ]
     if not runs:
         return None
     return sorted(set(runs))[-1]
@@ -139,8 +150,7 @@ def _resolve_cog_path(model: str, region: str, run: str, var: str, fh: int) -> P
     """Find the RGBA COG on disk.
 
     Resolves 'latest' to the actual latest run directory.
-    Checks published/ first, then staging/.  Returns the first path that
-    exists, or None if the COG cannot be found.
+    Checks published/ only. Returns the path if it exists, else None.
     """
     resolved = run
     if run == "latest":
@@ -151,10 +161,9 @@ def _resolve_cog_path(model: str, region: str, run: str, var: str, fh: int) -> P
     fh_str = f"fh{fh:03d}"
     filename = f"{fh_str}.rgba.cog.tif"
 
-    for prefix in ("published", "staging"):
-        candidate = DATA_ROOT / prefix / model / region / resolved / var / filename
-        if candidate.is_file():
-            return candidate
+    candidate = PUBLISHED_ROOT / model / region / resolved / var / filename
+    if candidate.is_file():
+        return candidate
     return None
 
 
@@ -180,15 +189,12 @@ def get_tile(
         )
 
     try:
-        resampling_method, reproject_method = _tile_resampling_for_var(var)
         with Reader(str(cog_path)) as cog:
             tile = _read_tile_compat(
                 cog,
                 x=x,
                 y=y,
                 z=z,
-                resampling_method=resampling_method,
-                reproject_method=reproject_method,
             )
 
         content = _render_png_compat(tile)

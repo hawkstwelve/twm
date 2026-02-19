@@ -17,3 +17,4 @@ herbie_cache/
 # Additional files to ignore
 extract_colorbar.py
 ~HOME
+/docs/ANIMATION_FIX.md
