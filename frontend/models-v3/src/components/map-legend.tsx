@@ -134,8 +134,10 @@ function groupRadarEntries(
     }
   }
 
-  // Fallback: split displayed sequence on zero-value delimiters.
-  const displayed = entries.slice().reverse();
+  // Fallback: split sequence on zero-value delimiters in native order.
+  // Reversing here flips group labels (rain↔frzr, snow↔sleet) when
+  // sidecars don't provide ptype metadata.
+  const displayed = entries.slice();
   const fallbackGroups: RadarLegendGroup[] = [];
   let current: LegendEntry[] = [];
 
