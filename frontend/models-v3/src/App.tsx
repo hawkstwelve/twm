@@ -336,15 +336,14 @@ export default function App() {
     if (frameHours.length < 2) return [];
     const currentIndex = frameHours.indexOf(forecastHour);
     const start = currentIndex >= 0 ? currentIndex : 0;
-    const isRadarLike = variable.includes("radar") || variable.includes("ptype");
-    const prefetchCount = isPlaying && isRadarLike ? 4 : 2;
+    const prefetchCount = 2;
     const nextHours = Array.from({ length: prefetchCount }, (_, idx) => {
       const i = start + idx + 1;
       return i >= frameHours.length ? Number.NaN : frameHours[i];
     });
     const dedup = Array.from(new Set(nextHours.filter((fh) => Number.isFinite(fh) && fh !== forecastHour)));
     return dedup.map((fh) => tileUrlForHour(fh));
-  }, [frameHours, forecastHour, tileUrlForHour, variable, isPlaying]);
+  }, [frameHours, forecastHour, tileUrlForHour]);
 
   const effectiveRunId = currentFrame?.run ?? (run !== "latest" ? run : latestRunId);
   const runDateTimeISO = runIdToIso(effectiveRunId);
@@ -357,12 +356,6 @@ export default function App() {
     varId: variable,
     fh: forecastHour,
   });
-
-  useEffect(() => {
-    if (frameHours.length > 0) {
-      console.log("[frames] frameHours sorted:", frameHours);
-    }
-  }, [frameHours]);
 
   const markTileReady = useCallback((readyUrl: string) => {
     const now = Date.now();
@@ -587,12 +580,17 @@ export default function App() {
   }, [model, region, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const interval = window.setInterval(() => {
       if (document.hidden || !model || !region || !variable) {
         return;
       }
       fetchFrames(model, region, resolvedRunForRequests, variable)
         .then((rows) => {
+          if (cancelled) {
+            return;
+          }
           setFrameRows(rows);
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
           setForecastHour((prev) => nearestFrame(frames, prev));
@@ -603,7 +601,10 @@ export default function App() {
         });
     }, 30000);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [model, region, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
