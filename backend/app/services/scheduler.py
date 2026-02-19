@@ -534,11 +534,14 @@ def run_scheduler(
     )
 
     last_run_id: str | None = None
+    last_run_available: int = 0
+    last_run_total: int = 0
     while True:
         run_dt = _resolve_run_dt(run_arg, model, plugin=plugin, probe_var=probe_var)
         run_id = _run_id_from_dt(run_dt)
 
-        if last_run_id == run_id and not run_arg:
+        run_complete = last_run_total > 0 and last_run_available >= last_run_total
+        if last_run_id == run_id and not run_arg and run_complete:
             logger.info("No new run yet (latest=%s); sleeping %ss", run_id, poll_seconds)
             time.sleep(poll_seconds)
             continue
@@ -555,6 +558,8 @@ def run_scheduler(
             keep_runs=keep_runs,
         )
         last_run_id = processed_run_id
+        last_run_available = available
+        last_run_total = total
         logger.info("Run summary: %s available=%d/%d", processed_run_id, available, total)
 
         if once or run_arg:

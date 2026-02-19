@@ -21,6 +21,8 @@ Usage
 from __future__ import annotations
 
 import logging
+import os
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -31,6 +33,41 @@ import rasterio.crs
 import rasterio.transform
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_HERBIE_PRIORITY = ["aws", "nomads", "google", "azure", "pando", "pando2"]
+ENV_HERBIE_PRIORITY = "TWF_HERBIE_PRIORITY"
+ENV_HERBIE_RETRIES = "TWF_HERBIE_SUBSET_RETRIES"
+ENV_HERBIE_RETRY_SLEEP = "TWF_HERBIE_RETRY_SLEEP_SECONDS"
+
+
+def _priority_candidates(herbie_kwargs: dict[str, Any] | None) -> list[str]:
+    if herbie_kwargs and herbie_kwargs.get("priority"):
+        return [str(herbie_kwargs["priority"]).strip()]
+
+    raw = os.getenv(ENV_HERBIE_PRIORITY, "")
+    if raw.strip():
+        parsed = [item.strip().lower() for item in raw.split(",") if item.strip()]
+        if parsed:
+            return parsed
+    return list(DEFAULT_HERBIE_PRIORITY)
+
+
+def _retry_count() -> int:
+    raw = os.getenv(ENV_HERBIE_RETRIES, "2").strip()
+    try:
+        count = int(raw)
+    except ValueError:
+        return 2
+    return max(1, count)
+
+
+def _retry_sleep_seconds() -> float:
+    raw = os.getenv(ENV_HERBIE_RETRY_SLEEP, "0.6").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 0.6
+    return max(0.0, value)
 
 
 def fetch_variable(
@@ -93,20 +130,57 @@ def fetch_variable(
     # Strip tzinfo to avoid pandas tz-naive vs tz-aware comparison errors.
     herbie_date = run_date.replace(tzinfo=None) if run_date.tzinfo else run_date
 
-    H = Herbie(herbie_date, **kwargs)
+    priority_list = _priority_candidates(herbie_kwargs)
+    retries = _retry_count()
+    sleep_s = _retry_sleep_seconds()
 
-    # Download the subset matching the search pattern
-    grib_path = H.download(search_pattern)
+    last_exc: Exception | None = None
+    grib_path: Path | None = None
+    for priority in priority_list:
+        for attempt_idx in range(1, retries + 1):
+            run_kwargs = dict(kwargs)
+            run_kwargs["priority"] = priority
+            try:
+                H = Herbie(herbie_date, **run_kwargs)
+                subset_path = H.download(search_pattern)
+                if subset_path is None:
+                    raise RuntimeError(
+                        f"Herbie subset download returned None ({model_id} fh{fh:03d} {search_pattern!r})"
+                    )
+                grib_path = Path(subset_path)
+                logger.info(
+                    "Downloaded GRIB: %s (%s fh%03d %s; priority=%s; attempt=%d/%d)",
+                    grib_path.name,
+                    model_id,
+                    fh,
+                    search_pattern,
+                    priority,
+                    attempt_idx,
+                    retries,
+                )
+                break
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Herbie subset fetch failed (%s fh%03d %s; priority=%s; attempt=%d/%d): %s",
+                    model_id,
+                    fh,
+                    search_pattern,
+                    priority,
+                    attempt_idx,
+                    retries,
+                    exc,
+                )
+                if sleep_s > 0 and attempt_idx < retries:
+                    time.sleep(sleep_s)
+        if grib_path is not None:
+            break
+
     if grib_path is None:
         raise RuntimeError(
-            f"Herbie download failed: {model_id} fh{fh:03d} "
-            f"pattern={search_pattern!r}"
-        )
-    grib_path = Path(grib_path)
-    logger.info(
-        "Downloaded GRIB: %s (%s fh%03d %s)",
-        grib_path.name, model_id, fh, search_pattern,
-    )
+            f"Herbie subset download failed after trying priorities={priority_list} "
+            f"for {model_id} fh{fh:03d} pattern={search_pattern!r}"
+        ) from last_exc
 
     # Open with rasterio to get array + CRS + transform
     with rasterio.open(grib_path) as src:
