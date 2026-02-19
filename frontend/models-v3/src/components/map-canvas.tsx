@@ -71,12 +71,37 @@ function prefetchLayerId(index: number): string {
 }
 
 function getResamplingMode(variable?: string): "nearest" | "linear" {
+  if (variable === "wspd10m") {
+    return "nearest";
+  }
   // Discrete/categorical variables use nearest to preserve exact values.
   // Continuous variables (tmp2m, wspd10m, etc.) use linear for smooth display.
   if (variable && (variable.includes("radar") || variable.includes("ptype") || variable === "refc")) {
     return "nearest";
   }
   return "linear";
+}
+
+function getOverlayPaintSettings(variable?: string): {
+  contrast: number;
+  saturation: number;
+  brightnessMin: number;
+  brightnessMax: number;
+} {
+  if (variable === "wspd10m") {
+    return {
+      contrast: 0,
+      saturation: 0,
+      brightnessMin: 0,
+      brightnessMax: 1,
+    };
+  }
+  return {
+    contrast: OVERLAY_RASTER_CONTRAST,
+    saturation: OVERLAY_RASTER_SATURATION,
+    brightnessMin: OVERLAY_RASTER_BRIGHTNESS_MIN,
+    brightnessMax: OVERLAY_RASTER_BRIGHTNESS_MAX,
+  };
 }
 
 function styleFor(
@@ -87,6 +112,7 @@ function styleFor(
   contourGeoJsonUrl?: string | null
 ): StyleSpecification {
   const resamplingMode = getResamplingMode(variable);
+  const paintSettings = getOverlayPaintSettings(variable);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
     : opacity;
@@ -94,10 +120,10 @@ function styleFor(
     "raster-opacity": overlayOpacity,
     "raster-resampling": resamplingMode,
     "raster-fade-duration": 0,
-    "raster-contrast": OVERLAY_RASTER_CONTRAST,
-    "raster-saturation": OVERLAY_RASTER_SATURATION,
-    "raster-brightness-min": OVERLAY_RASTER_BRIGHTNESS_MIN,
-    "raster-brightness-max": OVERLAY_RASTER_BRIGHTNESS_MAX,
+    "raster-contrast": paintSettings.contrast,
+    "raster-saturation": paintSettings.saturation,
+    "raster-brightness-min": paintSettings.brightnessMin,
+    "raster-brightness-max": paintSettings.brightnessMax,
   };
   return {
     version: 8,
