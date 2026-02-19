@@ -115,6 +115,21 @@ function withPrecipRateUnits(title: string, units?: string): string {
   return `${title} (${resolvedUnits})`;
 }
 
+function normalizeLegendUnits(
+  units: string | undefined,
+  meta: LegendMeta & { var_key?: string; spec_key?: string; id?: string; var?: string }
+): string | undefined {
+  const resolved = (units ?? "").trim();
+  if (resolved.toLowerCase() !== "index") {
+    return units;
+  }
+  const id = String(meta.var_key ?? meta.spec_key ?? meta.id ?? meta.var ?? "").toLowerCase();
+  if (id === "radar_ptype") {
+    return "dBZ";
+  }
+  return units;
+}
+
 function buildLegend(meta: LegendMeta | null | undefined, opacity: number): LegendPayload | null {
   if (!meta) {
     return null;
@@ -123,7 +138,7 @@ function buildLegend(meta: LegendMeta | null | undefined, opacity: number): Lege
   const isPrecipPtype = isPrecipPtypeLegendMeta(metaWithIds);
   const baseTitle = meta.legend_title ?? meta.display_name ?? "Legend";
   const title = isPrecipPtype ? withPrecipRateUnits(baseTitle, meta.units) : baseTitle;
-  const units = meta.units;
+  const units = normalizeLegendUnits(meta.units, metaWithIds);
   const legendMetadata = {
     kind: metaWithIds.kind,
     id: metaWithIds.var_key ?? metaWithIds.spec_key ?? metaWithIds.id ?? metaWithIds.var,

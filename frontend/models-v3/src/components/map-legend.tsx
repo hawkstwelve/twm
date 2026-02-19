@@ -121,11 +121,7 @@ function groupRadarEntries(
       if (!Number.isFinite(offset) || !Number.isFinite(count) || offset < 0 || count <= 0) {
         continue;
       }
-      const slice = entries
-        .slice(offset, offset + count)
-        .filter((entry) => !isZero(entry.value))
-        .slice()
-        .reverse();
+      const slice = entries.slice(offset, offset + count);
       if (slice.length === 0) continue;
       groupedByMeta.push({
         label: radarGroupLabelForCode(ptype, index),

@@ -445,6 +445,33 @@ def _build_legend(
         levels = var_spec.get("levels", colorize_meta.get("levels", []))
         colors = var_spec.get("colors", colorize_meta.get("colors", []))
 
+        ptype_order = colorize_meta.get("ptype_order") or var_spec.get("ptype_order")
+        ptype_breaks = colorize_meta.get("ptype_breaks") or var_spec.get("ptype_breaks")
+        ptype_levels = colorize_meta.get("ptype_levels") or var_spec.get("ptype_levels")
+
+        if (
+            isinstance(ptype_order, list)
+            and isinstance(ptype_breaks, dict)
+            and isinstance(ptype_levels, dict)
+        ):
+            stops: list[list[Any]] = []
+            for ptype in ptype_order:
+                boundary = ptype_breaks.get(ptype)
+                type_levels = ptype_levels.get(ptype)
+                if not isinstance(boundary, dict) or not isinstance(type_levels, list):
+                    continue
+                offset = int(boundary.get("offset", -1))
+                count = int(boundary.get("count", 0))
+                if offset < 0 or count <= 0:
+                    continue
+                max_items = min(count, len(type_levels), len(colors) - offset)
+                if max_items <= 0:
+                    continue
+                for idx in range(max_items):
+                    stops.append([float(type_levels[idx]), colors[offset + idx]])
+            if stops:
+                return {"type": "discrete", "stops": stops}
+
         # Pair levels with colors (take min length)
         n = min(len(levels), len(colors))
         stops = [[float(levels[i]), colors[i]] for i in range(n)]

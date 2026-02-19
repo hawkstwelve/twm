@@ -553,6 +553,18 @@ export function MapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !isLoaded || !map.getLayer(CONTOUR_LAYER_ID)) {
+      return;
+    }
+    map.setLayoutProperty(
+      CONTOUR_LAYER_ID,
+      "visibility",
+      variable === "tmp2m" ? "visible" : "none"
+    );
+  }, [isLoaded, variable]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !isLoaded || !onZoomHint) {
       return;
     }

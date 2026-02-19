@@ -193,6 +193,10 @@ def _build_radar_ptype_flat_palette() -> tuple[list[float], list[str], dict[str,
 
 
 RADAR_PTYPE_LEVELS, RADAR_PTYPE_COLORS, RADAR_PTYPE_BREAKS = _build_radar_ptype_flat_palette()
+RADAR_PTYPE_LEVELS_BY_TYPE = {
+    key: list(RADAR_CONFIG[key]["levels"][: len(RADAR_CONFIG[key]["colors"])])
+    for key in RADAR_PTYPE_ORDER
+}
 
 # 2m temperature (°F) palette
 TMP2M_F_COLOR_ANCHORS = [
@@ -541,6 +545,7 @@ VAR_SPECS = {
         "legend_title": "Composite Reflectivity + P-Type (dBZ)",
         "ptype_order": list(RADAR_PTYPE_ORDER),
         "ptype_breaks": RADAR_PTYPE_BREAKS,
+        "ptype_levels": RADAR_PTYPE_LEVELS_BY_TYPE,
     },
     "precip_total": {
         "type": "discrete",
