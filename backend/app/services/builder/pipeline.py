@@ -55,6 +55,19 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "3.0"
 
 
+def _warp_resampling_for_kind(kind: str | None) -> str:
+    """Return warp resampling method from variable kind.
+
+    Categorical/indexed/discrete fields must use nearest to avoid
+    interpolation across class boundaries. Continuous fields can use
+    a smoother kernel.
+    """
+    normalized = str(kind or "").strip().lower()
+    if normalized in {"discrete", "indexed", "categorical"}:
+        return "nearest"
+    return "cubic"
+
+
 # ---------------------------------------------------------------------------
 # Gate 1: gdalinfo structural validation
 # ---------------------------------------------------------------------------
@@ -581,6 +594,8 @@ def build_frame(
     resolved_plugin = model_plugin or _resolve_model_plugin(model)
     var_spec_model = _resolve_model_var_spec(model, var_id, resolved_plugin)
     kind = getattr(var_spec_model, "kind", None) or var_spec_colormap.get("type", "continuous")
+    kind_normalized = str(kind).strip().lower() or "continuous"
+    warp_resampling = _warp_resampling_for_kind(kind_normalized)
     search_pattern = None if getattr(var_spec_model, "derived", False) else _get_search_pattern(var_spec_model)
 
     # --- Staging directory ---
@@ -625,14 +640,14 @@ def build_frame(
             converted_data = convert_units(raw_data, var_id)
 
         # --- Step 3: Warp to target grid ---
-        logger.info("Step 3/6: Warping to target grid")
+        logger.info("Step 3/6: Warping to target grid (resampling=%s)", warp_resampling)
         warped_data, dst_transform = warp_to_target_grid(
             converted_data,
             src_crs,
             src_transform,
             model=model,
             region=region,
-            resampling="bilinear",
+            resampling=warp_resampling,
             src_nodata=None,
             dst_nodata=float("nan"),
         )
@@ -645,7 +660,7 @@ def build_frame(
         logger.info("Step 5/6: Writing COGs")
         write_rgba_cog(
             rgba, rgba_path,
-            model=model, region=region, kind=kind,
+            model=model, region=region, kind=kind_normalized,
         )
         write_value_cog(
             warped_data, val_path,
