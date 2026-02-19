@@ -18,6 +18,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
 
+from app.services.colormaps import VAR_SPECS
+
 logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
@@ -37,6 +39,20 @@ app.add_middleware(
     allow_methods=["GET"],
     allow_headers=["*"],
 )
+
+
+def _tile_resampling_for_var(var: str) -> tuple[str, str]:
+    """Return (resampling_method, reproject_method) for tile reads.
+
+    Explicitly set behavior by variable kind instead of relying on rio-tiler
+    defaults. This keeps categorical products crisp while allowing smooth
+    continuous interpolation.
+    """
+    spec = VAR_SPECS.get(var, {})
+    kind = str(spec.get("type", "")).strip().lower()
+    if kind in {"discrete", "indexed", "categorical"}:
+        return "nearest", "nearest"
+    return "bilinear", "bilinear"
 
 
 def _resolve_latest_run(model: str, region: str) -> str | None:
@@ -98,8 +114,17 @@ def get_tile(
         )
 
     try:
+        resampling_method, reproject_method = _tile_resampling_for_var(var)
         with Reader(str(cog_path)) as cog:
-            tile = cog.tile(x, y, z, indexes=(1, 2, 3, 4), tilesize=512)
+            tile = cog.tile(
+                x,
+                y,
+                z,
+                indexes=(1, 2, 3, 4),
+                tilesize=512,
+                resampling_method=resampling_method,
+                reproject_method=reproject_method,
+            )
 
         content = tile.render(img_format="PNG", add_mask=False)
         return Response(
