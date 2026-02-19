@@ -386,7 +386,7 @@ def warp_to_target_grid(
     *,
     model: str,
     region: str,
-    resampling: str = "cubic",
+    resampling: str = "bilinear",
     src_nodata: float | None = None,
     dst_nodata: float = float("nan"),
 ) -> tuple[np.ndarray, rasterio.transform.Affine]:
@@ -406,7 +406,7 @@ def warp_to_target_grid(
     model, region : str
         Target model/region for grid parameters.
     resampling : str
-        Resampling method name (e.g. "cubic", "nearest").
+        Resampling method name (e.g. "bilinear", "nearest").
     src_nodata, dst_nodata : float or None
         Nodata values for source and destination.
 

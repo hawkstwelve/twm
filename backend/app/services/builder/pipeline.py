@@ -65,7 +65,7 @@ def _warp_resampling_for_kind(kind: str | None) -> str:
     normalized = str(kind or "").strip().lower()
     if normalized in {"discrete", "indexed", "categorical"}:
         return "nearest"
-    return "cubic"
+    return "bilinear"
 
 
 # ---------------------------------------------------------------------------

@@ -71,9 +71,6 @@ function prefetchLayerId(index: number): string {
 }
 
 function getResamplingMode(variable?: string): "nearest" | "linear" {
-  if (variable === "wspd10m") {
-    return "nearest";
-  }
   // Discrete/categorical variables use nearest to preserve exact values.
   // Continuous variables (tmp2m, wspd10m, etc.) use linear for smooth display.
   if (variable && (variable.includes("radar") || variable.includes("ptype") || variable === "refc")) {
