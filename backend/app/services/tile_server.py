@@ -55,6 +55,42 @@ def _tile_resampling_for_var(var: str) -> tuple[str, str]:
     return "bilinear", "bilinear"
 
 
+def _read_tile_compat(
+    cog: Reader,
+    *,
+    x: int,
+    y: int,
+    z: int,
+    resampling_method: str,
+    reproject_method: str,
+):
+    """Read a tile with compatibility across rio-tiler versions.
+
+    Some deployments may run older rio-tiler builds that don't accept
+    resampling kwargs on `Reader.tile`. Try explicit strategy first, then
+    gracefully fall back to defaults to avoid service outages.
+    """
+    common_args = {
+        "indexes": (1, 2, 3, 4),
+        "tilesize": 512,
+    }
+
+    try:
+        return cog.tile(
+            x,
+            y,
+            z,
+            **common_args,
+            resampling_method=resampling_method,
+            reproject_method=reproject_method,
+        )
+    except TypeError:
+        logger.warning(
+            "Reader.tile() resampling kwargs unsupported; falling back to defaults"
+        )
+        return cog.tile(x, y, z, **common_args)
+
+
 def _resolve_latest_run(model: str, region: str) -> str | None:
     """Find the latest (lexicographically greatest) run ID for a model/region."""
     runs: list[str] = []
@@ -116,12 +152,11 @@ def get_tile(
     try:
         resampling_method, reproject_method = _tile_resampling_for_var(var)
         with Reader(str(cog_path)) as cog:
-            tile = cog.tile(
-                x,
-                y,
-                z,
-                indexes=(1, 2, 3, 4),
-                tilesize=512,
+            tile = _read_tile_compat(
+                cog,
+                x=x,
+                y=y,
+                z=z,
                 resampling_method=resampling_method,
                 reproject_method=reproject_method,
             )
