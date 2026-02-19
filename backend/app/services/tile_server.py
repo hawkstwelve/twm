@@ -84,11 +84,31 @@ def _read_tile_compat(
             resampling_method=resampling_method,
             reproject_method=reproject_method,
         )
-    except TypeError:
+    except Exception as exc:
         logger.warning(
-            "Reader.tile() resampling kwargs unsupported; falling back to defaults"
+            "Reader.tile() explicit resampling failed (%s: %s); trying default args",
+            exc.__class__.__name__,
+            exc,
         )
+
+    try:
         return cog.tile(x, y, z, **common_args)
+    except Exception as exc:
+        logger.warning(
+            "Reader.tile() with common args failed (%s: %s); trying minimal args",
+            exc.__class__.__name__,
+            exc,
+        )
+        return cog.tile(x, y, z)
+
+
+def _render_png_compat(tile) -> bytes:
+    """Render PNG with compatibility across rio-tiler versions."""
+    try:
+        return tile.render(img_format="PNG", add_mask=False)
+    except TypeError:
+        logger.warning("tile.render(add_mask=...) unsupported; falling back")
+        return tile.render(img_format="PNG")
 
 
 def _resolve_latest_run(model: str, region: str) -> str | None:
@@ -161,7 +181,7 @@ def get_tile(
                 reproject_method=reproject_method,
             )
 
-        content = tile.render(img_format="PNG", add_mask=False)
+        content = _render_png_compat(tile)
         return Response(
             content=content,
             media_type="image/png",
