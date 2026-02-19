@@ -90,15 +90,19 @@ def _read_tile_compat(
             resampling_method=resampling_method,
             reproject_method=reproject_method,
         )
+    except TileOutsideBounds:
+        raise
     except Exception as exc:
         logger.warning(
-            "Reader.tile() explicit resampling failed (%s: %s); trying default args",
+            "Reader.tile() explicit resampling unsupported/failed (%s: %s); trying default args",
             exc.__class__.__name__,
             exc,
         )
 
     try:
         return cog.tile(x, y, z, **common_args)
+    except TileOutsideBounds:
+        raise
     except Exception as exc:
         logger.warning(
             "Reader.tile() with common args failed (%s: %s); trying minimal args",
