@@ -18,7 +18,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
 
-from app.services.colormaps import VAR_SPECS
+try:
+    from backend.app.services.colormaps import VAR_SPECS
+except ModuleNotFoundError:
+    try:
+        from app.services.colormaps import VAR_SPECS
+    except ModuleNotFoundError:
+        from .colormaps import VAR_SPECS
 
 logger = logging.getLogger(__name__)
 
