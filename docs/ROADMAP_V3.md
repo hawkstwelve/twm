@@ -721,7 +721,7 @@ Adding a new variable becomes:
    - Wire each into `pipeline.py` as a dispatch based on `VarSpec.derivation`
 2. ✅ Verify categorical overview handling: radar_ptype uses nearest for all bands
 3. ✅ Verify value-grid semantics: wspd stores derived float mph; radar_ptype stores category index
-4. Run all HRRR variables through scheduler, validate tiles + hover for each
+4. ✅ Run all HRRR variables through scheduler, validate tiles + hover for each
 5. Confirm legend rendering for all types (gradient, discrete, segmented)
 
 **Checkpoint:** All current HRRR variables work. Adding a new simple variable is a one-spec addition.

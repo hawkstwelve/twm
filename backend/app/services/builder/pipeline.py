@@ -303,10 +303,7 @@ def build_sidecar_json(
     model_units = getattr(var_spec_model, "units", None) if var_spec_model is not None else None
 
     kind = colorize_meta.get("kind") or model_kind or var_spec.get("type", "continuous")
-    if str(kind).lower() == "indexed":
-        units = "index"
-    else:
-        units = model_units or colorize_meta.get("units") or var_spec.get("units", "")
+    units = model_units or colorize_meta.get("units") or var_spec.get("units", "")
 
     # Build legend
     legend = _build_legend(kind, var_spec, colorize_meta)
@@ -325,6 +322,14 @@ def build_sidecar_json(
         "max": colorize_meta.get("max"),
         "legend": legend,
     }
+
+    # Preserve optional legend-grouping metadata for categorical ptype variables.
+    for key in ("ptype_order", "ptype_breaks", "ptype_levels", "bins_per_ptype"):
+        value = colorize_meta.get(key)
+        if value is None:
+            value = var_spec.get(key)
+        if value is not None:
+            sidecar[key] = value
 
     if contours:
         sidecar["contours"] = contours

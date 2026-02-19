@@ -95,10 +95,10 @@ function runIdToIso(runId: string | null): string | null {
 }
 
 function isPrecipPtypeLegendMeta(
-  meta: LegendMeta & { var_key?: string; spec_key?: string; id?: string }
+  meta: LegendMeta & { var_key?: string; spec_key?: string; id?: string; var?: string }
 ): boolean {
   const kind = String(meta.kind ?? "").toLowerCase();
-  const id = String(meta.var_key ?? meta.spec_key ?? meta.id ?? "").toLowerCase();
+  const id = String(meta.var_key ?? meta.spec_key ?? meta.id ?? meta.var ?? "").toLowerCase();
   return kind.includes("precip_ptype") || id === "precip_ptype";
 }
 
@@ -119,14 +119,14 @@ function buildLegend(meta: LegendMeta | null | undefined, opacity: number): Lege
   if (!meta) {
     return null;
   }
-  const metaWithIds = meta as LegendMeta & { var_key?: string; spec_key?: string; id?: string };
+  const metaWithIds = meta as LegendMeta & { var_key?: string; spec_key?: string; id?: string; var?: string };
   const isPrecipPtype = isPrecipPtypeLegendMeta(metaWithIds);
   const baseTitle = meta.legend_title ?? meta.display_name ?? "Legend";
   const title = isPrecipPtype ? withPrecipRateUnits(baseTitle, meta.units) : baseTitle;
   const units = meta.units;
   const legendMetadata = {
     kind: metaWithIds.kind,
-    id: metaWithIds.var_key ?? metaWithIds.spec_key ?? metaWithIds.id,
+    id: metaWithIds.var_key ?? metaWithIds.spec_key ?? metaWithIds.id ?? metaWithIds.var,
     ptype_breaks: metaWithIds.ptype_breaks,
     ptype_order: metaWithIds.ptype_order,
     bins_per_ptype: metaWithIds.bins_per_ptype,
@@ -289,6 +289,9 @@ export default function App() {
   }, [tileUrlForHour, forecastHour]);
 
   const contourGeoJsonUrl = useMemo(() => {
+    if (variable !== "tmp2m") {
+      return null;
+    }
     const frameMeta = extractLegendMeta(currentFrame);
     const contourSpec = frameMeta?.contours?.iso32f;
     if (!contourSpec) {
