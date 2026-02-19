@@ -259,6 +259,20 @@ def _frame_value_path(data_root: Path, model: str, region: str, run_id: str, var
     return data_root / "staging" / model / region / run_id / var_id / f"fh{fh:03d}.val.cog.tif"
 
 
+def _frame_artifacts_exist(
+    data_root: Path,
+    model: str,
+    region: str,
+    run_id: str,
+    var_id: str,
+    fh: int,
+) -> bool:
+    rgba = _frame_rgba_path(data_root, model, region, run_id, var_id, fh)
+    val = _frame_value_path(data_root, model, region, run_id, var_id, fh)
+    side = _frame_sidecar_path(data_root, model, region, run_id, var_id, fh)
+    return rgba.exists() and val.exists() and side.exists()
+
+
 def _build_one(
     *,
     model_id: str,
@@ -443,18 +457,25 @@ def _process_run(
     cycle_hour = run_dt.hour
     targets = _scheduled_targets_for_cycle(plugin, vars_to_build, cycle_hour)
 
-    missing: list[tuple[str, int]] = []
+    # Build targets sequentially per variable: if the next FH is missing,
+    # do not attempt later FHs for that variable in this poll cycle.
+    # Upstream publication is typically hour-by-hour, so this avoids repeated
+    # futile fetches for future FHs and significantly reduces log spam.
+    fhs_by_var: dict[str, list[int]] = {}
     for var_id, fh in targets:
-        rgba = _frame_rgba_path(data_root, model_id, region, run_id, var_id, fh)
-        val = _frame_value_path(data_root, model_id, region, run_id, var_id, fh)
-        side = _frame_sidecar_path(data_root, model_id, region, run_id, var_id, fh)
-        if rgba.exists() and val.exists() and side.exists():
-            continue
-        missing.append((var_id, fh))
+        fhs_by_var.setdefault(var_id, []).append(int(fh))
+
+    missing: list[tuple[str, int]] = []
+    for var_id, fhs in fhs_by_var.items():
+        for fh in sorted(set(fhs)):
+            if _frame_artifacts_exist(data_root, model_id, region, run_id, var_id, fh):
+                continue
+            missing.append((var_id, fh))
+            break
 
     total = len(targets)
     logger.info(
-        "Run=%s model=%s region=%s targets=%d missing=%d",
+        "Run=%s model=%s region=%s targets=%d next_missing=%d",
         run_id,
         model_id,
         region,
@@ -501,7 +522,10 @@ def _process_run(
     _enforce_run_retention(data_root / "staging" / model_id / region, keep_runs)
     _enforce_run_retention(data_root / "published" / model_id / region, keep_runs)
 
-    available = total - (len(missing) - built_ok)
+    available = 0
+    for var_id, fh in targets:
+        if _frame_artifacts_exist(data_root, model_id, region, run_id, var_id, fh):
+            available += 1
     return run_id, available, total
 
 
