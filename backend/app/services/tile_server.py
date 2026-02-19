@@ -56,6 +56,8 @@ def _tile_resampling_for_var(var: str) -> tuple[str, str]:
     """
     spec = VAR_SPECS.get(var, {})
     kind = str(spec.get("type", "")).strip().lower()
+    if var == "wspd10m":
+        return "cubic", "cubic"
     if kind in {"discrete", "indexed", "categorical"}:
         return "nearest", "nearest"
     return "bilinear", "bilinear"
