@@ -15,4 +15,5 @@ herbie_cache/
 .DS_Store
 
 # Additional files to ignore
-extract_pivotal_bar.py
+extract_colorbar.py
+~HOME
