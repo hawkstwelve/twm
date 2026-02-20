@@ -195,15 +195,25 @@ def check_pixel_sanity(
     skip_physical_range_checks = is_non_physical_kind or is_non_physical_units or is_non_physical_flag
     is_categorical_ptype = spec_type in {"discrete", "indexed"} and bool(var_spec.get("ptype_breaks"))
 
+    # Default catastrophic-failure thresholds.
+    min_alpha_coverage = 0.05
+    max_nodata_ratio = 0.95
+
+    # Categorical ptype products can legitimately be very sparse (near-dry scenes).
+    # Keep guardrails, but relax thresholds enough to avoid rejecting valid frames.
+    if is_categorical_ptype:
+        min_alpha_coverage = 0.002  # 0.2%
+        max_nodata_ratio = 0.998    # 99.8%
+
     # --- RGBA checks ---
     with rasterio.open(rgba_path) as src:
         alpha = src.read(4)
         total_pixels = alpha.size
 
-        # Alpha coverage: >5% valid
+        # Alpha coverage sanity threshold
         valid_count = int(np.count_nonzero(alpha == 255))
         coverage = valid_count / total_pixels
-        if coverage < 0.05:
+        if coverage < min_alpha_coverage:
             if is_categorical_ptype and valid_count == 0:
                 logger.warning(
                     "Dry categorical ptype frame allowed: alpha coverage %.1f%% (%s)",
@@ -212,8 +222,10 @@ def check_pixel_sanity(
                 )
             else:
                 logger.error(
-                    "Alpha coverage too low: %.1f%% (<5%%) — likely all-transparent (%s)",
-                    coverage * 100, rgba_path,
+                    "Alpha coverage too low: %.1f%% (<%.1f%%) — likely all-transparent (%s)",
+                    coverage * 100,
+                    min_alpha_coverage * 100,
+                    rgba_path,
                 )
                 ok = False
 
@@ -238,9 +250,9 @@ def check_pixel_sanity(
         finite_count = int(np.count_nonzero(finite_mask))
         total_pixels = values.size
 
-        # Nodata ratio: <95% nodata
+        # Nodata ratio sanity threshold
         nodata_ratio = 1.0 - (finite_count / total_pixels)
-        if nodata_ratio > 0.95:
+        if nodata_ratio > max_nodata_ratio:
             if is_categorical_ptype and finite_count == 0:
                 logger.warning(
                     "Dry categorical ptype frame allowed: nodata ratio %.1f%% (%s)",
@@ -249,9 +261,11 @@ def check_pixel_sanity(
                 )
             else:
                 logger.error(
-                    "Value COG nodata ratio too high: %.1f%% (>95%%) — "
+                    "Value COG nodata ratio too high: %.1f%% (>%.1f%%) — "
                     "likely grid misalignment or empty fetch (%s)",
-                    nodata_ratio * 100, val_path,
+                    nodata_ratio * 100,
+                    max_nodata_ratio * 100,
+                    val_path,
                 )
                 ok = False
 
