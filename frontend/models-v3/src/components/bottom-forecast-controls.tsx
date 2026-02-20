@@ -14,6 +14,7 @@ type BottomForecastControlsProps = {
   forecastHour: number;
   availableFrames: number[];
   onForecastHourChange: (fh: number) => void;
+  onScrubStateChange?: (isScrubbing: boolean) => void;
   isPlaying: boolean;
   setIsPlaying: (value: boolean) => void;
   runDateTimeISO: string | null;
@@ -55,14 +56,16 @@ export function BottomForecastControls({
   forecastHour,
   availableFrames,
   onForecastHourChange,
+  onScrubStateChange,
   isPlaying,
   setIsPlaying,
   runDateTimeISO,
   disabled,
   transientStatus,
 }: BottomForecastControlsProps) {
-  const DRAG_UPDATE_MS = 90;
+  const DRAG_UPDATE_MS = 200;
   const [previewHour, setPreviewHour] = useState<number | null>(null);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const lastDragEmitAtRef = useRef(0);
   const lastSentHourRef = useRef<number | null>(null);
 
@@ -78,6 +81,16 @@ export function BottomForecastControls({
   useEffect(() => {
     setPreviewHour(null);
   }, [forecastHour]);
+
+  useEffect(() => {
+    onScrubStateChange?.(isScrubbing);
+  }, [isScrubbing, onScrubStateChange]);
+
+  useEffect(() => {
+    if (isPlaying && isScrubbing) {
+      setIsScrubbing(false);
+    }
+  }, [isPlaying, isScrubbing]);
 
   useEffect(() => {
     lastSentHourRef.current = forecastHour;
@@ -139,6 +152,9 @@ export function BottomForecastControls({
               onValueChange={([value]) => {
                 const next = availableFrames[Math.round(value ?? 0)];
                 if (Number.isFinite(next)) {
+                  if (!isScrubbing) {
+                    setIsScrubbing(true);
+                  }
                   setPreviewHour(next);
                   emitForecastHour(next, false);
                 }
@@ -147,6 +163,7 @@ export function BottomForecastControls({
                 const next = availableFrames[Math.round(value ?? 0)];
                 if (Number.isFinite(next)) {
                   setPreviewHour(null);
+                  setIsScrubbing(false);
                   emitForecastHour(next, true);
                 }
               }}

@@ -280,6 +280,7 @@ export function MapCanvas({
   const prefetchTokenRef = useRef(0);
   const prefetchUrlsRef = useRef<string[]>(Array.from({ length: PREFETCH_BUFFER_COUNT }, () => ""));
   const sourceRequestedUrlRef = useRef<Map<string, string>>(new Map());
+  const sourceRequestTokenRef = useRef<Map<string, number>>(new Map());
   const sourceEventCountRef = useRef<Map<string, number>>(new Map());
   const fadeTokenRef = useRef(0);
   const fadeRafRef = useRef<number | null>(null);
@@ -431,6 +432,7 @@ export function MapCanvas({
       map: maplibregl.Map,
       source: string,
       expectedUrl: string,
+      expectedRequestToken: number,
       minEventCount: number,
       modeValue: PlaybackMode,
       onReady: () => void,
@@ -466,8 +468,14 @@ export function MapCanvas({
 
       const readyForMode = () => {
         const requested = sourceRequestedUrlRef.current.get(source);
+        const token = sourceRequestTokenRef.current.get(source) ?? 0;
         const eventCount = sourceEventCountRef.current.get(source) ?? 0;
-        return map.isSourceLoaded(source) && requested === expectedUrl && eventCount > minEventCount;
+        return (
+          map.isSourceLoaded(source) &&
+          requested === expectedUrl &&
+          token === expectedRequestToken &&
+          eventCount > minEventCount
+        );
       };
 
       const finishReadyAfterRender = () => {
@@ -531,11 +539,14 @@ export function MapCanvas({
       const sourceB = sourceId("b");
       sourceRequestedUrlRef.current.set(sourceA, tileUrl);
       sourceRequestedUrlRef.current.set(sourceB, tileUrl);
+      sourceRequestTokenRef.current.set(sourceA, 0);
+      sourceRequestTokenRef.current.set(sourceB, 0);
       sourceEventCountRef.current.set(sourceA, 0);
       sourceEventCountRef.current.set(sourceB, 0);
       for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
         const prefetchSource = prefetchSourceId(idx);
         sourceRequestedUrlRef.current.set(prefetchSource, tileUrl);
+        sourceRequestTokenRef.current.set(prefetchSource, 0);
         sourceEventCountRef.current.set(prefetchSource, 0);
       }
     });
@@ -616,6 +627,7 @@ export function MapCanvas({
         map,
         source,
         tileUrl,
+        sourceRequestTokenRef.current.get(source) ?? 0,
         -1,
         mode,
         () => {
@@ -642,10 +654,13 @@ export function MapCanvas({
 
     onFrameLoadingChange?.(tileUrl, true);
     inactiveSource.setTiles([tileUrl]);
-    sourceRequestedUrlRef.current.set(sourceId(inactiveBuffer), tileUrl);
-    const swapSourceEventBaseline = sourceEventCountRef.current.get(sourceId(inactiveBuffer)) ?? 0;
+    const inactiveSourceId = sourceId(inactiveBuffer);
+    sourceRequestedUrlRef.current.set(inactiveSourceId, tileUrl);
+    const nextSwapRequestToken = (sourceRequestTokenRef.current.get(inactiveSourceId) ?? 0) + 1;
+    sourceRequestTokenRef.current.set(inactiveSourceId, nextSwapRequestToken);
+    const swapSourceEventBaseline = sourceEventCountRef.current.get(inactiveSourceId) ?? 0;
     const token = ++swapTokenRef.current;
-    console.debug("[map] swap start", { sourceId: sourceId(inactiveBuffer), tileUrl, mode, token });
+    console.debug("[map] swap start", { sourceId: inactiveSourceId, tileUrl, mode, token });
 
     const finishSwap = (skipSettleNotify = false) => {
       if (token !== swapTokenRef.current) {
@@ -670,12 +685,12 @@ export function MapCanvas({
       }
     };
 
-    const readyCleanup = waitForSourceReady(map, sourceId(inactiveBuffer), tileUrl, swapSourceEventBaseline, mode, finishSwap, () => {
+    const readyCleanup = waitForSourceReady(map, inactiveSourceId, tileUrl, nextSwapRequestToken, swapSourceEventBaseline, mode, finishSwap, () => {
       if (token !== swapTokenRef.current) {
         return;
       }
       onFrameLoadingChange?.(tileUrl, true);
-      console.warn("[map] swap timeout", { sourceId: sourceId(inactiveBuffer), tileUrl, token, mode });
+      console.warn("[map] swap timeout", { sourceId: inactiveSourceId, tileUrl, token, mode });
     });
 
     return () => {
@@ -725,13 +740,17 @@ export function MapCanvas({
 
       prefetchUrlsRef.current[idx] = url;
       source.setTiles([url]);
-      sourceRequestedUrlRef.current.set(prefetchSourceId(idx + 1), url);
-      const prefetchEventBaseline = sourceEventCountRef.current.get(prefetchSourceId(idx + 1)) ?? 0;
+      const prefetchSource = prefetchSourceId(idx + 1);
+      sourceRequestedUrlRef.current.set(prefetchSource, url);
+      const nextPrefetchRequestToken = (sourceRequestTokenRef.current.get(prefetchSource) ?? 0) + 1;
+      sourceRequestTokenRef.current.set(prefetchSource, nextPrefetchRequestToken);
+      const prefetchEventBaseline = sourceEventCountRef.current.get(prefetchSource) ?? 0;
 
       const cleanup = waitForSourceReady(
         map,
-        prefetchSourceId(idx + 1),
+        prefetchSource,
         url,
+        nextPrefetchRequestToken,
         prefetchEventBaseline,
         "scrub",
         () => {

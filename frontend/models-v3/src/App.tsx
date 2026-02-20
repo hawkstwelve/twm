@@ -258,6 +258,7 @@ export default function App() {
   const [forecastHour, setForecastHour] = useState(0);
   const [targetForecastHour, setTargetForecastHour] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isScrubbing, setIsScrubbing] = useState(false);
   const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -334,16 +335,21 @@ export default function App() {
 
   const prefetchTileUrls = useMemo(() => {
     if (frameHours.length < 2) return [];
+
+    const prefetchCount = isPlaying ? 4 : isScrubbing ? 2 : 0;
+    if (prefetchCount <= 0) {
+      return [];
+    }
+
     const currentIndex = frameHours.indexOf(forecastHour);
     const start = currentIndex >= 0 ? currentIndex : 0;
-    const prefetchCount = 2;
     const nextHours = Array.from({ length: prefetchCount }, (_, idx) => {
       const i = start + idx + 1;
       return i >= frameHours.length ? Number.NaN : frameHours[i];
     });
     const dedup = Array.from(new Set(nextHours.filter((fh) => Number.isFinite(fh) && fh !== forecastHour)));
     return dedup.map((fh) => tileUrlForHour(fh));
-  }, [frameHours, forecastHour, tileUrlForHour]);
+  }, [frameHours, forecastHour, tileUrlForHour, isPlaying, isScrubbing]);
 
   const effectiveRunId = currentFrame?.run ?? (run !== "latest" ? run : latestRunId);
   const runDateTimeISO = runIdToIso(effectiveRunId);
@@ -670,6 +676,12 @@ export default function App() {
   }, [isPlaying, clearUnavailableTimer]);
 
   useEffect(() => {
+    if (isPlaying && isScrubbing) {
+      setIsScrubbing(false);
+    }
+  }, [isPlaying, isScrubbing]);
+
+  useEffect(() => {
     return () => {
       clearUnavailableTimer();
     };
@@ -763,6 +775,7 @@ export default function App() {
           forecastHour={forecastHour}
           availableFrames={frameHours}
           onForecastHourChange={setTargetForecastHour}
+          onScrubStateChange={setIsScrubbing}
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
           runDateTimeISO={runDateTimeISO}
