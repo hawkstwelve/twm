@@ -22,8 +22,9 @@ import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
 
 const AUTOPLAY_TICK_MS = 400;
-const AUTOPLAY_MAX_HOLD_MS = 1000;
-const FRAME_UNAVAILABLE_BADGE_MS = 900;
+const AUTOPLAY_READY_AHEAD = 2;
+const AUTOPLAY_SKIP_WINDOW = 3;
+const FRAME_STATUS_BADGE_MS = 900;
 const READY_URL_TTL_MS = 30_000;
 const READY_URL_LIMIT = 160;
 
@@ -268,9 +269,8 @@ export default function App() {
   const [showZoomHint, setShowZoomHint] = useState(false);
   const latestTileUrlRef = useRef<string>("");
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
-  const autoplayHoldMsRef = useRef(0);
-  const unavailableTimerRef = useRef<number | null>(null);
-  const pendingAdvanceHourRef = useRef<number | null>(null);
+  const autoplayPrimedRef = useRef(false);
+  const frameStatusTimerRef = useRef<number | null>(null);
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -336,7 +336,8 @@ export default function App() {
   const prefetchTileUrls = useMemo(() => {
     if (frameHours.length < 2) return [];
 
-    const prefetchCount = isPlaying ? 4 : isScrubbing ? 2 : 0;
+    const isRadarLike = variable.includes("radar") || variable.includes("ptype");
+    const prefetchCount = isPlaying ? (isRadarLike ? 6 : 4) : isScrubbing ? 2 : 0;
     if (prefetchCount <= 0) {
       return [];
     }
@@ -426,26 +427,23 @@ export default function App() {
     setMapLoadingTileUrl((current) => (current === loadingTileUrl ? null : current));
   }, []);
 
-  const clearUnavailableTimer = useCallback(() => {
-    if (unavailableTimerRef.current !== null) {
-      window.clearTimeout(unavailableTimerRef.current);
-      unavailableTimerRef.current = null;
+  const clearFrameStatusTimer = useCallback(() => {
+    if (frameStatusTimerRef.current !== null) {
+      window.clearTimeout(frameStatusTimerRef.current);
+      frameStatusTimerRef.current = null;
     }
-    pendingAdvanceHourRef.current = null;
+    setFrameStatusMessage(null);
   }, []);
 
-  const scheduleUnavailableAdvance = useCallback((missingHour: number, nextAvailableHour: number) => {
-    if (pendingAdvanceHourRef.current !== null) {
-      return;
+  const showTransientFrameStatus = useCallback((message: string) => {
+    setFrameStatusMessage(message);
+    if (frameStatusTimerRef.current !== null) {
+      window.clearTimeout(frameStatusTimerRef.current);
     }
-    pendingAdvanceHourRef.current = nextAvailableHour;
-    setFrameStatusMessage(`Frame unavailable (FH ${missingHour})`);
-    unavailableTimerRef.current = window.setTimeout(() => {
-      unavailableTimerRef.current = null;
-      pendingAdvanceHourRef.current = null;
+    frameStatusTimerRef.current = window.setTimeout(() => {
+      frameStatusTimerRef.current = null;
       setFrameStatusMessage(null);
-      setTargetForecastHour(nextAvailableHour);
-    }, FRAME_UNAVAILABLE_BADGE_MS);
+    }, FRAME_STATUS_BADGE_MS);
   }, []);
 
   useEffect(() => {
@@ -625,41 +623,50 @@ export default function App() {
         setIsPlaying(false);
         return;
       }
-      const nextHour = frameHours[nextIndex];
-      const nextUrl = tileUrlForHour(nextHour);
-      if (isTileReady(nextUrl)) {
-        autoplayHoldMsRef.current = 0;
-        clearUnavailableTimer();
-        setFrameStatusMessage(null);
-        setTargetForecastHour(nextHour);
-        return;
-      }
 
-      autoplayHoldMsRef.current += AUTOPLAY_TICK_MS;
-      if (autoplayHoldMsRef.current < AUTOPLAY_MAX_HOLD_MS) {
-        return;
-      }
-
-      // Hold current frame until the exact next frame is ready.
-      autoplayHoldMsRef.current = AUTOPLAY_MAX_HOLD_MS;
-
-      const searchDepth = Math.min(frameHours.length - 1, 6);
-      for (let step = 2; step <= searchDepth; step += 1) {
-        const candidateIndex = currentIndex + step;
-        if (candidateIndex >= frameHours.length) {
-          break;
+      if (!autoplayPrimedRef.current) {
+        let primed = true;
+        const readyAheadEnd = Math.min(frameHours.length - 1, currentIndex + AUTOPLAY_READY_AHEAD);
+        for (let idx = currentIndex + 1; idx <= readyAheadEnd; idx += 1) {
+          const aheadHour = frameHours[idx];
+          if (!isTileReady(tileUrlForHour(aheadHour))) {
+            primed = false;
+            break;
+          }
         }
-        const candidateHour = frameHours[candidateIndex];
-        const candidateUrl = tileUrlForHour(candidateHour);
-        if (isTileReady(candidateUrl)) {
-          scheduleUnavailableAdvance(nextHour, candidateHour);
+        if (!primed) {
           return;
         }
+        autoplayPrimedRef.current = true;
       }
+
+      let chosenHour: number | null = null;
+      let chosenStep = 0;
+      const maxStep = Math.min(AUTOPLAY_SKIP_WINDOW, frameHours.length - 1 - currentIndex);
+      for (let step = 1; step <= maxStep; step += 1) {
+        const candidateHour = frameHours[currentIndex + step];
+        const candidateUrl = tileUrlForHour(candidateHour);
+        if (isTileReady(candidateUrl)) {
+          chosenHour = candidateHour;
+          chosenStep = step;
+          break;
+        }
+      }
+
+      if (chosenHour !== null) {
+        if (chosenStep > 1) {
+          const skippedHour = frameHours[nextIndex];
+          showTransientFrameStatus(`Frame unavailable (FH ${skippedHour})`);
+        }
+        setTargetForecastHour(chosenHour);
+        return;
+      }
+
+      autoplayPrimedRef.current = false;
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, clearUnavailableTimer, scheduleUnavailableAdvance]);
+  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, showTransientFrameStatus]);
 
   useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
@@ -669,11 +676,10 @@ export default function App() {
 
   useEffect(() => {
     if (!isPlaying) {
-      autoplayHoldMsRef.current = 0;
-      clearUnavailableTimer();
-      setFrameStatusMessage(null);
+      autoplayPrimedRef.current = false;
+      clearFrameStatusTimer();
     }
-  }, [isPlaying, clearUnavailableTimer]);
+  }, [isPlaying, clearFrameStatusTimer]);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {
@@ -683,9 +689,9 @@ export default function App() {
 
   useEffect(() => {
     return () => {
-      clearUnavailableTimer();
+      clearFrameStatusTimer();
     };
-  }, [clearUnavailableTimer]);
+  }, [clearFrameStatusTimer]);
 
   useEffect(() => {
     if (frameHours.length === 0) {

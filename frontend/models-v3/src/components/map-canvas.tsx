@@ -674,7 +674,11 @@ export function MapCanvas({
       activeBufferRef.current = inactiveBuffer;
       activeTileUrlRef.current = tileUrl;
 
-      if (crossfade) {
+      if (mode === "scrub") {
+        cancelCrossfade();
+        setLayerOpacity(map, layerId(previousActive), HIDDEN_SWAP_BUFFER_OPACITY);
+        setLayerOpacity(map, layerId(inactiveBuffer), opacity);
+      } else if (crossfade) {
         runCrossfade(map, previousActive, inactiveBuffer, opacity);
       } else {
         cancelCrossfade();
