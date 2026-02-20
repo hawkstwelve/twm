@@ -385,9 +385,16 @@ export function MapCanvas({
           return;
         }
 
-        // Leave the old buffer at a tiny opacity so its tiles remain warm.
-        setLayerOpacity(map, layerId(fromBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
         setLayerOpacity(map, layerId(toBuffer), targetOpacity);
+        // Defer old-buffer hide by 2 paint ticks to avoid white flash.
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            if (token !== fadeTokenRef.current) {
+              return;
+            }
+            setLayerOpacity(map, layerId(fromBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+          });
+        });
 
         fadeRafRef.current = null;
       };
@@ -417,8 +424,16 @@ export function MapCanvas({
         if (progress < 1) {
           window.requestAnimationFrame(tick);
         } else {
-          // Once new layer is fully visible, hide old layer
-          setLayerOpacity(map, layerId(fromBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+          // Once new layer is fully visible, defer old-layer hide by 2 paint ticks
+          // to avoid a brief basemap flash during rapid swaps.
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+              if (token !== swapTokenRef.current) {
+                return;
+              }
+              setLayerOpacity(map, layerId(fromBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+            });
+          });
         }
       };
       
@@ -676,8 +691,19 @@ export function MapCanvas({
 
       if (mode === "scrub") {
         cancelCrossfade();
-        setLayerOpacity(map, layerId(previousActive), HIDDEN_SWAP_BUFFER_OPACITY);
+        // Anti-flash scrub swap: keep previous frame visible for extra paint ticks
+        // while the next frame is promoted to full opacity, then hide previous.
+        // This avoids a brief basemap-white flash between frames.
+        setLayerOpacity(map, layerId(previousActive), opacity);
         setLayerOpacity(map, layerId(inactiveBuffer), opacity);
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            if (token !== swapTokenRef.current) {
+              return;
+            }
+            setLayerOpacity(map, layerId(previousActive), HIDDEN_SWAP_BUFFER_OPACITY);
+          });
+        });
       } else if (crossfade) {
         runCrossfade(map, previousActive, inactiveBuffer, opacity);
       } else {
