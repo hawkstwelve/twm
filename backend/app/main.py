@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -16,6 +17,7 @@ import rasterio
 from rasterio.windows import Window
 from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pyproj import Transformer
 
 logger = logging.getLogger(__name__)
@@ -186,14 +188,20 @@ def list_runs(model: str, region: str):
     """List available published runs for a model/region, newest first."""
     d = PUBLISHED_ROOT / model / region
     if not d.is_dir():
-        return []
+        return JSONResponse(content=[], headers={"Cache-Control": "public, max-age=60"})
 
-    runs = [
-        child.name
-        for child in d.iterdir()
-        if child.is_dir() and _RUN_ID_RE.match(child.name)
-    ]
-    return sorted(set(runs), reverse=True)  # newest first
+    runs = sorted(
+        {child.name for child in d.iterdir() if child.is_dir() and _RUN_ID_RE.match(child.name)},
+        reverse=True,
+    )
+    etag = hashlib.md5(json.dumps(runs).encode()).hexdigest()[:8]
+    return JSONResponse(
+        content=runs,
+        headers={
+            "Cache-Control": "public, max-age=60",
+            "ETag": f'"{etag}"',
+        },
+    )
 
 
 @app.get("/api/v3/{model}/{region}/{run}/vars")
@@ -265,7 +273,22 @@ def list_frames(model: str, region: str, run: str, var: str):
             })
 
     frames.sort(key=lambda x: x["fh"])
-    return frames
+
+    # Immutable cache for resolved runs; short TTL + ETag for "latest" requests.
+    if _RUN_ID_RE.match(run):
+        return JSONResponse(
+            content=frames,
+            headers={"Cache-Control": "public, max-age=31536000, immutable"},
+        )
+    else:
+        etag = hashlib.md5(json.dumps(frames, default=str).encode()).hexdigest()[:8]
+        return JSONResponse(
+            content=frames,
+            headers={
+                "Cache-Control": "public, max-age=60",
+                "ETag": f'"{etag}"',
+            },
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +370,7 @@ def sample(
         if row < 0 or row >= ds.height or col < 0 or col >= ds.width:
             return Response(
                 status_code=204,
-                headers={"Cache-Control": "public, max-age=15"},
+                headers={"Cache-Control": "private, max-age=300"},
             )
 
         # Read single pixel
@@ -359,7 +382,7 @@ def sample(
         if np.isnan(value):
             return Response(
                 status_code=204,
-                headers={"Cache-Control": "public, max-age=15"},
+                headers={"Cache-Control": "private, max-age=300"},
             )
 
         # Round to reasonable precision
@@ -370,7 +393,7 @@ def sample(
         units = sidecar.get("units", "") if sidecar else ""
         valid_time = sidecar.get("valid_time", "") if sidecar else ""
 
-        return {
+        payload = {
             "value": value,
             "units": units,
             "model": model,
@@ -380,6 +403,10 @@ def sample(
             "lat": lat,
             "lon": lon,
         }
+        return JSONResponse(
+            content=payload,
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
 
     except Exception:
         logger.exception("Sample query failed: %s/%s/%s/%s/fh%03d @ (%.4f, %.4f)",
