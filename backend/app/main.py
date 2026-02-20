@@ -15,7 +15,7 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from rasterio.windows import Window
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyproj import Transformer
@@ -35,6 +35,37 @@ MODEL_NAMES = {
 
 # Regex to match run IDs like 20260217_20z
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
+
+
+# ---------------------------------------------------------------------------
+# Conditional GET helpers
+# ---------------------------------------------------------------------------
+
+def _if_none_match_values(header_value: str) -> list[str]:
+    return [v.strip() for v in header_value.split(",") if v.strip()]
+
+
+def _etag_matches(if_none_match: str | None, etag: str) -> bool:
+    if not if_none_match:
+        return False
+    vals = _if_none_match_values(if_none_match)
+    if "*" in vals:
+        return True
+    return etag in vals
+
+
+def _maybe_304(request: Request, *, etag: str, cache_control: str) -> Response | None:
+    inm = request.headers.get("if-none-match")
+    if _etag_matches(inm, etag):
+        return Response(
+            status_code=304,
+            headers={
+                "ETag": etag,
+                "Cache-Control": cache_control,
+            },
+        )
+    return None
+
 
 app = FastAPI(title="TWF V3 API", version="1.0.0")
 
@@ -184,7 +215,7 @@ def list_regions(model: str):
 
 
 @app.get("/api/v3/{model}/{region}/runs")
-def list_runs(model: str, region: str):
+def list_runs(request: Request, model: str, region: str):
     """List available published runs for a model/region, newest first."""
     d = PUBLISHED_ROOT / model / region
     if not d.is_dir():
@@ -194,12 +225,19 @@ def list_runs(model: str, region: str):
         {child.name for child in d.iterdir() if child.is_dir() and _RUN_ID_RE.match(child.name)},
         reverse=True,
     )
-    etag = hashlib.md5(json.dumps(runs).encode()).hexdigest()[:8]
+    cache_control = "public, max-age=60"
+    etag_value = hashlib.md5(json.dumps(runs).encode()).hexdigest()[:8]
+    etag_header = f'"{etag_value}"'
+
+    r304 = _maybe_304(request, etag=etag_header, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+
     return JSONResponse(
         content=runs,
         headers={
-            "Cache-Control": "public, max-age=60",
-            "ETag": f'"{etag}"',
+            "Cache-Control": cache_control,
+            "ETag": etag_header,
         },
     )
 
@@ -232,7 +270,7 @@ def list_vars(model: str, region: str, run: str):
 
 
 @app.get("/api/v3/{model}/{region}/{run}/{var}/frames")
-def list_frames(model: str, region: str, run: str, var: str):
+def list_frames(request: Request, model: str, region: str, run: str, var: str):
     """List available frames for a model/region/run/variable."""
     resolved = _resolve_run(model, region, run)
     if resolved is None:
@@ -281,12 +319,21 @@ def list_frames(model: str, region: str, run: str, var: str):
             headers={"Cache-Control": "public, max-age=31536000, immutable"},
         )
     else:
-        etag = hashlib.md5(json.dumps(frames, default=str).encode()).hexdigest()[:8]
+        cache_control = "public, max-age=60"
+        etag_value = hashlib.md5(
+            json.dumps(frames, default=str).encode()
+        ).hexdigest()[:8]
+        etag_header = f'"{etag_value}"'
+
+        r304 = _maybe_304(request, etag=etag_header, cache_control=cache_control)
+        if r304 is not None:
+            return r304
+
         return JSONResponse(
             content=frames,
             headers={
-                "Cache-Control": "public, max-age=60",
-                "ETag": f'"{etag}"',
+                "Cache-Control": cache_control,
+                "ETag": etag_header,
             },
         )
 
