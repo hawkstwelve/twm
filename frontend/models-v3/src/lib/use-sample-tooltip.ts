@@ -101,7 +101,9 @@ export function useSampleTooltip(ctx: SampleContext) {
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
         const gen = ++genRef.current;
-        const key = cacheKey(ctx.model, ctx.region, ctx.run, ctx.varId, ctx.fh, lat, lon);
+        const roundedLat = roundCoord(lat);
+        const roundedLon = roundCoord(lon);
+        const key = cacheKey(ctx.model, ctx.region, ctx.run, ctx.varId, ctx.fh, roundedLat, roundedLon);
 
         // Check LRU cache
         const cached = cacheRef.current.get(key);
@@ -122,8 +124,8 @@ export function useSampleTooltip(ctx: SampleContext) {
           run: ctx.run,
           var: ctx.varId,
           fh: ctx.fh,
-          lat,
-          lon,
+          lat: roundedLat,
+          lon: roundedLon,
         })
           .then((result) => {
             cacheRef.current.set(key, result);
