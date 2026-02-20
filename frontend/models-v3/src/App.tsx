@@ -343,8 +343,7 @@ export default function App() {
   const prefetchTileUrls = useMemo(() => {
     if (frameHours.length < 2) return [];
 
-    const isRadarLike = variable.includes("radar") || variable.includes("ptype");
-    const prefetchCount = isPlaying ? (isRadarLike ? 6 : 4) : isScrubbing ? 2 : 0;
+    const prefetchCount = isPlaying ? 4 : isScrubbing ? 2 : 0;
     if (prefetchCount <= 0) {
       return [];
     }
