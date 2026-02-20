@@ -589,7 +589,7 @@ the site to forum users, regardless of their impact tier.
 |---|---|---|---|---|---|---|
 | HIGH | H1-pre | Fix LRU key/URL mismatch in fetchSample | `use-sample-tooltip.ts` | 5 min | — | `[x]` |
 | HIGH | H1 | API cache headers | `backend/app/main.py` | ~30 min | ✅ | `[x]` |
-| HIGH | H2 | Parallel API fetches on mount | `src/App.tsx` | ~1 hr | — | `[ ]` |
+| HIGH | H2 | Parallel API fetches on mount | `src/App.tsx` | ~1 hr | — | `[x]` |
 | HIGH | H3 | Cloudflare CDN for tile serving | Infrastructure / DNS | ~1 hr | ✅ | `[ ]` |
 | MEDIUM | M1 | Vite `manualChunks` for maplibre-gl | `vite.config.ts` | 5 min | — | `[ ]` |
 | MEDIUM | M2 | Fix prefetch count mismatch | `App.tsx`, `map-canvas.tsx` | 10 min | — | `[ ]` |

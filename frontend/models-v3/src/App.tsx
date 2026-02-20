@@ -271,6 +271,10 @@ export default function App() {
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
+  // Tracks current selector values so the async fast-path callback can guard against
+  // stale-closure issues (updated every render, not inside an effect).
+  const activeSelectorRef = useRef({ model, region, variable, run });
+  activeSelectorRef.current = { model, region, variable, run };
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -445,6 +449,85 @@ export default function App() {
       setFrameStatusMessage(null);
     }, FRAME_STATUS_BADGE_MS);
   }, []);
+
+  // ── Fast-path: fire all discovery fetches in parallel on mount ─────────────────────────────
+  // On a 50 ms RTT connection the standard sequential waterfall (models → regions →
+  // runs + vars → frames) costs 200-400 ms before MapLibre can start loading tiles.
+  // Here we fire all five fetches simultaneously. If they all succeed and the user has
+  // not yet touched any selector, we apply the results in one batched update and skip
+  // the waterfall entirely. If any fetch fails we bail out silently and let the
+  // sequential waterfall effects (which run in parallel on mount) finish normally.
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([
+      fetchModels(),
+      fetchRegions(DEFAULTS.model),
+      fetchRuns(DEFAULTS.model, DEFAULTS.region),
+      fetchVars(DEFAULTS.model, DEFAULTS.region, DEFAULTS.run),
+      fetchFrames(DEFAULTS.model, DEFAULTS.region, DEFAULTS.run, DEFAULTS.variable),
+    ])
+      .then(([modelsData, regionsData, runsData, varsData, framesData]) => {
+        if (cancelled) return;
+
+        // If the user changed a selector while requests were in-flight, bail out and
+        // let the sequential waterfall (still running concurrently) handle things.
+        const s = activeSelectorRef.current;
+        if (
+          s.model !== DEFAULTS.model ||
+          s.region !== DEFAULTS.region ||
+          s.variable !== DEFAULTS.variable ||
+          s.run !== DEFAULTS.run
+        ) {
+          return;
+        }
+
+        // Batch-apply all discovery state in one synchronous pass.
+        const modelOptions = modelsData.map((item) => ({
+          value: item.id,
+          label: item.name || item.id,
+        }));
+        const modelIds = modelOptions.map((opt) => opt.value);
+        setModels(modelOptions);
+        setModel(pickPreferred(modelIds, DEFAULTS.model));
+
+        const regionOptions = regionsData.map((id) => ({
+          value: id,
+          label: makeRegionLabel(id),
+        }));
+        const regionIds = regionOptions.map((opt) => opt.value);
+        setRegions(regionOptions);
+        setRegion((prev) => (regionIds.includes(prev) ? prev : pickPreferred(regionIds, DEFAULTS.region)));
+
+        setRuns(runsData);
+        setRun(DEFAULTS.run);
+
+        const normalizedVars = normalizeVarRows(varsData);
+        const variableOptions = normalizedVars.map((entry) => ({
+          value: entry.id,
+          label: makeVariableLabel(entry.id, entry.displayName),
+        }));
+        const variableIds = variableOptions.map((opt) => opt.value);
+        setVariables(variableOptions);
+        setVariable((prev) => (variableIds.includes(prev) ? prev : pickPreferred(variableIds, DEFAULTS.variable)));
+
+        setFrameRows(framesData);
+        const frames = framesData.map((row) => Number(row.fh)).filter(Number.isFinite);
+        setForecastHour((prev) => nearestFrame(frames, prev));
+        setTargetForecastHour((prev) => nearestFrame(frames, prev));
+
+        // Mark loading done. loadModels.finally() will also call setLoading(false)
+        // concurrently — the duplicate call is harmless.
+        setLoading(false);
+      })
+      .catch(() => {
+        // Fast-path failed silently. The sequential waterfall handles recovery.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false;
