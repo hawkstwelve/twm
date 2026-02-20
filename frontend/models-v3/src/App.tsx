@@ -275,6 +275,9 @@ export default function App() {
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
   activeSelectorRef.current = { model, region, variable, run };
+  // Set to true when fast-path successfully bootstraps all state. Waterfall effects
+  // check this and bail out early to avoid duplicate fetches.
+  const bootstrappedRef = useRef(false);
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -516,8 +519,9 @@ export default function App() {
         setForecastHour((prev) => nearestFrame(frames, prev));
         setTargetForecastHour((prev) => nearestFrame(frames, prev));
 
-        // Mark loading done. loadModels.finally() will also call setLoading(false)
-        // concurrently — the duplicate call is harmless.
+        // Signal that all discovery state has been committed — waterfall effects will
+        // see this flag and skip their own fetches.
+        bootstrappedRef.current = true;
         setLoading(false);
       })
       .catch(() => {
@@ -530,6 +534,7 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (bootstrappedRef.current) return;
     let cancelled = false;
 
     async function loadModels() {
@@ -560,6 +565,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (bootstrappedRef.current) return;
     if (!model) return;
     let cancelled = false;
 
@@ -586,6 +592,7 @@ export default function App() {
   }, [model]);
 
   useEffect(() => {
+    if (bootstrappedRef.current) return;
     if (!model || !region) return;
     let cancelled = false;
 
@@ -632,6 +639,7 @@ export default function App() {
   }, [model, region]);
 
   useEffect(() => {
+    if (bootstrappedRef.current) return;
     if (!model || !region || !variable) return;
     let cancelled = false;
 
