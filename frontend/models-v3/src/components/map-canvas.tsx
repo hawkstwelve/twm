@@ -30,16 +30,19 @@ const SCRUB_SWAP_TIMEOUT_MS = 650;
 const AUTOPLAY_SWAP_TIMEOUT_MS = 1500;
 const SETTLE_TIMEOUT_MS = 1200;
 const CONTINUOUS_CROSSFADE_MS = 120;
-const MICRO_CROSSFADE_MS = 100; // Keep within 80–150ms target window
+const MICRO_CROSSFADE_MS = 140;
 const PREFETCH_BUFFER_COUNT = 4;
 const OVERLAY_RASTER_CONTRAST = 0.08;
 const OVERLAY_RASTER_SATURATION = 0.08;
 const OVERLAY_RASTER_BRIGHTNESS_MIN = 0.02;
 const OVERLAY_RASTER_BRIGHTNESS_MAX = 0.98;
 
-// Keep hidden raster layers at a tiny opacity so MapLibre still requests/renders their tiles.
-// This helps avoid a one-frame "basemap flash" when swapping buffers.
-const HIDDEN_OPACITY = 0.001;
+// Keep inactive swap buffer warm at tiny opacity to avoid one-frame basemap flash.
+const HIDDEN_SWAP_BUFFER_OPACITY = 0.001;
+// Keep prefetch layers fully hidden by default to reduce overdraw/compositing cost.
+// Prefetch layers are only warmed while an active prefetch URL is being requested.
+const HIDDEN_PREFETCH_OPACITY = 0;
+const WARM_PREFETCH_OPACITY = 0.001;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -383,14 +386,14 @@ export function MapCanvas({
         }
 
         // Leave the old buffer at a tiny opacity so its tiles remain warm.
-        setLayerOpacity(map, layerId(fromBuffer), HIDDEN_OPACITY);
+        setLayerOpacity(map, layerId(fromBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
         setLayerOpacity(map, layerId(toBuffer), targetOpacity);
 
         fadeRafRef.current = null;
       };
 
       setLayerOpacity(map, layerId(fromBuffer), targetOpacity);
-      setLayerOpacity(map, layerId(toBuffer), HIDDEN_OPACITY);
+      setLayerOpacity(map, layerId(toBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
       fadeRafRef.current = window.requestAnimationFrame(tick);
     },
     [cancelCrossfade, setLayerOpacity]
@@ -415,7 +418,7 @@ export function MapCanvas({
           window.requestAnimationFrame(tick);
         } else {
           // Once new layer is fully visible, hide old layer
-          setLayerOpacity(map, layerId(fromBuffer), HIDDEN_OPACITY);
+          setLayerOpacity(map, layerId(fromBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
         }
       };
       
@@ -731,6 +734,7 @@ export function MapCanvas({
 
       if (!url) {
         prefetchUrlsRef.current[idx] = "";
+        setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
         return;
       }
 
@@ -739,6 +743,7 @@ export function MapCanvas({
       }
 
       prefetchUrlsRef.current[idx] = url;
+  setLayerOpacity(map, prefetchLayerId(idx + 1), WARM_PREFETCH_OPACITY);
       source.setTiles([url]);
       const prefetchSource = prefetchSourceId(idx + 1);
       sourceRequestedUrlRef.current.set(prefetchSource, url);
@@ -763,6 +768,7 @@ export function MapCanvas({
           // Important: App.tsx autoplay waits on URLs being marked ready.
           // Prefetch sources should contribute to that readiness cache.
           onTileReady?.(url);
+          setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
         },
         () => {
           if (token !== prefetchTokenRef.current) {
@@ -778,6 +784,7 @@ export function MapCanvas({
             tileUrl: url,
             token,
           });
+          setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
         }
       );
 
@@ -805,9 +812,9 @@ export function MapCanvas({
     }
 
     setLayerOpacity(map, layerId(activeBuffer), opacity);
-    setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_OPACITY);
+    setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
-      setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_OPACITY);
+      setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
     }
   }, [opacity, isLoaded, crossfade, cancelCrossfade, setLayerOpacity]);
 
