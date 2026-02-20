@@ -281,7 +281,7 @@ export default function App() {
   }, [frameRows]);
 
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
-  const latestRunId = frameRows[0]?.run ?? runs[0] ?? null;
+  const latestRunId = runs[0] ?? frameRows[0]?.run ?? null;
   const resolvedRunForRequests = run === "latest" ? (latestRunId ?? "latest") : run;
 
   const runOptions = useMemo<Option[]>(() => {

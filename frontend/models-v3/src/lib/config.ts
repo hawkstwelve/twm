@@ -1,21 +1,6 @@
-const isLocalDevHost =
-  window.location.hostname === "127.0.0.1" ||
-  window.location.hostname === "localhost";
+export const API_BASE = "https://api.sodakweather.com/api/v3";
 
-const isLocalDevPort =
-  window.location.port === "5173" ||
-  window.location.port === "4173" ||
-  window.location.port === "8080";
-
-export const API_BASE =
-  isLocalDevHost && isLocalDevPort
-    ? "http://127.0.0.1:8200/api/v3"
-    : "https://api.sodakweather.com/api/v3";
-
-export const TILES_BASE =
-  isLocalDevHost && isLocalDevPort
-    ? "http://127.0.0.1:8201"
-    : "https://api.sodakweather.com";
+export const TILES_BASE = "https://api.sodakweather.com";
 
 export const DEFAULTS = {
   model: "hrrr",
