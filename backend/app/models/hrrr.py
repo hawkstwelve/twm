@@ -100,7 +100,7 @@ HRRR_VARS: dict[str, VarSpec] = {
             },
         ),
         primary=True,
-        kind="discrete",
+        kind="continuous",
         units="in",
     ),
     "wspd10m": VarSpec(

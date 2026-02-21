@@ -114,6 +114,14 @@ def _colorize_continuous(
     # Zero out alpha for nodata pixels
     rgba_hwc[~finite_mask, 3] = 0
 
+    transparent_below_min = spec.get("transparent_below_min")
+    if transparent_below_min is not None:
+        try:
+            min_visible = float(transparent_below_min)
+            rgba_hwc[finite_mask & (data < min_visible), 3] = 0
+        except (TypeError, ValueError):
+            pass
+
     # Transpose to band-first (4, H, W) for rasterio
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
 

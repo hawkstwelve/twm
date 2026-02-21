@@ -280,6 +280,9 @@ snow_levels = [
     40.0, 41.0, 42.0, 43.0, 44.0, 45.0, 46.0, 47.0, 48.0,
 ]
 
+SNOWFALL_TOTAL_COLOR_ANCHORS = list(zip(snow_levels, snow_colors))
+SNOWFALL_TOTAL_RANGE = (0.0, 48.0)
+
 # 10m wind speed (mph) continuous palette anchors
 WSPD10M_COLOR_ANCHORS = [
     (0, "#ffffff"), (4, "#e1e1e1"), (6, "#d1d1d1"), (8, "#b3b3b3"),
@@ -383,13 +386,14 @@ VAR_SPECS = {
         "ptype_levels": PRECIP_PTYPE_LEVELS_BY_TYPE,
     },
     "snowfall_total": {
-        "type": "discrete",
+        "type": "continuous",
         "units": "in",
-        "levels": snow_levels,
-        "colors": snow_colors,
+        "range": SNOWFALL_TOTAL_RANGE,
+        "anchors": SNOWFALL_TOTAL_COLOR_ANCHORS,
         "display_name": "Total Snowfall (10:1)",
         "legend_title": "Total Snowfall (in)",
         "allow_dry_frame": True,
+        "transparent_below_min": 0.1,
     },
     "tmp2m": {
         "type": "continuous",
