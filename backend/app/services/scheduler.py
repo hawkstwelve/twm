@@ -270,7 +270,15 @@ def _frame_artifacts_exist(
     rgba = _frame_rgba_path(data_root, model, region, run_id, var_id, fh)
     val = _frame_value_path(data_root, model, region, run_id, var_id, fh)
     side = _frame_sidecar_path(data_root, model, region, run_id, var_id, fh)
-    return rgba.exists() and val.exists() and side.exists()
+
+    def _safe_exists(path: Path) -> bool:
+        try:
+            return path.exists()
+        except PermissionError:
+            logger.warning("Permission denied while checking artifact path: %s", path)
+            return False
+
+    return _safe_exists(rgba) and _safe_exists(val) and _safe_exists(side)
 
 
 def _build_one(
