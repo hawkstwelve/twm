@@ -122,13 +122,6 @@ def _colorize_continuous(
         except (TypeError, ValueError):
             pass
 
-    _apply_nonlinear_alpha(
-        rgba_hwc,
-        finite_mask,
-        spec,
-        strength=np.clip(scale, 0.0, 1.0),
-    )
-
     # Transpose to band-first (4, H, W) for rasterio
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
 
@@ -179,16 +172,6 @@ def _colorize_discrete(
     else:
         valid_mask = finite_mask
     rgba_hwc[~valid_mask, 3] = 0
-
-    strength = np.zeros(data.shape, dtype=np.float32)
-    if len(colors) > 1:
-        strength = bins.astype(np.float32) / float(len(colors) - 1)
-    _apply_nonlinear_alpha(
-        rgba_hwc,
-        valid_mask,
-        spec,
-        strength=np.clip(strength, 0.0, 1.0),
-    )
 
     # Band-first
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
@@ -243,40 +226,6 @@ def _colorize_indexed(
 
     meta = _build_meta(var_key, spec, data, finite_mask)
     return rgba, meta
-
-
-def _apply_nonlinear_alpha(
-    rgba_hwc: np.ndarray,
-    valid_mask: np.ndarray,
-    spec: dict[str, Any],
-    *,
-    strength: np.ndarray,
-) -> None:
-    gamma_val = spec.get("alpha_curve_gamma")
-    if gamma_val is None:
-        return
-
-    try:
-        gamma = float(gamma_val)
-        if gamma <= 0:
-            return
-    except (TypeError, ValueError):
-        return
-
-    floor_val = spec.get("alpha_curve_floor", 0.0)
-    try:
-        floor = float(floor_val)
-    except (TypeError, ValueError):
-        floor = 0.0
-    floor = float(np.clip(floor, 0.0, 1.0))
-
-    active_mask = valid_mask & (rgba_hwc[:, :, 3] > 0)
-    if not np.any(active_mask):
-        return
-
-    alpha_scale = floor + (1.0 - floor) * np.power(np.clip(strength, 0.0, 1.0), gamma)
-    alpha_scaled = np.rint(255.0 * alpha_scale).astype(np.uint8)
-    rgba_hwc[active_mask, 3] = alpha_scaled[active_mask]
 
 
 # ---------------------------------------------------------------------------

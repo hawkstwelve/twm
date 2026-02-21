@@ -372,8 +372,6 @@ VAR_SPECS = {
         "display_name": "6-hr Precip",
         "legend_title": "6-hr Precip (in)",
         "legend_stops": QPF6H_LEGEND_STOPS,
-        "alpha_curve_gamma": 1.8,
-        "alpha_curve_floor": 0.2,
     },
     "precip_ptype": {
         "type": "indexed",
@@ -398,8 +396,6 @@ VAR_SPECS = {
         "allow_dry_frame": True,
         "transparent_below_min": 0.1,
         "display_smoothing_sigma": 0.8,
-        "alpha_curve_gamma": 1.6,
-        "alpha_curve_floor": 0.2,
     },
     "tmp2m": {
         "type": "continuous",
@@ -426,8 +422,6 @@ VAR_SPECS = {
         "display_name": "10m Wind Speed",
         "legend_title": "Wind Speed (mph)",
         "display_smoothing_sigma": 0.8,
-        "alpha_curve_gamma": 1.5,
-        "alpha_curve_floor": 0.2,
     },
     "refc": {
         "type": "discrete",
@@ -438,8 +432,6 @@ VAR_SPECS = {
         "colors": RADAR_CONFIG["rain"]["colors"][1:],
         "display_name": "Composite Reflectivity",
         "legend_title": "Reflectivity (dBZ)",
-        "alpha_curve_gamma": 1.5,
-        "alpha_curve_floor": 0.2,
     },
 }
 
