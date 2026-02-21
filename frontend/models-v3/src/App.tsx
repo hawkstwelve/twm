@@ -635,10 +635,9 @@ export default function App() {
     setFrameRows([]);
     setForecastHour(0);
     setTargetForecastHour(0);
-  }, [model, region]);
+  }, [model, region, run, variable]);
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
     if (!model || !region || !variable) return;
     let cancelled = false;
 
