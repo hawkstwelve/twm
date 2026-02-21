@@ -55,6 +55,52 @@ logger = logging.getLogger(__name__)
 CONTRACT_VERSION = "3.0"
 
 
+def _gaussian_kernel_1d(sigma: float) -> np.ndarray:
+    radius = max(1, int(np.ceil(3.0 * sigma)))
+    x = np.arange(-radius, radius + 1, dtype=np.float32)
+    kernel = np.exp(-(x * x) / (2.0 * sigma * sigma), dtype=np.float32)
+    kernel_sum = float(kernel.sum())
+    if kernel_sum <= 0:
+        return np.array([1.0], dtype=np.float32)
+    return (kernel / kernel_sum).astype(np.float32)
+
+
+def _convolve_axis_edge(arr: np.ndarray, kernel: np.ndarray, axis: int) -> np.ndarray:
+    if kernel.size == 1:
+        return arr.astype(np.float32, copy=True)
+    pad = kernel.size // 2
+    pad_width = [(0, 0)] * arr.ndim
+    pad_width[axis] = (pad, pad)
+    padded = np.pad(arr, pad_width, mode="edge")
+    return np.apply_along_axis(
+        lambda values: np.convolve(values, kernel, mode="valid"),
+        axis,
+        padded,
+    ).astype(np.float32, copy=False)
+
+
+def _smooth_display_data(data: np.ndarray, sigma: float) -> np.ndarray:
+    if sigma <= 0.0:
+        return data
+
+    finite_mask = np.isfinite(data)
+    if not finite_mask.any():
+        return data
+
+    kernel = _gaussian_kernel_1d(sigma)
+    data_filled = np.where(finite_mask, data, 0.0).astype(np.float32, copy=False)
+    weight = np.where(finite_mask, 1.0, 0.0).astype(np.float32, copy=False)
+
+    num = _convolve_axis_edge(data_filled, kernel, axis=1)
+    num = _convolve_axis_edge(num, kernel, axis=0)
+    den = _convolve_axis_edge(weight, kernel, axis=1)
+    den = _convolve_axis_edge(den, kernel, axis=0)
+
+    smoothed = np.where(den > 1e-6, num / den, np.nan).astype(np.float32, copy=False)
+    smoothed[~finite_mask] = np.nan
+    return smoothed
+
+
 def _warp_resampling_for_kind(kind: str | None) -> str:
     """Return warp resampling method from variable kind.
 
@@ -66,6 +112,22 @@ def _warp_resampling_for_kind(kind: str | None) -> str:
     if normalized in {"discrete", "indexed", "categorical"}:
         return "nearest"
     return "bilinear"
+
+
+def _prepare_display_data_for_colorize(
+    warped_data: np.ndarray,
+    var_spec: dict[str, Any],
+) -> np.ndarray:
+    sigma_raw = var_spec.get("display_smoothing_sigma")
+    if sigma_raw is None:
+        return warped_data
+    try:
+        sigma = float(sigma_raw)
+    except (TypeError, ValueError):
+        return warped_data
+    if sigma <= 0.0:
+        return warped_data
+    return _smooth_display_data(warped_data, sigma)
 
 
 # ---------------------------------------------------------------------------
@@ -692,7 +754,8 @@ def build_frame(
 
         # --- Step 4: Colorize ---
         logger.info("Step 4/6: Colorizing")
-        rgba, colorize_meta = float_to_rgba(warped_data, var_id)
+        display_data = _prepare_display_data_for_colorize(warped_data, var_spec_colormap)
+        rgba, colorize_meta = float_to_rgba(display_data, var_id)
 
         # --- Step 5: Write COGs ---
         logger.info("Step 5/6: Writing COGs")

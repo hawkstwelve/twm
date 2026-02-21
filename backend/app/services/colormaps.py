@@ -394,6 +394,7 @@ VAR_SPECS = {
         "legend_title": "Total Snowfall (in)",
         "allow_dry_frame": True,
         "transparent_below_min": 0.1,
+        "display_smoothing_sigma": 0.8,
     },
     "tmp2m": {
         "type": "continuous",
