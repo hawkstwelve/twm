@@ -22,22 +22,6 @@ from app.services.colormaps import (
 )
 
 
-def _apply_alpha_scale(rgba_hwc: np.ndarray, spec: dict[str, Any]) -> None:
-    alpha_scale_raw = spec.get("display_alpha_scale")
-    if alpha_scale_raw is None:
-        return
-    try:
-        alpha_scale = float(alpha_scale_raw)
-    except (TypeError, ValueError):
-        return
-    alpha_scale = max(0.0, min(1.0, alpha_scale))
-    if alpha_scale >= 0.999:
-        return
-
-    alpha = rgba_hwc[..., 3].astype(np.float32, copy=False)
-    rgba_hwc[..., 3] = np.clip(np.rint(alpha * alpha_scale), 0, 255).astype(np.uint8)
-
-
 def float_to_rgba(
     data: np.ndarray,
     var_key: str,
@@ -138,8 +122,6 @@ def _colorize_continuous(
         except (TypeError, ValueError):
             pass
 
-    _apply_alpha_scale(rgba_hwc, spec)
-
     # Transpose to band-first (4, H, W) for rasterio
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
 
@@ -191,8 +173,6 @@ def _colorize_discrete(
         valid_mask = finite_mask
     rgba_hwc[~valid_mask, 3] = 0
 
-    _apply_alpha_scale(rgba_hwc, spec)
-
     # Band-first
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
 
@@ -240,8 +220,6 @@ def _colorize_indexed(
     else:
         valid_mask = finite_mask
     rgba_hwc[~valid_mask, 3] = 0
-
-    _apply_alpha_scale(rgba_hwc, spec)
 
     # Band-first
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()

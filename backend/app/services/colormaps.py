@@ -357,7 +357,6 @@ VAR_SPECS = {
         "ptype_breaks": RADAR_PTYPE_BREAKS,
         "ptype_levels": RADAR_PTYPE_LEVELS_BY_TYPE,
         "display_smoothing_sigma": 0.8,
-        "display_alpha_scale": 0.85,
     },
     "precip_total": {
         "type": "discrete",
@@ -373,7 +372,6 @@ VAR_SPECS = {
         "display_name": "6-hr Precip",
         "legend_title": "6-hr Precip (in)",
         "legend_stops": QPF6H_LEGEND_STOPS,
-        "display_alpha_scale": 0.85,
     },
     "precip_ptype": {
         "type": "indexed",
@@ -387,7 +385,6 @@ VAR_SPECS = {
         "ptype_order": list(PRECIP_PTYPE_ORDER),
         "ptype_breaks": PRECIP_PTYPE_BREAKS,
         "ptype_levels": PRECIP_PTYPE_LEVELS_BY_TYPE,
-        "display_alpha_scale": 0.85,
     },
     "snowfall_total": {
         "type": "continuous",
@@ -399,7 +396,6 @@ VAR_SPECS = {
         "allow_dry_frame": True,
         "transparent_below_min": 0.1,
         "display_smoothing_sigma": 0.8,
-        "display_alpha_scale": 0.85,
     },
     "tmp2m": {
         "type": "continuous",
@@ -409,7 +405,6 @@ VAR_SPECS = {
         "display_name": "2m Temperature",
         "legend_title": "Temperature (°F)",
         "display_smoothing_sigma": 0.8,
-        "display_alpha_scale": 0.85,
     },
     "tmp850": {
         "type": "continuous",
@@ -418,7 +413,6 @@ VAR_SPECS = {
         "anchors": TMP850_COLOR_ANCHORS,
         "display_name": "850mb Temperature",
         "legend_title": "850mb Temperature (°C)",
-        "display_alpha_scale": 0.85,
     },
     "wspd10m": {
         "type": "continuous",
@@ -428,7 +422,6 @@ VAR_SPECS = {
         "display_name": "10m Wind Speed",
         "legend_title": "Wind Speed (mph)",
         "display_smoothing_sigma": 0.8,
-        "display_alpha_scale": 0.85,
     },
     "refc": {
         "type": "discrete",
@@ -439,7 +432,6 @@ VAR_SPECS = {
         "colors": RADAR_CONFIG["rain"]["colors"][1:],
         "display_name": "Composite Reflectivity",
         "legend_title": "Reflectivity (dBZ)",
-        "display_alpha_scale": 0.85,
     },
 }
 
