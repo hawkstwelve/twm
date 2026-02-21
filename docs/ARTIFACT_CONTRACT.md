@@ -66,4 +66,8 @@ Filename: `fh{NNN}.json`
 
 For categorical variables, `legend.type` is `"discrete"` with named category stops.
 
+#### Sidecar immutability note
+
+Legend metadata is frame-scoped and immutable once published. The frontend legend is sourced from each frame's sidecar (`fh{NNN}.json`), so palette/anchor changes in code only appear for newly built artifacts. Existing published runs/frames retain their original legend metadata until those frames are rebuilt and republished.
+
 ---

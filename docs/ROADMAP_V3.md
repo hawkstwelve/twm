@@ -722,9 +722,9 @@ Adding a new variable becomes:
 2. ✅ Verify categorical overview handling: radar_ptype uses nearest for all bands
 3. ✅ Verify value-grid semantics: wspd stores derived float mph; radar_ptype stores category index
 4. ✅ Run all HRRR variables through scheduler, validate tiles + hover for each
-5. Confirm legend rendering for all types (gradient, discrete, segmented)
+5. ✅ Confirm legend rendering for all types (gradient, discrete, segmented)
 
-**Checkpoint:** All current HRRR variables work. Adding a new simple variable is a one-spec addition.
+**Checkpoint:** ~~All current HRRR variables work. Adding a new simple variable is a one-spec addition.~~ **PASSED.**
 
 ### Phase 3 — Expand Models (iterative, 2–3 days per model)
 
