@@ -387,6 +387,9 @@ VAR_SPECS = {
         "units": "in",
         "levels": snow_levels,
         "colors": snow_colors,
+        "display_name": "Total Snowfall (10:1)",
+        "legend_title": "Total Snowfall (in)",
+        "allow_dry_frame": True,
     },
     "tmp2m": {
         "type": "continuous",

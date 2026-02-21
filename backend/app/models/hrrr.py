@@ -15,6 +15,8 @@ class HRRRPlugin(BaseModelPlugin):
         normalized = var_id.strip().lower()
         if normalized in {"t2m", "tmp2m", "2t"}:
             return "tmp2m"
+        if normalized in {"snowfall_total", "asnow", "snow10", "snow_10to1", "total_snow", "totalsnow"}:
+            return "snowfall_total"
         if normalized in {"tmp850", "t850", "t850mb", "temp850", "temp850mb"}:
             return "tmp850"
         if normalized in {"10u", "u10"}:
@@ -83,6 +85,23 @@ HRRR_VARS: dict[str, VarSpec] = {
         primary=True,
         kind="continuous",
         units="C",
+    ),
+    "snowfall_total": VarSpec(
+        id="snowfall_total",
+        name="Total Snowfall (10:1)",
+        selectors=VarSelectors(
+            search=[":ASNOW:surface:"],
+            filter_by_keys={
+                "shortName": "asnow",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "asnow",
+            },
+        ),
+        primary=True,
+        kind="discrete",
+        units="in",
     ),
     "wspd10m": VarSpec(
         id="wspd10m",

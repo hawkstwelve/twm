@@ -192,6 +192,7 @@ def check_pixel_sanity(
     }
     is_non_physical_units = model_units is None or var_spec.get("units") is None
     is_non_physical_flag = var_spec.get("physical") is False
+    allow_dry_frame = bool(var_spec.get("allow_dry_frame", False))
     skip_physical_range_checks = is_non_physical_kind or is_non_physical_units or is_non_physical_flag
     is_categorical_ptype = spec_type in {"discrete", "indexed"} and bool(var_spec.get("ptype_breaks"))
 
@@ -204,6 +205,16 @@ def check_pixel_sanity(
     if is_categorical_ptype:
         min_alpha_coverage = 0.002  # 0.2%
         max_nodata_ratio = 0.998    # 99.8%
+    elif allow_dry_frame:
+        min_alpha_coverage = 0.0
+
+    min_discrete_level = None
+    levels = var_spec.get("levels")
+    if isinstance(levels, list) and levels:
+        try:
+            min_discrete_level = float(levels[0])
+        except (TypeError, ValueError):
+            min_discrete_level = None
 
     # --- RGBA checks ---
     with rasterio.open(rgba_path) as src:
@@ -217,6 +228,12 @@ def check_pixel_sanity(
             if is_categorical_ptype and valid_count == 0:
                 logger.warning(
                     "Dry categorical ptype frame allowed: alpha coverage %.1f%% (%s)",
+                    coverage * 100,
+                    rgba_path,
+                )
+            elif allow_dry_frame and valid_count == 0:
+                logger.warning(
+                    "Dry frame allowed: alpha coverage %.1f%% (%s)",
                     coverage * 100,
                     rgba_path,
                 )
@@ -274,12 +291,19 @@ def check_pixel_sanity(
             vmin = float(np.nanmin(values[finite_mask]))
             vmax = float(np.nanmax(values[finite_mask]))
             if vmin == vmax:
-                logger.error(
-                    "Value COG is flat (min==max==%.2f) — "
-                    "likely constant input or unit conversion error (%s)",
-                    vmin, val_path,
-                )
-                ok = False
+                if allow_dry_frame and (min_discrete_level is None or vmin <= min_discrete_level):
+                    logger.warning(
+                        "Dry frame allowed: flat value field at %.2f (%s)",
+                        vmin,
+                        val_path,
+                    )
+                else:
+                    logger.error(
+                        "Value COG is flat (min==max==%.2f) — "
+                        "likely constant input or unit conversion error (%s)",
+                        vmin, val_path,
+                    )
+                    ok = False
 
             # Value range within VarSpec.range ± 20% (for physical continuous vars)
             spec_range = var_spec.get("range")

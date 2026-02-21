@@ -37,6 +37,7 @@ VAR_ORDER_BY_MODEL = {
     "hrrr": [
         "tmp2m",
         "tmp850",
+        "snowfall_total",
         "wspd10m",
         "radar_ptype",
     ],
