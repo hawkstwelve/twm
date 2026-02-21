@@ -282,9 +282,10 @@ def check_pixel_sanity(
     with rasterio.open(rgba_path) as src:
         alpha = src.read(4)
         total_pixels = alpha.size
+        visible_mask = alpha > 0
 
         # Alpha coverage sanity threshold
-        valid_count = int(np.count_nonzero(alpha == 255))
+        valid_count = int(np.count_nonzero(visible_mask))
         coverage = valid_count / total_pixels
         if coverage < min_alpha_coverage:
             if is_categorical_ptype and valid_count == 0:
@@ -312,7 +313,7 @@ def check_pixel_sanity(
         for band_idx in range(1, 4):
             band_data = src.read(band_idx)
             # Only check where alpha is valid
-            valid_pixels = band_data[alpha == 255]
+            valid_pixels = band_data[visible_mask]
             if valid_pixels.size > 0:
                 unique_count = len(np.unique(valid_pixels))
                 if unique_count < 2:
