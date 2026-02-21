@@ -348,11 +348,17 @@ def _promote_run(data_root: Path, model: str, region: str, run_id: str) -> None:
 
     if tmp_run.exists():
         shutil.rmtree(tmp_run, ignore_errors=True)
+    if tmp_run.exists():
+        raise SchedulerConfigError(f"Cannot clear temporary promotion dir: {tmp_run}")
+
     shutil.copytree(stage_run, tmp_run)
 
     if published_run.exists():
         shutil.rmtree(published_run, ignore_errors=True)
-    tmp_run.replace(published_run)
+    if published_run.exists():
+        raise SchedulerConfigError(f"Cannot clear existing published run dir: {published_run}")
+
+    shutil.move(str(tmp_run), str(published_run))
 
 
 def _write_run_manifest(
