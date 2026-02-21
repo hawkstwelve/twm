@@ -33,6 +33,15 @@ MODEL_NAMES = {
     "nam": "NAM",
 }
 
+VAR_ORDER_BY_MODEL = {
+    "hrrr": [
+        "tmp2m",
+        "tmp850",
+        "wspd10m",
+        "radar_ptype",
+    ],
+}
+
 # Regex to match run IDs like 20260217_20z
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 
@@ -259,8 +268,16 @@ def list_vars(model: str, region: str, run: str):
 
     # Import VAR_SPECS for display names
     from .services.colormaps import VAR_SPECS
+    priority = VAR_ORDER_BY_MODEL.get(model, [])
+    priority_index = {var_id: idx for idx, var_id in enumerate(priority)}
+
+    ordered_var_ids = sorted(
+        var_ids,
+        key=lambda var_id: (priority_index.get(var_id, len(priority_index)), var_id),
+    )
+
     result = []
-    for v in sorted(var_ids):
+    for v in ordered_var_ids:
         spec = VAR_SPECS.get(v, {})
         result.append({
             "id": v,
