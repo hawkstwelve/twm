@@ -22,6 +22,7 @@ DEFAULT_DATA_ROOT = Path("/opt/twf_v3/data/v3")
 DEFAULT_PRIMARY_VAR = "tmp2m"
 DEFAULT_VARS = "tmp2m,tmp850,snowfall_total,wspd10m,refc,radar_ptype"
 DEFAULT_POLL_SECONDS = 300
+INCOMPLETE_RUN_POLL_SECONDS = 60
 DEFAULT_PROMOTION_FHS = (0, 1, 2)
 DEFAULT_PROBE_VAR = "tmp2m"
 DEFAULT_HRRR_PROBE_ATTEMPTS = 4
@@ -579,7 +580,7 @@ def run_scheduler(
             resolved_primary = [normalized_vars[0]]
 
     logger.info(
-        "Scheduler starting model=%s region=%s vars=%s primary=%s probe_var=%s data_root=%s workers=%d",
+        "Scheduler starting model=%s region=%s vars=%s primary=%s probe_var=%s data_root=%s workers=%d poll_incomplete=%ds poll_complete=%ds",
         model,
         region,
         normalized_vars,
@@ -587,6 +588,8 @@ def run_scheduler(
         plugin.normalize_var_id(probe_var),
         data_root,
         workers,
+        INCOMPLETE_RUN_POLL_SECONDS,
+        poll_seconds,
     )
 
     last_run_id: str | None = None
@@ -598,7 +601,7 @@ def run_scheduler(
 
         run_complete = last_run_total > 0 and last_run_available >= last_run_total
         if last_run_id == run_id and not run_arg and run_complete:
-            logger.info("No new run yet (latest=%s); sleeping %ss", run_id, poll_seconds)
+            logger.info("No new run yet (latest=%s complete); sleeping %ss", run_id, poll_seconds)
             time.sleep(poll_seconds)
             continue
 
@@ -621,7 +624,15 @@ def run_scheduler(
         if once or run_arg:
             return 0
 
-        time.sleep(poll_seconds)
+        run_complete_now = total > 0 and available >= total
+        next_poll_seconds = poll_seconds if run_complete_now else INCOMPLETE_RUN_POLL_SECONDS
+        logger.info(
+            "Next poll in %ss (run=%s complete=%s)",
+            next_poll_seconds,
+            processed_run_id,
+            run_complete_now,
+        )
+        time.sleep(next_poll_seconds)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
