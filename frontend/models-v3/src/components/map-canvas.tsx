@@ -330,6 +330,33 @@ export function MapCanvas({
     []
   );
 
+  const enforceLayerOrder = useCallback((map: maplibregl.Map) => {
+    if (!map.getLayer("twf-labels")) {
+      return;
+    }
+
+    const beforeId = map.getLayer(CONTOUR_LAYER_ID) ? CONTOUR_LAYER_ID : "twf-labels";
+    const overlayIds = [
+      layerId("a"),
+      layerId("b"),
+      prefetchLayerId(1),
+      prefetchLayerId(2),
+      prefetchLayerId(3),
+      prefetchLayerId(4),
+    ];
+
+    overlayIds.forEach((id) => {
+      if (map.getLayer(id)) {
+        map.moveLayer(id, beforeId);
+      }
+    });
+
+    if (map.getLayer(CONTOUR_LAYER_ID)) {
+      map.moveLayer(CONTOUR_LAYER_ID, "twf-labels");
+    }
+    map.moveLayer("twf-labels");
+  }, []);
+
   const notifySettled = useCallback(
     (map: maplibregl.Map, source: string, url: string) => {
       let done = false;
@@ -595,6 +622,8 @@ export function MapCanvas({
         sourceRequestTokenRef.current.set(prefetchSource, 0);
         sourceEventCountRef.current.set(prefetchSource, 0);
       }
+
+      enforceLayerOrder(map);
     });
 
     mapRef.current = map;
@@ -605,7 +634,7 @@ export function MapCanvas({
       mapRef.current = null;
       setIsLoaded(false);
     };
-  }, [cancelCrossfade]);
+  }, [cancelCrossfade, enforceLayerOrder]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -629,7 +658,8 @@ export function MapCanvas({
       "visibility",
       variable === "tmp2m" ? "visible" : "none"
     );
-  }, [isLoaded, variable]);
+    enforceLayerOrder(map);
+  }, [isLoaded, variable, enforceLayerOrder]);
 
   useEffect(() => {
     const map = mapRef.current;
