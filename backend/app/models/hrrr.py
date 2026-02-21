@@ -15,6 +15,8 @@ class HRRRPlugin(BaseModelPlugin):
         normalized = var_id.strip().lower()
         if normalized in {"t2m", "tmp2m", "2t"}:
             return "tmp2m"
+        if normalized in {"tmp850", "t850", "t850mb", "temp850", "temp850mb"}:
+            return "tmp850"
         if normalized in {"10u", "u10"}:
             return "10u"
         if normalized in {"10v", "v10"}:
@@ -28,18 +30,12 @@ class HRRRPlugin(BaseModelPlugin):
         return normalized
 
     def select_dataarray(self, ds: object, var_id: str) -> object:
-        from app.services.variable_registry import select_dataarray
-
-        return select_dataarray(ds, var_id)
+        del ds, var_id
+        raise NotImplementedError("select_dataarray is not used in the V3 builder path")
 
     def ensure_latest_cycles(self, keep_cycles: int, *, cache_dir: Path | None = None) -> dict[str, int]:
-        from app.services.hrrr_fetch import ensure_latest_cycles
-        from app.services.hrrr_runs import HRRRCacheConfig
-
-        if cache_dir is None:
-            return ensure_latest_cycles(keep_cycles=keep_cycles)
-        cache_cfg = HRRRCacheConfig(base_dir=cache_dir, keep_runs=keep_cycles)
-        return ensure_latest_cycles(keep_cycles=keep_cycles, cache_cfg=cache_cfg)
+        del keep_cycles, cache_dir
+        raise NotImplementedError("ensure_latest_cycles is not used in the V3 scheduler/builder path")
 
 
 PNW_BBOX_WGS84 = (-125.5, 41.5, -111.0, 49.5)
@@ -69,6 +65,24 @@ HRRR_VARS: dict[str, VarSpec] = {
             },
         ),
         primary=True,
+    ),
+    "tmp850": VarSpec(
+        id="tmp850",
+        name="850mb Temp",
+        selectors=VarSelectors(
+            search=[":TMP:850 mb:"],
+            filter_by_keys={
+                "shortName": "t",
+                "typeOfLevel": "isobaricInhPa",
+                "level": "850",
+            },
+            hints={
+                "upstream_var": "t850",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="C",
     ),
     "wspd10m": VarSpec(
         id="wspd10m",

@@ -430,6 +430,14 @@ VAR_SPECS = {
         "display_name": "2m Temperature",
         "legend_title": "Temperature (°F)",
     },
+    "tmp850": {
+        "type": "continuous",
+        "units": "C",
+        "range": TEMP850_C_RANGE,
+        "anchors": TEMP850_C_COLOR_ANCHORS,
+        "display_name": "850mb Temperature",
+        "legend_title": "850mb Temperature (°C)",
+    },
     "wspd10m": {
         "type": "continuous",
         "units": "mph",
