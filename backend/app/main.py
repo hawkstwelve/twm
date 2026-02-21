@@ -312,30 +312,25 @@ def list_frames(request: Request, model: str, region: str, run: str, var: str):
 
     frames.sort(key=lambda x: x["fh"])
 
-    # Immutable cache for resolved runs; short TTL + ETag for "latest" requests.
-    if _RUN_ID_RE.match(run):
-        return JSONResponse(
-            content=frames,
-            headers={"Cache-Control": "public, max-age=31536000, immutable"},
-        )
-    else:
-        cache_control = "public, max-age=60"
-        etag_value = hashlib.md5(
-            json.dumps(frames, default=str).encode()
-        ).hexdigest()[:8]
-        etag_header = f'"{etag_value}"'
+    # Runs accumulate new forecast hours as the pipeline produces them, so the
+    # frame manifest is never immutable.  Use a short TTL + ETag for all cases.
+    cache_control = "public, max-age=60"
+    etag_value = hashlib.md5(
+        json.dumps(frames, default=str).encode()
+    ).hexdigest()[:8]
+    etag_header = f'"{etag_value}"'
 
-        r304 = _maybe_304(request, etag=etag_header, cache_control=cache_control)
-        if r304 is not None:
-            return r304
+    r304 = _maybe_304(request, etag=etag_header, cache_control=cache_control)
+    if r304 is not None:
+        return r304
 
-        return JSONResponse(
-            content=frames,
-            headers={
-                "Cache-Control": cache_control,
-                "ETag": etag_header,
-            },
-        )
+    return JSONResponse(
+        content=frames,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag_header,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -593,8 +593,8 @@ the site to forum users, regardless of their impact tier.
 | HIGH | H3 | Cloudflare CDN for tile serving | Infrastructure / DNS | ~1 hr | ✅ | `[x]` |
 | MEDIUM | M1 | Vite `manualChunks` for maplibre-gl | `vite.config.ts` | 5 min | — | `[x]` |
 | MEDIUM | M2 | Fix prefetch count mismatch | `App.tsx`, `map-canvas.tsx` | 10 min | — | `[x]` |
-| MEDIUM | M3 | Reduce autoplay tick to 250ms | `App.tsx` | 2 min | — | `[ ]` |
-| MEDIUM | M4 | `<link rel="preconnect">` hints | `index.html` | 5 min | — | `[ ]` |
+| MEDIUM | M3 | Reduce autoplay tick to 250ms | `App.tsx` | 2 min | — | `[x]` |
+| MEDIUM | M4 | `<link rel="preconnect">` hints | `index.html` | 5 min | — | `[x]` |
 | MEDIUM | M5 | nginx `limit_req` for `/sample` | nginx config | 15 min | ✅ | `[x]` |
 | LOW | L1 | Split `buildLegend` memo from opacity | `App.tsx` | 15 min | — | `[ ]` |
 | LOW | L2 | O(1) LRU cache | `use-sample-tooltip.ts` | 15 min | — | `[ ]` |

@@ -21,7 +21,7 @@ import { buildRunOptions } from "@/lib/run-options";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
 
-const AUTOPLAY_TICK_MS = 400;
+const AUTOPLAY_TICK_MS = 250;
 const AUTOPLAY_READY_AHEAD = 2;
 const AUTOPLAY_SKIP_WINDOW = 3;
 const FRAME_STATUS_BADGE_MS = 900;
@@ -680,7 +680,10 @@ export default function App() {
       if (document.hidden || !model || !region || !variable) {
         return;
       }
-      fetchFrames(model, region, resolvedRunForRequests, variable)
+      // Use `run` ("latest" when in live mode) rather than the resolved run ID so
+      // the request hits the short-TTL ETag path and bypasses any stale immutable
+      // browser-cache entries for the resolved run URL.
+      fetchFrames(model, region, run, variable)
         .then((rows) => {
           if (cancelled) {
             return;
