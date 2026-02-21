@@ -356,6 +356,7 @@ VAR_SPECS = {
         "ptype_order": list(RADAR_PTYPE_ORDER),
         "ptype_breaks": RADAR_PTYPE_BREAKS,
         "ptype_levels": RADAR_PTYPE_LEVELS_BY_TYPE,
+        "display_smoothing_sigma": 0.8,
     },
     "precip_total": {
         "type": "discrete",
@@ -403,6 +404,7 @@ VAR_SPECS = {
         "anchors": TMP2M_F_COLOR_ANCHORS,
         "display_name": "2m Temperature",
         "legend_title": "Temperature (°F)",
+        "display_smoothing_sigma": 0.8,
     },
     "tmp850": {
         "type": "continuous",
@@ -419,6 +421,7 @@ VAR_SPECS = {
         "anchors": WSPD10M_COLOR_ANCHORS,
         "display_name": "10m Wind Speed",
         "legend_title": "Wind Speed (mph)",
+        "display_smoothing_sigma": 0.8,
     },
     "refc": {
         "type": "discrete",
