@@ -24,8 +24,7 @@ export type LegendPayload = {
 function formatValue(value: number): string {
   if (Number.isInteger(value)) return value.toString();
   if (Math.abs(value) < 0.1) return value.toFixed(2);
-  if (Math.abs(value) < 1) return value.toFixed(1);
-  return value.toFixed(0);
+  return value.toFixed(1);
 }
 
 function UnavailablePlaceholder() {
