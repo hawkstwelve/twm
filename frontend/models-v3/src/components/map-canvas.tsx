@@ -310,6 +310,26 @@ export function MapCanvas({
     map.setPaintProperty(id, "raster-opacity", value);
   }, []);
 
+  const setLayerRasterPaint = useCallback(
+    (
+      map: maplibregl.Map,
+      id: string,
+      variableId?: string
+    ) => {
+      if (!map.getLayer(id)) {
+        return;
+      }
+      const resamplingMode = getResamplingMode(variableId);
+      const paintSettings = getOverlayPaintSettings(variableId);
+      map.setPaintProperty(id, "raster-resampling", resamplingMode);
+      map.setPaintProperty(id, "raster-contrast", paintSettings.contrast);
+      map.setPaintProperty(id, "raster-saturation", paintSettings.saturation);
+      map.setPaintProperty(id, "raster-brightness-min", paintSettings.brightnessMin);
+      map.setPaintProperty(id, "raster-brightness-max", paintSettings.brightnessMax);
+    },
+    []
+  );
+
   const notifySettled = useCallback(
     (map: maplibregl.Map, source: string, url: string) => {
       let done = false;
@@ -855,6 +875,19 @@ export function MapCanvas({
       setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
     }
   }, [opacity, isLoaded, crossfade, cancelCrossfade, setLayerOpacity]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) {
+      return;
+    }
+
+    setLayerRasterPaint(map, layerId("a"), variable);
+    setLayerRasterPaint(map, layerId("b"), variable);
+    for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
+      setLayerRasterPaint(map, prefetchLayerId(idx), variable);
+    }
+  }, [isLoaded, variable, setLayerRasterPaint]);
 
   useEffect(() => {
     const map = mapRef.current;
