@@ -82,7 +82,6 @@ function getResamplingMode(variable?: string): "nearest" | "linear" {
       variable.includes("radar")
       || variable.includes("ptype")
       || variable === "refc"
-      || variable === "snowfall_total"
     )
   ) {
     return "nearest";
