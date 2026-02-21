@@ -872,23 +872,28 @@ export function MapCanvas({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isLoaded) return;
+    const canvas = map.getCanvas();
+    canvas.style.cursor = "";
 
     const handleMove = (e: maplibregl.MapMouseEvent) => {
       const { lng, lat } = e.lngLat;
       const { x, y } = e.point;
+      canvas.style.cursor = onMapHoverRef.current ? "crosshair" : "";
       onMapHoverRef.current?.(lat, lng, x, y);
     };
 
     const handleLeave = () => {
+      canvas.style.cursor = "";
       onMapHoverEndRef.current?.();
     };
 
     map.on("mousemove", handleMove);
-    map.getCanvas().addEventListener("mouseleave", handleLeave);
+    canvas.addEventListener("mouseleave", handleLeave);
 
     return () => {
       map.off("mousemove", handleMove);
-      map.getCanvas().removeEventListener("mouseleave", handleLeave);
+      canvas.removeEventListener("mouseleave", handleLeave);
+      canvas.style.cursor = "";
     };
   }, [isLoaded]);
 
