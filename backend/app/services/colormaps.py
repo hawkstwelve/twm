@@ -370,6 +370,7 @@ VAR_SPECS = {
         "legend_stops": QPF6H_LEGEND_STOPS,
         "allow_dry_frame": True,
         "transparent_below_min": 0.01,
+        "display_smoothing_sigma": 0.8,
     },
     "qpf6h": {
         "type": "continuous",
