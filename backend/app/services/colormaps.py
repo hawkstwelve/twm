@@ -359,10 +359,15 @@ VAR_SPECS = {
         "display_smoothing_sigma": 0.8,
     },
     "precip_total": {
-        "type": "discrete",
+        "type": "continuous",
         "units": "in",
-        "levels": precip_levels,
+        "range": (0.0, 25.0),
         "colors": precip_colors,
+        "display_name": "Total Precipitation",
+        "legend_title": "Total Precipitation (in)",
+        "legend_stops": QPF6H_LEGEND_STOPS,
+        "allow_dry_frame": True,
+        "transparent_below_min": 0.01,
     },
     "qpf6h": {
         "type": "continuous",

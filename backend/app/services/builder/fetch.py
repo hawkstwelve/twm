@@ -350,6 +350,14 @@ def _meters_to_inches(data: np.ndarray) -> np.ndarray:
     return data * 39.37007874015748
 
 
+def _kgm2_to_inches(data: np.ndarray) -> np.ndarray:
+    """Convert kg/m^2 liquid water equivalent → inches.
+
+    For water, 1 kg/m^2 == 1 mm depth.
+    """
+    return data * 0.03937007874015748
+
+
 # Registry: var_id → converter function
 # Variables not listed here need no conversion (GRIB units match spec units).
 # NOTE: GDAL's GRIB driver applies GRIB_NORMALIZE_UNITS=YES by default,
@@ -358,6 +366,7 @@ UNIT_CONVERTERS: dict[str, Any] = {
     "tmp2m": _celsius_to_fahrenheit,
     "wspd10m": _ms_to_mph,
     "snowfall_total": _meters_to_inches,
+    "precip_total": _kgm2_to_inches,
 }
 
 

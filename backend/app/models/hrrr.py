@@ -15,6 +15,8 @@ class HRRRPlugin(BaseModelPlugin):
         normalized = var_id.strip().lower()
         if normalized in {"t2m", "tmp2m", "2t"}:
             return "tmp2m"
+        if normalized in {"precip_total", "total_precip", "apcp", "qpf", "total_qpf"}:
+            return "precip_total"
         if normalized in {"snowfall_total", "asnow", "snow10", "snow_10to1", "total_snow", "totalsnow"}:
             return "snowfall_total"
         if normalized in {"tmp850", "t850", "t850mb", "temp850", "temp850mb"}:
@@ -97,6 +99,23 @@ HRRR_VARS: dict[str, VarSpec] = {
             },
             hints={
                 "upstream_var": "asnow",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="in",
+    ),
+    "precip_total": VarSpec(
+        id="precip_total",
+        name="Total Precipitation",
+        selectors=VarSelectors(
+            search=[":APCP:surface:"],
+            filter_by_keys={
+                "shortName": "apcp",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "apcp",
             },
         ),
         primary=True,
