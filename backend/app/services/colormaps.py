@@ -298,6 +298,7 @@ WSPD10M_COLOR_ANCHORS = [
 WSPD10M_RANGE = (0.0, 100.0)
 
 QPF6H_LEGEND_STOPS = list(zip(precip_levels, precip_colors))
+PRECIP_TOTAL_COLOR_ANCHORS = list(zip(precip_levels, precip_colors))
 
 # 850mb temperature (°C) continuous palette anchors and range
 TMP850_COLOR_ANCHORS = [
@@ -362,6 +363,7 @@ VAR_SPECS = {
         "type": "continuous",
         "units": "in",
         "range": (0.0, 25.0),
+        "anchors": PRECIP_TOTAL_COLOR_ANCHORS,
         "colors": precip_colors,
         "display_name": "Total Precipitation",
         "legend_title": "Total Precipitation (in)",
