@@ -34,11 +34,14 @@ This eliminates the historical pain of per-variable overview hacks and the 3-fal
 
 | Property | Value |
 |---|---|
-| CRS | EPSG:3857 (same grid as RGBA) |
+| CRS | EPSG:3857 (same extent as RGBA; may use coarser hover grid) |
 | Bands | 1, float32 |
 | Nodata | Explicitly set (NaN or sentinel per var spec) |
 | Overviews | Internal, nearest resampling |
 | Filename | `fh{NNN}.val.cog.tif` |
+
+Current production optimization for hover sampling uses a 4x coarser value grid
+(pixel size ×4, ~1/16 pixel count). RGBA remains full-resolution.
 
 ### Sidecar metadata (per frame)
 

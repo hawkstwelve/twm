@@ -53,6 +53,7 @@ from app.services.colormaps import VAR_SPECS
 logger = logging.getLogger(__name__)
 
 CONTRACT_VERSION = "3.0"
+VALUE_HOVER_DOWNSAMPLE_FACTOR = 4
 
 
 def _gaussian_kernel_1d(sigma: float) -> np.ndarray:
@@ -403,6 +404,7 @@ def build_sidecar_json(
     var_spec: dict[str, Any],
     var_spec_model: Any | None = None,
     contours: dict[str, Any] | None = None,
+    value_downsample_factor: int = 1,
 ) -> dict[str, Any]:
     """Build the sidecar metadata dict per the artifact contract.
 
@@ -435,6 +437,9 @@ def build_sidecar_json(
         "max": colorize_meta.get("max"),
         "legend": legend,
     }
+
+    if value_downsample_factor > 1:
+        sidecar["hover_value_downsample_factor"] = int(value_downsample_factor)
 
     # Preserve optional legend-grouping metadata for categorical ptype variables.
     for key in ("ptype_order", "ptype_breaks", "ptype_levels", "bins_per_ptype"):
@@ -766,6 +771,7 @@ def build_frame(
         write_value_cog(
             warped_data, val_path,
             model=model, region=region,
+            downsample_factor=VALUE_HOVER_DOWNSAMPLE_FACTOR,
         )
 
         # --- Step 5b: Optional contour extraction (tmp2m only) ---
@@ -835,7 +841,7 @@ def build_frame(
             expected_bands=1,
             expected_dtype="Float32",
             region=region,
-            grid_meters=grid_m,
+            grid_meters=grid_m * VALUE_HOVER_DOWNSAMPLE_FACTOR,
         ):
             logger.error("Gate 1 FAILED for value COG — rejecting frame")
             _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
@@ -864,6 +870,7 @@ def build_frame(
             var_spec=var_spec_colormap,
             var_spec_model=var_spec_model,
             contours=contour_sidecar,
+            value_downsample_factor=VALUE_HOVER_DOWNSAMPLE_FACTOR,
         )
         _write_json_atomic(sidecar_path, sidecar)
 

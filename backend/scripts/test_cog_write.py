@@ -192,6 +192,33 @@ def test_value_cog():
     print("  Value COG: PASS\n")
 
 
+def test_value_cog_downsample_4x():
+    """Write a 4x-downsampled value COG and validate coarse-grid geometry."""
+    bbox, grid_m = get_grid_params("hrrr", "pnw")
+    _, height, width = compute_transform_and_shape(bbox, grid_m)
+    _, expected_h, expected_w = compute_transform_and_shape(bbox, grid_m * 4)
+
+    values = np.random.uniform(-40, 120, (height, width)).astype(np.float32)
+    values[:10, :] = np.nan
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = os.path.join(tmpdir, "fh000.down4.val.cog.tif")
+        write_value_cog(values, out, model="hrrr", region="pnw", downsample_factor=4)
+
+        with rasterio.open(out) as src:
+            assert src.count == 1
+            assert src.width == expected_w, f"Expected width {expected_w}, got {src.width}"
+            assert src.height == expected_h, f"Expected height {expected_h}, got {src.height}"
+            assert abs(src.transform.a - (grid_m * 4)) < 0.1, (
+                f"Expected x-res {grid_m * 4}, got {src.transform.a}"
+            )
+            assert abs(abs(src.transform.e) - (grid_m * 4)) < 0.1, (
+                f"Expected y-res {grid_m * 4}, got {abs(src.transform.e)}"
+            )
+
+    print("  Value COG (4x downsample): PASS\n")
+
+
 if __name__ == "__main__":
     print("=== COG Writer Integration Tests ===\n")
     ensure_gdal()
@@ -202,5 +229,6 @@ if __name__ == "__main__":
     test_rgba_cog_continuous()
     test_rgba_cog_discrete()
     test_value_cog()
+    test_value_cog_downsample_4x()
 
     print("All tests passed.")
