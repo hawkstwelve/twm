@@ -23,12 +23,10 @@ export function toAbsoluteTileTemplate(template: string): string {
 
 export function buildFallbackTileUrl(params: {
   model: string;
-  region?: string;
   run: string;
   varKey: string;
   fh: number;
 }): string {
-  void params.region;
   const root = baseRoot().replace(/\/$/, "");
   const enc = encodeURIComponent;
   return `${root}/tiles/v3/${enc(params.model)}/${enc(params.run)}/${enc(params.varKey)}/${enc(params.fh)}/{z}/{x}/{y}.png`;
@@ -36,7 +34,6 @@ export function buildFallbackTileUrl(params: {
 
 export function buildTileUrlFromFrame(params: {
   model: string;
-  region?: string;
   run: string;
   varKey: string;
   fh: number;

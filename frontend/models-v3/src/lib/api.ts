@@ -128,15 +128,13 @@ export async function fetchRegions(model: string): Promise<string[]> {
   return Object.keys(regions);
 }
 
-export async function fetchRuns(model: string, region: string): Promise<string[]> {
-  void region;
+export async function fetchRuns(model: string): Promise<string[]> {
   return fetchJson<string[]>(
     `${API_BASE}/${encodeURIComponent(model)}/runs`
   );
 }
 
-export async function fetchVars(model: string, region: string, run: string): Promise<VarRow[]> {
-  void region;
+export async function fetchVars(model: string, run: string): Promise<VarRow[]> {
   const runKey = run || "latest";
   return fetchJson<VarRow[]>(
     `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`
@@ -145,11 +143,9 @@ export async function fetchVars(model: string, region: string, run: string): Pro
 
 export async function fetchFrames(
   model: string,
-  region: string,
   run: string,
   varKey: string
 ): Promise<FrameRow[]> {
-  void region;
   const runKey = run || "latest";
   const response = await fetchJson<FrameRow[]>(
     `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`
@@ -177,7 +173,6 @@ export type SampleResult = {
 
 export async function fetchSample(params: {
   model: string;
-  region?: string;
   run: string;
   var: string;
   fh: number;
@@ -204,7 +199,6 @@ export async function fetchSample(params: {
 
 export function buildContourUrl(params: {
   model: string;
-  region?: string;
   run: string;
   varKey: string;
   fh: number;

@@ -54,6 +54,7 @@ logger = logging.getLogger(__name__)
 
 CONTRACT_VERSION = "3.0"
 VALUE_HOVER_DOWNSAMPLE_FACTOR = 4
+CANONICAL_COVERAGE = "conus"
 
 
 def _gaussian_kernel_1d(sigma: float) -> np.ndarray:
@@ -715,6 +716,10 @@ def build_frame(
     """
     run_id = _run_id_from_date(run_date)
     fh_str = f"fh{fh:03d}"
+
+    if region != CANONICAL_COVERAGE:
+        logger.error("Rejected non-canonical coverage for build_frame: %s (expected %s)", region, CANONICAL_COVERAGE)
+        return None
 
     logger.info("Building frame: %s/%s/%s/%s (coverage=%s)", model, run_id, var_id, fh_str, region)
 

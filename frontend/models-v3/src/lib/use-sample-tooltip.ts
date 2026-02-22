@@ -44,14 +44,13 @@ function roundCoord(v: number): number {
 
 function cacheKey(
   model: string,
-  region: string,
   run: string,
   varId: string,
   fh: number,
   lat: number,
   lon: number
 ): string {
-  return `${model}/${region}/${run}/${varId}/${fh}/${roundCoord(lat)}/${roundCoord(lon)}`;
+  return `${model}/${run}/${varId}/${fh}/${roundCoord(lat)}/${roundCoord(lon)}`;
 }
 
 // ── Debounce interval (ms) ───────────────────────────────────────────
@@ -69,7 +68,6 @@ export type SampleTooltipState = {
 
 export type SampleContext = {
   model: string;
-  region: string;
   run: string;
   varId: string;
   fh: number;
@@ -82,8 +80,8 @@ export function useSampleTooltip(ctx: SampleContext) {
   const cacheRef = useRef(new LRUCache());
   const prevCtxRef = useRef<string>("");
 
-  // Clear cache when model/region/run/var change
-  const ctxFingerprint = `${ctx.model}/${ctx.region}/${ctx.run}/${ctx.varId}`;
+  // Clear cache when model/run/var change
+  const ctxFingerprint = `${ctx.model}/${ctx.run}/${ctx.varId}`;
   useEffect(() => {
     if (ctxFingerprint !== prevCtxRef.current) {
       cacheRef.current.clear();
@@ -103,7 +101,7 @@ export function useSampleTooltip(ctx: SampleContext) {
         const gen = ++genRef.current;
         const roundedLat = roundCoord(lat);
         const roundedLon = roundCoord(lon);
-        const key = cacheKey(ctx.model, ctx.region, ctx.run, ctx.varId, ctx.fh, roundedLat, roundedLon);
+        const key = cacheKey(ctx.model, ctx.run, ctx.varId, ctx.fh, roundedLat, roundedLon);
 
         // Check LRU cache
         const cached = cacheRef.current.get(key);
@@ -120,7 +118,6 @@ export function useSampleTooltip(ctx: SampleContext) {
         // Fetch from API
         fetchSample({
           model: ctx.model,
-          region: ctx.region,
           run: ctx.run,
           var: ctx.varId,
           fh: ctx.fh,
@@ -143,7 +140,7 @@ export function useSampleTooltip(ctx: SampleContext) {
           });
       }, DEBOUNCE_MS);
     },
-    [ctx.model, ctx.region, ctx.run, ctx.varId, ctx.fh]
+    [ctx.model, ctx.run, ctx.varId, ctx.fh]
   );
 
   const onHoverEnd = useCallback(() => {

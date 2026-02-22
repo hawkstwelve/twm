@@ -319,14 +319,13 @@ export default function App() {
       const resolvedFh = Number.isFinite(fh) ? fh : fallbackFh;
       return buildTileUrlFromFrame({
         model,
-        region,
         run: resolvedRunForRequests,
         varKey: variable,
         fh: resolvedFh,
         frameRow: frameByHour.get(resolvedFh) ?? frameRows[0] ?? null,
       });
     },
-    [model, region, resolvedRunForRequests, variable, frameHours, frameByHour, frameRows]
+    [model, resolvedRunForRequests, variable, frameHours, frameByHour, frameRows]
   );
 
   const tileUrl = useMemo(() => {
@@ -344,13 +343,12 @@ export default function App() {
     }
     return buildContourUrl({
       model,
-      region,
       run: resolvedRunForRequests,
       varKey: variable,
       fh: forecastHour,
       key: "iso32f",
     });
-  }, [currentFrame, model, region, resolvedRunForRequests, variable, forecastHour]);
+  }, [currentFrame, model, resolvedRunForRequests, variable, forecastHour]);
 
   const legend = useMemo(() => {
     const normalizedMeta = extractLegendMeta(currentFrame) ?? extractLegendMeta(frameRows[0] ?? null);
@@ -381,7 +379,6 @@ export default function App() {
   // ── Hover-for-data tooltip ──────────────────────────────────────────
   const { tooltip, onHover, onHoverEnd } = useSampleTooltip({
     model,
-    region,
     run: resolvedRunForRequests,
     varId: variable,
     fh: forecastHour,
@@ -482,9 +479,9 @@ export default function App() {
     Promise.all([
       fetchModels(),
       fetchRegionPresets(),
-      fetchRuns(DEFAULTS.model, DEFAULTS.region),
-      fetchVars(DEFAULTS.model, DEFAULTS.region, DEFAULTS.run),
-      fetchFrames(DEFAULTS.model, DEFAULTS.region, DEFAULTS.run, DEFAULTS.variable),
+      fetchRuns(DEFAULTS.model),
+      fetchVars(DEFAULTS.model, DEFAULTS.run),
+      fetchFrames(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable),
     ])
       .then(([modelsData, regionPresetData, runsData, varsData, framesData]) => {
         if (cancelled) return;
@@ -613,17 +610,17 @@ export default function App() {
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
-    if (!model || !region) return;
+    if (!model) return;
     let cancelled = false;
 
     async function loadRunsAndVars() {
       setError(null);
       try {
-        const runData = await fetchRuns(model, region);
+        const runData = await fetchRuns(model);
         if (cancelled) return;
 
         const nextRun = run !== "latest" && runData.includes(run) ? run : "latest";
-        const varData = await fetchVars(model, region, nextRun);
+        const varData = await fetchVars(model, nextRun);
         if (cancelled) return;
 
         setRuns(runData);
@@ -650,22 +647,22 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [model, region, run]);
+  }, [model, run]);
 
   useEffect(() => {
     setFrameRows([]);
     setForecastHour(0);
     setTargetForecastHour(0);
-  }, [model, region, run, variable]);
+  }, [model, run, variable]);
 
   useEffect(() => {
-    if (!model || !region || !variable) return;
+    if (!model || !variable) return;
     let cancelled = false;
 
     async function loadFrames() {
       setError(null);
       try {
-        const rows = await fetchFrames(model, region, resolvedRunForRequests, variable);
+        const rows = await fetchFrames(model, resolvedRunForRequests, variable);
         if (cancelled) return;
         setFrameRows(rows);
         const frameMeta = extractLegendMeta(rows[0] ?? null);
@@ -691,19 +688,19 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [model, region, run, variable, resolvedRunForRequests]);
+  }, [model, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
     let cancelled = false;
 
     const interval = window.setInterval(() => {
-      if (document.hidden || !model || !region || !variable) {
+      if (document.hidden || !model || !variable) {
         return;
       }
       // Use `run` ("latest" when in live mode) rather than the resolved run ID so
       // the request hits the short-TTL ETag path and bypasses any stale immutable
       // browser-cache entries for the resolved run URL.
-      fetchFrames(model, region, run, variable)
+      fetchFrames(model, run, variable)
         .then((rows) => {
           if (cancelled) {
             return;
@@ -722,7 +719,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [model, region, run, variable, resolvedRunForRequests]);
+  }, [model, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
     if (!isPlaying || frameHours.length === 0) return;
