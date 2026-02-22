@@ -8,8 +8,10 @@ import logging
 import os
 import re
 import threading
+import time
 from functools import lru_cache
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import rasterio
@@ -46,6 +48,7 @@ VAR_ORDER_BY_MODEL = {
 }
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
+_JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
 
 
 def _if_none_match_values(header_value: str) -> list[str]:
@@ -94,21 +97,60 @@ _ds_cache: dict[str, rasterio.DatasetReader] = {}
 _ds_cache_lock = threading.Lock()
 _DS_CACHE_MAX = 16
 
+_manifest_cache: dict[str, dict[str, Any]] = {}
+_sidecar_cache: dict[str, dict[str, Any]] = {}
+_json_cache_lock = threading.Lock()
 
-@lru_cache(maxsize=256)
-def _cached_sidecar(path_str: str) -> dict | None:
+
+def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
+    key = str(path)
+    now = time.monotonic()
+
+    with _json_cache_lock:
+        entry = cache.get(key)
+        if entry is not None:
+            last_checked = float(entry.get("last_checked", 0.0))
+            if now - last_checked < _JSON_CACHE_RECHECK_SECONDS:
+                payload = entry.get("payload")
+                return payload if isinstance(payload, dict) else None
+
     try:
-        return json.loads(Path(path_str).read_text())
-    except Exception:
+        stat = path.stat()
+        mtime_ns = int(stat.st_mtime_ns)
+    except OSError:
+        with _json_cache_lock:
+            cache.pop(key, None)
         return None
 
+    with _json_cache_lock:
+        entry = cache.get(key)
+        if entry is not None and int(entry.get("mtime_ns", -1)) == mtime_ns:
+            entry["last_checked"] = now
+            payload = entry.get("payload")
+            return payload if isinstance(payload, dict) else None
 
-@lru_cache(maxsize=256)
-def _cached_manifest(path_str: str) -> dict | None:
     try:
-        return json.loads(Path(path_str).read_text())
+        payload = json.loads(path.read_text())
     except Exception:
+        logger.warning("Failed to read JSON cache file %s; serving last-good payload if available", path)
+        with _json_cache_lock:
+            entry = cache.get(key)
+            if entry is not None:
+                entry["last_checked"] = now
+                cached_payload = entry.get("payload")
+                return cached_payload if isinstance(cached_payload, dict) else None
         return None
+
+    if not isinstance(payload, dict):
+        return None
+
+    with _json_cache_lock:
+        cache[key] = {
+            "mtime_ns": mtime_ns,
+            "last_checked": now,
+            "payload": payload,
+        }
+    return payload
 
 
 def _get_cached_dataset(path: Path) -> rasterio.DatasetReader:
@@ -194,7 +236,7 @@ def _load_manifest(model: str, run: str) -> dict | None:
     path = _manifest_path(model, run)
     if not path.is_file():
         return None
-    return _cached_manifest(str(path))
+    return _load_json_cached(path, _manifest_cache)
 
 
 def _published_var_dir(model: str, run: str, var: str) -> Path:
@@ -213,7 +255,7 @@ def _resolve_sidecar(model: str, run: str, var: str, fh: int) -> dict | None:
     resolved = _resolve_run(model, run) or run
     candidate = _published_var_dir(model, resolved, var) / f"fh{fh:03d}.json"
     if candidate.is_file():
-        return _cached_sidecar(str(candidate))
+        return _load_json_cached(candidate, _sidecar_cache)
     return None
 
 
