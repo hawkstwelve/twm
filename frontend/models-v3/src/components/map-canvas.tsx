@@ -22,8 +22,12 @@ const CARTO_LIGHT_LABEL_TILES = [
   "https://d.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
 ];
 
-const REGION_VIEWS: Record<string, { center: [number, number]; zoom: number }> = {
-  pnw: { center: [-120.8, 45.6], zoom: 6 },
+type RegionView = {
+  center: [number, number];
+  zoom: number;
+  bbox?: [number, number, number, number];
+  minZoom?: number;
+  maxZoom?: number;
 };
 
 const SCRUB_SWAP_TIMEOUT_MS = 650;
@@ -251,6 +255,7 @@ type MapCanvasProps = {
   tileUrl: string;
   contourGeoJsonUrl?: string | null;
   region: string;
+  regionViews?: Record<string, RegionView>;
   opacity: number;
   mode: PlaybackMode;
   variable?: string;
@@ -269,6 +274,7 @@ export function MapCanvas({
   tileUrl,
   contourGeoJsonUrl,
   region,
+  regionViews,
   opacity,
   mode,
   variable,
@@ -297,11 +303,11 @@ export function MapCanvas({
   const fadeRafRef = useRef<number | null>(null);
 
   const view = useMemo(() => {
-    return REGION_VIEWS[region] ?? {
+    return regionViews?.[region] ?? {
       center: [DEFAULTS.center[1], DEFAULTS.center[0]] as [number, number],
       zoom: DEFAULTS.zoom,
     };
-  }, [region]);
+  }, [region, regionViews]);
 
   const setLayerOpacity = useCallback((map: maplibregl.Map, id: string, value: number) => {
     if (!map.getLayer(id)) {
@@ -599,8 +605,8 @@ export function MapCanvas({
       style: styleFor(tileUrl, opacity, variable, model, contourGeoJsonUrl),
       center: view.center,
       zoom: view.zoom,
-      minZoom: 3,
-      maxZoom: 11,
+      minZoom: view.minZoom ?? 3,
+      maxZoom: view.maxZoom ?? 11,
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
@@ -924,7 +930,12 @@ export function MapCanvas({
     if (!map || !isLoaded) {
       return;
     }
-    map.easeTo({ center: view.center, zoom: view.zoom, duration: 600 });
+    if (view.bbox) {
+      const [west, south, east, north] = view.bbox;
+      map.fitBounds([[west, south], [east, north]], { duration: 600, padding: 24 });
+    } else {
+      map.easeTo({ center: view.center, zoom: view.zoom, duration: 600 });
+    }
   }, [view, isLoaded]);
 
   // ── Hover events for sample tooltip ──────────────────────────────────

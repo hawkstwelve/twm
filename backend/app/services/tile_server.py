@@ -97,9 +97,9 @@ def _render_png_compat(tile) -> bytes:
         return tile.render(img_format="PNG")
 
 
-def _latest_run_from_pointer(model: str, region: str) -> str | None:
+def _latest_run_from_pointer(model: str) -> str | None:
     """Return run_id from published LATEST.json if valid and present on disk."""
-    latest_path = PUBLISHED_ROOT / model / region / "LATEST.json"
+    latest_path = PUBLISHED_ROOT / model / "LATEST.json"
     if not latest_path.is_file():
         return None
 
@@ -114,25 +114,25 @@ def _latest_run_from_pointer(model: str, region: str) -> str | None:
         logger.warning("Invalid run_id in LATEST.json at %s: %r", latest_path, run_id)
         return None
 
-    run_dir = PUBLISHED_ROOT / model / region / run_id
+    run_dir = PUBLISHED_ROOT / model / run_id
     if not run_dir.is_dir():
         logger.warning("LATEST.json run_id does not exist on disk: %s", run_dir)
         return None
     return run_id
 
 
-def _resolve_latest_run(model: str, region: str) -> str | None:
-    """Find latest published run ID for model/region.
+def _resolve_latest_run(model: str) -> str | None:
+    """Find latest published run ID for model.
 
     Preference order:
-    1) published/{model}/{region}/LATEST.json run_id (if valid)
+    1) published/{model}/LATEST.json run_id (if valid)
     2) lexicographically greatest run directory in published/
     """
-    pointed = _latest_run_from_pointer(model, region)
+    pointed = _latest_run_from_pointer(model)
     if pointed is not None:
         return pointed
 
-    d = PUBLISHED_ROOT / model / region
+    d = PUBLISHED_ROOT / model
     if not d.is_dir():
         return None
 
@@ -146,7 +146,7 @@ def _resolve_latest_run(model: str, region: str) -> str | None:
     return sorted(set(runs))[-1]
 
 
-def _resolve_cog_path(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
+def _resolve_cog_path(model: str, run: str, var: str, fh: int) -> Path | None:
     """Find the RGBA COG on disk.
 
     Resolves 'latest' to the actual latest run directory.
@@ -154,14 +154,14 @@ def _resolve_cog_path(model: str, region: str, run: str, var: str, fh: int) -> P
     """
     resolved = run
     if run == "latest":
-        resolved = _resolve_latest_run(model, region)
+        resolved = _resolve_latest_run(model)
         if resolved is None:
             return None
 
     fh_str = f"fh{fh:03d}"
     filename = f"{fh_str}.rgba.cog.tif"
 
-    candidate = PUBLISHED_ROOT / model / region / resolved / var / filename
+    candidate = PUBLISHED_ROOT / model / resolved / var / filename
     if candidate.is_file():
         return candidate
     return None
@@ -172,16 +172,16 @@ def health():
     return {"ok": True, "data_root": str(DATA_ROOT)}
 
 
-@app.get("/tiles/v3/{model}/{region}/{run}/{var}/{fh:int}/{z:int}/{x:int}/{y:int}.png")
+@app.get("/tiles/v3/{model}/{run}/{var}/{fh:int}/{z:int}/{x:int}/{y:int}.png")
 def get_tile(
-    model: str, region: str, run: str, var: str, fh: int,
+    model: str, run: str, var: str, fh: int,
     z: int, x: int, y: int,
 ):
     """Serve a single PNG map tile from a pre-styled RGBA COG.
 
     No colormap logic. No var-branching. Read 4 bands, encode PNG, return.
     """
-    cog_path = _resolve_cog_path(model, region, run, var, fh)
+    cog_path = _resolve_cog_path(model, run, var, fh)
     if cog_path is None:
         return Response(
             status_code=404,
@@ -213,7 +213,7 @@ def get_tile(
     except Exception as exc:
         logger.exception(
             "Tile read failed: %s/%s/%s/%s/fh%03d/%d/%d/%d",
-            model, region, run, var, fh, z, x, y,
+            model, run, var, fh, z, x, y,
         )
         raise HTTPException(
             status_code=500,

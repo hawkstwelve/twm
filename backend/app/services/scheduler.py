@@ -25,6 +25,7 @@ DEFAULT_POLL_SECONDS = 300
 INCOMPLETE_RUN_POLL_SECONDS = 60
 DEFAULT_PROMOTION_FHS = (0, 1, 2)
 DEFAULT_PROBE_VAR = "tmp2m"
+CANONICAL_COVERAGE = "conus"
 DEFAULT_HRRR_PROBE_ATTEMPTS = 4
 MAX_HRRR_PROBE_ATTEMPTS = 6
 ENV_DEFAULT_VARS = "TWF_V3_SCHEDULER_VARS"
@@ -248,29 +249,28 @@ def _scheduled_targets_for_cycle(plugin, vars_to_build: list[str], cycle_hour: i
     return targets
 
 
-def _frame_sidecar_path(data_root: Path, model: str, region: str, run_id: str, var_id: str, fh: int) -> Path:
-    return data_root / "staging" / model / region / run_id / var_id / f"fh{fh:03d}.json"
+def _frame_sidecar_path(data_root: Path, model: str, run_id: str, var_id: str, fh: int) -> Path:
+    return data_root / "staging" / model / run_id / var_id / f"fh{fh:03d}.json"
 
 
-def _frame_rgba_path(data_root: Path, model: str, region: str, run_id: str, var_id: str, fh: int) -> Path:
-    return data_root / "staging" / model / region / run_id / var_id / f"fh{fh:03d}.rgba.cog.tif"
+def _frame_rgba_path(data_root: Path, model: str, run_id: str, var_id: str, fh: int) -> Path:
+    return data_root / "staging" / model / run_id / var_id / f"fh{fh:03d}.rgba.cog.tif"
 
 
-def _frame_value_path(data_root: Path, model: str, region: str, run_id: str, var_id: str, fh: int) -> Path:
-    return data_root / "staging" / model / region / run_id / var_id / f"fh{fh:03d}.val.cog.tif"
+def _frame_value_path(data_root: Path, model: str, run_id: str, var_id: str, fh: int) -> Path:
+    return data_root / "staging" / model / run_id / var_id / f"fh{fh:03d}.val.cog.tif"
 
 
 def _frame_artifacts_exist(
     data_root: Path,
     model: str,
-    region: str,
     run_id: str,
     var_id: str,
     fh: int,
 ) -> bool:
-    rgba = _frame_rgba_path(data_root, model, region, run_id, var_id, fh)
-    val = _frame_value_path(data_root, model, region, run_id, var_id, fh)
-    side = _frame_sidecar_path(data_root, model, region, run_id, var_id, fh)
+    rgba = _frame_rgba_path(data_root, model, run_id, var_id, fh)
+    val = _frame_value_path(data_root, model, run_id, var_id, fh)
+    side = _frame_sidecar_path(data_root, model, run_id, var_id, fh)
 
     def _safe_exists(path: Path) -> bool:
         try:
@@ -285,7 +285,6 @@ def _frame_artifacts_exist(
 def _build_one(
     *,
     model_id: str,
-    region: str,
     var_id: str,
     fh: int,
     run_dt: datetime,
@@ -294,7 +293,7 @@ def _build_one(
 ) -> tuple[str, int, bool]:
     result = build_frame(
         model=model_id,
-        region=region,
+        region=CANONICAL_COVERAGE,
         var_id=var_id,
         fh=fh,
         run_date=run_dt,
@@ -312,7 +311,7 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     tmp.replace(path)
 
 
-def _write_latest_pointer(data_root: Path, model: str, region: str, run_id: str) -> None:
+def _write_latest_pointer(data_root: Path, model: str, run_id: str) -> None:
     run_dt = _parse_run_id_datetime(run_id)
     if run_dt is None:
         raise SchedulerConfigError(f"Cannot write LATEST.json for invalid run_id={run_id!r}")
@@ -322,38 +321,37 @@ def _write_latest_pointer(data_root: Path, model: str, region: str, run_id: str)
         "updated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "source": "scheduler_v3",
     }
-    latest_path = data_root / "published" / model / region / "LATEST.json"
+    latest_path = data_root / "published" / model / "LATEST.json"
     _write_json_atomic(latest_path, payload)
 
 
 def _should_promote(
     data_root: Path,
     model: str,
-    region: str,
     run_id: str,
     primary_vars: list[str],
     promotion_fhs: Iterable[int],
 ) -> bool:
     for var_id in primary_vars:
         for fh in promotion_fhs:
-            rgba = _frame_rgba_path(data_root, model, region, run_id, var_id, int(fh))
-            val = _frame_value_path(data_root, model, region, run_id, var_id, int(fh))
-            side = _frame_sidecar_path(data_root, model, region, run_id, var_id, int(fh))
+            rgba = _frame_rgba_path(data_root, model, run_id, var_id, int(fh))
+            val = _frame_value_path(data_root, model, run_id, var_id, int(fh))
+            side = _frame_sidecar_path(data_root, model, run_id, var_id, int(fh))
             if rgba.exists() and val.exists() and side.exists():
                 return True
     return False
 
 
-def _promote_run(data_root: Path, model: str, region: str, run_id: str) -> None:
-    stage_run = data_root / "staging" / model / region / run_id
+def _promote_run(data_root: Path, model: str, run_id: str) -> None:
+    stage_run = data_root / "staging" / model / run_id
     if not stage_run.is_dir():
         raise SchedulerConfigError(f"Cannot promote missing staging run dir: {stage_run}")
 
-    published_region = data_root / "published" / model / region
-    published_region.mkdir(parents=True, exist_ok=True)
+    published_model = data_root / "published" / model
+    published_model.mkdir(parents=True, exist_ok=True)
 
-    published_run = published_region / run_id
-    tmp_run = published_region / f".{run_id}.tmp"
+    published_run = published_model / run_id
+    tmp_run = published_model / f".{run_id}.tmp"
 
     if tmp_run.exists():
         shutil.rmtree(tmp_run, ignore_errors=True)
@@ -374,7 +372,6 @@ def _write_run_manifest(
     *,
     data_root: Path,
     model: str,
-    region: str,
     run_id: str,
     targets: list[tuple[str, int]],
 ) -> None:
@@ -394,7 +391,7 @@ def _write_run_manifest(
         kind = ""
 
         for fh in expected_fhs:
-            sidecar_path = _frame_sidecar_path(data_root, model, region, run_id, var_id, fh)
+            sidecar_path = _frame_sidecar_path(data_root, model, run_id, var_id, fh)
             if not sidecar_path.exists():
                 continue
             try:
@@ -424,13 +421,12 @@ def _write_run_manifest(
     payload = {
         "contract_version": "3.0",
         "model": model,
-        "region": region,
         "run": run_id,
         "variables": variables,
         "last_updated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
-    manifest_path = data_root / "manifests" / model / region / f"{run_id}.json"
+    manifest_path = data_root / "manifests" / model / f"{run_id}.json"
     _write_json_atomic(manifest_path, payload)
 
 
@@ -460,7 +456,6 @@ def _process_run(
     *,
     plugin,
     model_id: str,
-    region: str,
     vars_to_build: list[str],
     primary_vars: list[str],
     run_dt: datetime,
@@ -483,17 +478,17 @@ def _process_run(
     missing: list[tuple[str, int]] = []
     for var_id, fhs in fhs_by_var.items():
         for fh in sorted(set(fhs)):
-            if _frame_artifacts_exist(data_root, model_id, region, run_id, var_id, fh):
+            if _frame_artifacts_exist(data_root, model_id, run_id, var_id, fh):
                 continue
             missing.append((var_id, fh))
             break
 
     total = len(targets)
     logger.info(
-        "Run=%s model=%s region=%s targets=%d next_missing=%d",
+        "Run=%s model=%s coverage=%s targets=%d next_missing=%d",
         run_id,
         model_id,
-        region,
+        CANONICAL_COVERAGE,
         total,
         len(missing),
     )
@@ -505,7 +500,6 @@ def _process_run(
                 pool.submit(
                     _build_one,
                     model_id=model_id,
-                    region=region,
                     var_id=var_id,
                     fh=fh,
                     run_dt=run_dt,
@@ -522,24 +516,22 @@ def _process_run(
                 else:
                     logger.warning("Build skipped/failed: %s %s fh%03d", run_id, var_id, fh)
 
-    _write_run_manifest(
-        data_root=data_root,
-        model=model_id,
-        region=region,
-        run_id=run_id,
-        targets=targets,
-    )
+    if _should_promote(data_root, model_id, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
+        _promote_run(data_root, model_id, run_id)
+        _write_run_manifest(
+            data_root=data_root,
+            model=model_id,
+            run_id=run_id,
+            targets=targets,
+        )
+        _write_latest_pointer(data_root, model_id, run_id)
 
-    if _should_promote(data_root, model_id, region, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
-        _promote_run(data_root, model_id, region, run_id)
-        _write_latest_pointer(data_root, model_id, region, run_id)
-
-    _enforce_run_retention(data_root / "staging" / model_id / region, keep_runs)
-    _enforce_run_retention(data_root / "published" / model_id / region, keep_runs)
+    _enforce_run_retention(data_root / "staging" / model_id, keep_runs)
+    _enforce_run_retention(data_root / "published" / model_id, keep_runs)
 
     available = 0
     for var_id, fh in targets:
-        if _frame_artifacts_exist(data_root, model_id, region, run_id, var_id, fh):
+        if _frame_artifacts_exist(data_root, model_id, run_id, var_id, fh):
             available += 1
     return run_id, available, total
 
@@ -547,7 +539,6 @@ def _process_run(
 def run_scheduler(
     *,
     model: str,
-    region: str,
     vars_to_build: list[str],
     primary_vars: list[str],
     data_root: Path,
@@ -559,8 +550,10 @@ def run_scheduler(
     probe_var: str,
 ) -> int:
     plugin = _resolve_model(model)
-    if plugin.get_region(region) is None:
-        raise SchedulerConfigError(f"Unknown region for model={model}: {region}")
+    if plugin.get_region(CANONICAL_COVERAGE) is None:
+        raise SchedulerConfigError(
+            f"Model {model!r} does not define canonical coverage {CANONICAL_COVERAGE!r}"
+        )
 
     normalized_vars = _resolve_vars_to_schedule(plugin, vars_to_build)
     if not normalized_vars:
@@ -580,9 +573,9 @@ def run_scheduler(
             resolved_primary = [normalized_vars[0]]
 
     logger.info(
-        "Scheduler starting model=%s region=%s vars=%s primary=%s probe_var=%s data_root=%s workers=%d poll_incomplete=%ds poll_complete=%ds",
+        "Scheduler starting model=%s coverage=%s vars=%s primary=%s probe_var=%s data_root=%s workers=%d poll_incomplete=%ds poll_complete=%ds",
         model,
-        region,
+        CANONICAL_COVERAGE,
         normalized_vars,
         resolved_primary,
         plugin.normalize_var_id(probe_var),
@@ -608,7 +601,6 @@ def run_scheduler(
         processed_run_id, available, total = _process_run(
             plugin=plugin,
             model_id=model,
-            region=region,
             vars_to_build=normalized_vars,
             primary_vars=resolved_primary,
             run_dt=run_dt,
@@ -638,7 +630,6 @@ def run_scheduler(
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the V3 model scheduler.")
     parser.add_argument("--model", required=True, help="Model id (e.g. hrrr, gfs)")
-    parser.add_argument("--region", required=True, help="Region id (e.g. pnw, conus)")
     parser.add_argument("--vars", default=None, help="Comma-separated vars to build")
     parser.add_argument("--primary-vars", default=None, help="Comma-separated primary vars for promotion")
     parser.add_argument("--data-root", default=None, help="Override TWF_V3_DATA_ROOT")
@@ -685,7 +676,6 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return run_scheduler(
             model=args.model.strip().lower(),
-            region=args.region.strip().lower(),
             vars_to_build=vars_list,
             primary_vars=primary_list,
             data_root=data_root,

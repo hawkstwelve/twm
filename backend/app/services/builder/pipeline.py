@@ -395,7 +395,7 @@ def check_pixel_sanity(
 def build_sidecar_json(
     *,
     model: str,
-    region: str,
+    region: str | None = None,
     run_id: str,
     var_id: str,
     fh: int,
@@ -426,7 +426,6 @@ def build_sidecar_json(
     sidecar: dict[str, Any] = {
         "contract_version": CONTRACT_VERSION,
         "model": model,
-        "region": region,
         "run": run_id,
         "var": var_id,
         "fh": fh,
@@ -437,6 +436,9 @@ def build_sidecar_json(
         "max": colorize_meta.get("max"),
         "legend": legend,
     }
+
+    if region:
+        sidecar["region"] = region
 
     if value_downsample_factor > 1:
         sidecar["hover_value_downsample_factor"] = int(value_downsample_factor)
@@ -714,10 +716,7 @@ def build_frame(
     run_id = _run_id_from_date(run_date)
     fh_str = f"fh{fh:03d}"
 
-    logger.info(
-        "Building frame: %s/%s/%s/%s/%s",
-        model, region, run_id, var_id, fh_str,
-    )
+    logger.info("Building frame: %s/%s/%s/%s (coverage=%s)", model, run_id, var_id, fh_str, region)
 
     # --- Resolve specs ---
     var_spec_colormap = VAR_SPECS.get(var_id)
@@ -734,7 +733,7 @@ def build_frame(
     search_pattern = None if getattr(var_spec_model, "derived", False) else _get_search_pattern(var_spec_model)
 
     # --- Staging directory ---
-    staging_dir = data_root / "staging" / model / region / run_id / var_id
+    staging_dir = data_root / "staging" / model / run_id / var_id
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     rgba_path = staging_dir / f"{fh_str}.rgba.cog.tif"
@@ -892,7 +891,6 @@ def build_frame(
         # --- Write sidecar JSON ---
         sidecar = build_sidecar_json(
             model=model,
-            region=region,
             run_id=run_id,
             var_id=var_id,
             fh=fh,

@@ -1,4 +1,4 @@
-"""TWF V3 API — Discovery + Sampling endpoints."""
+"""TWF V3 API — canonical discovery + sampling endpoints."""
 
 from __future__ import annotations
 
@@ -8,24 +8,25 @@ import logging
 import os
 import re
 import threading
-from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
 import rasterio
-from rasterio.windows import Window
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pyproj import Transformer
+from rasterio.windows import Window
+
+from .config.regions import REGION_PRESETS
 
 logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
 PUBLISHED_ROOT = DATA_ROOT / "published"
+MANIFESTS_ROOT = DATA_ROOT / "manifests"
 
-# Model display names
 MODEL_NAMES = {
     "hrrr": "HRRR",
     "gfs": "GFS",
@@ -44,13 +45,8 @@ VAR_ORDER_BY_MODEL = {
     ],
 }
 
-# Regex to match run IDs like 20260217_20z
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 
-
-# ---------------------------------------------------------------------------
-# Conditional GET helpers
-# ---------------------------------------------------------------------------
 
 def _if_none_match_values(header_value: str) -> list[str]:
     return [v.strip() for v in header_value.split(",") if v.strip()]
@@ -63,6 +59,11 @@ def _etag_matches(if_none_match: str | None, etag: str) -> bool:
     if "*" in vals:
         return True
     return etag in vals
+
+
+def _make_etag(payload: object) -> str:
+    digest = hashlib.md5(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()[:12]
+    return f'"{digest}"'
 
 
 def _maybe_304(request: Request, *, etag: str, cache_control: str) -> Response | None:
@@ -78,7 +79,7 @@ def _maybe_304(request: Request, *, etag: str, cache_control: str) -> Response |
     return None
 
 
-app = FastAPI(title="TWF V3 API", version="1.0.0")
+app = FastAPI(title="TWF V3 API", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -87,27 +88,35 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Reusable WGS84 → Web Mercator transformer (thread-safe, cached)
 _wgs84_to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
-
-# ---------------------------------------------------------------------------
-# Caches — keep COG datasets + sidecar JSON hot for hover sampling
-# ---------------------------------------------------------------------------
-
-_ds_cache: dict[str, rasterio.DatasetReader] = {}  # path → open dataset
+_ds_cache: dict[str, rasterio.DatasetReader] = {}
 _ds_cache_lock = threading.Lock()
-_DS_CACHE_MAX = 16  # keep at most 16 open datasets
+_DS_CACHE_MAX = 16
+
+
+@lru_cache(maxsize=256)
+def _cached_sidecar(path_str: str) -> dict | None:
+    try:
+        return json.loads(Path(path_str).read_text())
+    except Exception:
+        return None
+
+
+@lru_cache(maxsize=256)
+def _cached_manifest(path_str: str) -> dict | None:
+    try:
+        return json.loads(Path(path_str).read_text())
+    except Exception:
+        return None
 
 
 def _get_cached_dataset(path: Path) -> rasterio.DatasetReader:
-    """Return an open rasterio dataset, reusing from cache if possible."""
     key = str(path)
     with _ds_cache_lock:
         ds = _ds_cache.get(key)
         if ds is not None and not ds.closed:
             return ds
-        # Evict oldest if at capacity
         if len(_ds_cache) >= _DS_CACHE_MAX:
             evict_key = next(iter(_ds_cache))
             try:
@@ -119,30 +128,8 @@ def _get_cached_dataset(path: Path) -> rasterio.DatasetReader:
         return ds
 
 
-@lru_cache(maxsize=128)
-def _cached_sidecar(path_str: str) -> dict | None:
-    """Read and cache sidecar JSON. Keyed by string path for lru_cache."""
-    try:
-        return json.loads(Path(path_str).read_text())
-    except Exception:
-        return None
-
-
-# ---------------------------------------------------------------------------
-# Helpers — filesystem scanning + "latest" resolution
-# ---------------------------------------------------------------------------
-
-def _scan_subdirs(parent: Path) -> list[str]:
-    """Return sorted list of immediate subdirectory names under published/*parent*."""
-    d = PUBLISHED_ROOT / parent
-    if not d.is_dir():
-        return []
-    return sorted(child.name for child in d.iterdir() if child.is_dir())
-
-
-def _latest_run_from_pointer(model: str, region: str) -> str | None:
-    """Return run_id from published LATEST.json if valid and present on disk."""
-    latest_path = PUBLISHED_ROOT / model / region / "LATEST.json"
+def _latest_run_from_pointer(model: str) -> str | None:
+    latest_path = PUBLISHED_ROOT / model / "LATEST.json"
     if not latest_path.is_file():
         return None
     try:
@@ -156,48 +143,91 @@ def _latest_run_from_pointer(model: str, region: str) -> str | None:
         logger.warning("Invalid run_id in LATEST.json at %s: %r", latest_path, run_id)
         return None
 
-    run_dir = PUBLISHED_ROOT / model / region / run_id
-    if not run_dir.is_dir():
-        logger.warning("LATEST.json run_id does not exist on disk: %s", run_dir)
+    run_dir = PUBLISHED_ROOT / model / run_id
+    manifest_path = MANIFESTS_ROOT / model / f"{run_id}.json"
+    if not run_dir.is_dir() or not manifest_path.is_file():
+        logger.warning("LATEST.json points to incomplete run state for %s/%s", model, run_id)
         return None
     return run_id
 
 
-def _resolve_latest_run(model: str, region: str) -> str | None:
-    """Find latest published run ID for model/region.
+def _scan_manifest_runs(model: str) -> list[str]:
+    model_manifest_dir = MANIFESTS_ROOT / model
+    if not model_manifest_dir.is_dir():
+        return []
+    runs: list[str] = []
+    for file_path in model_manifest_dir.glob("*.json"):
+        run_id = file_path.stem
+        if not _RUN_ID_RE.match(run_id):
+            continue
+        if not (PUBLISHED_ROOT / model / run_id).is_dir():
+            continue
+        runs.append(run_id)
+    return sorted(set(runs), reverse=True)
 
-    Preference order:
-    1) published/{model}/{region}/LATEST.json run_id (if valid)
-    2) lexicographically greatest run directory in published/
-    """
-    pointed = _latest_run_from_pointer(model, region)
+
+def _resolve_latest_run(model: str) -> str | None:
+    pointed = _latest_run_from_pointer(model)
     if pointed is not None:
         return pointed
-
-    d = PUBLISHED_ROOT / model / region
-    if not d.is_dir():
-        return None
-
-    runs = [
-        child.name
-        for child in d.iterdir()
-        if child.is_dir() and _RUN_ID_RE.match(child.name)
-    ]
-    if not runs:
-        return None
-    return sorted(set(runs))[-1]  # Latest by lexicographic sort (YYYYMMDD_HHz)
+    runs = _scan_manifest_runs(model)
+    return runs[0] if runs else None
 
 
-def _resolve_run(model: str, region: str, run: str) -> str | None:
-    """Resolve a run value — if 'latest', find the actual latest run ID."""
+def _resolve_run(model: str, run: str) -> str | None:
     if run == "latest":
-        return _resolve_latest_run(model, region)
-    return run
+        return _resolve_latest_run(model)
+    if not _RUN_ID_RE.match(run):
+        return None
+    run_dir = PUBLISHED_ROOT / model / run
+    manifest_path = MANIFESTS_ROOT / model / f"{run}.json"
+    if run_dir.is_dir() and manifest_path.is_file():
+        return run
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Discovery endpoints
-# ---------------------------------------------------------------------------
+def _manifest_path(model: str, run: str) -> Path:
+    return MANIFESTS_ROOT / model / f"{run}.json"
+
+
+def _load_manifest(model: str, run: str) -> dict | None:
+    path = _manifest_path(model, run)
+    if not path.is_file():
+        return None
+    return _cached_manifest(str(path))
+
+
+def _published_var_dir(model: str, run: str, var: str) -> Path:
+    return PUBLISHED_ROOT / model / run / var
+
+
+def _resolve_val_cog(model: str, run: str, var: str, fh: int) -> Path | None:
+    resolved = _resolve_run(model, run) or run
+    candidate = _published_var_dir(model, resolved, var) / f"fh{fh:03d}.val.cog.tif"
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _resolve_sidecar(model: str, run: str, var: str, fh: int) -> dict | None:
+    resolved = _resolve_run(model, run) or run
+    candidate = _published_var_dir(model, resolved, var) / f"fh{fh:03d}.json"
+    if candidate.is_file():
+        return _cached_sidecar(str(candidate))
+    return None
+
+
+def _resolve_frame_var_dir(model: str, run: str, var: str, fh: int) -> Path | None:
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return None
+    var_dir = _published_var_dir(model, resolved, var)
+    if not var_dir.is_dir():
+        return None
+    if not (var_dir / f"fh{fh:03d}.rgba.cog.tif").is_file():
+        return None
+    return var_dir
+
 
 @app.get("/api/v3/health")
 def health():
@@ -206,140 +236,150 @@ def health():
 
 @app.get("/api/v3")
 def root():
-    return {"service": "twf-v3-api", "version": "1.0.0"}
+    return {"service": "twf-v3-api", "version": "2.0.0"}
 
 
-@app.get("/api/v3/models")
-def list_models():
-    """List available models by scanning the data directory."""
-    model_ids = _scan_subdirs(Path(""))
-    return [
-        {"id": m, "name": MODEL_NAMES.get(m, m.upper())}
-        for m in model_ids
-    ]
-
-
-@app.get("/api/v3/{model}/regions")
-def list_regions(model: str):
-    """List available regions for a model."""
-    return _scan_subdirs(Path(model))
-
-
-@app.get("/api/v3/{model}/{region}/runs")
-def list_runs(request: Request, model: str, region: str):
-    """List available published runs for a model/region, newest first."""
-    d = PUBLISHED_ROOT / model / region
-    if not d.is_dir():
-        return JSONResponse(content=[], headers={"Cache-Control": "public, max-age=60"})
-
-    runs = sorted(
-        {child.name for child in d.iterdir() if child.is_dir() and _RUN_ID_RE.match(child.name)},
-        reverse=True,
-    )
-    cache_control = "public, max-age=60"
-    etag_value = hashlib.md5(json.dumps(runs).encode()).hexdigest()[:8]
-    etag_header = f'"{etag_value}"'
-
-    r304 = _maybe_304(request, etag=etag_header, cache_control=cache_control)
+@app.get("/api/regions")
+def list_region_presets(request: Request):
+    payload = {"regions": REGION_PRESETS}
+    cache_control = "public, max-age=300"
+    etag = _make_etag(payload)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
     if r304 is not None:
         return r304
-
     return JSONResponse(
-        content=runs,
+        content=payload,
         headers={
             "Cache-Control": cache_control,
-            "ETag": etag_header,
+            "ETag": etag,
         },
     )
 
 
-@app.get("/api/v3/{model}/{region}/{run}/vars")
-def list_vars(model: str, region: str, run: str):
-    """List available variables for a model/region/run."""
-    resolved = _resolve_run(model, region, run)
+@app.get("/api/v3/models")
+def list_models():
+    models: set[str] = set()
+    if MANIFESTS_ROOT.is_dir():
+        models.update(child.name for child in MANIFESTS_ROOT.iterdir() if child.is_dir())
+    if PUBLISHED_ROOT.is_dir():
+        models.update(child.name for child in PUBLISHED_ROOT.iterdir() if child.is_dir())
+    model_ids = sorted(models)
+    return [{"id": model_id, "name": MODEL_NAMES.get(model_id, model_id.upper())} for model_id in model_ids]
+
+
+@app.get("/api/v3/{model}/runs")
+def list_runs(request: Request, model: str):
+    runs = _scan_manifest_runs(model)
+    cache_control = "public, max-age=60"
+    etag = _make_etag(runs)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+    return JSONResponse(
+        content=runs,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag,
+        },
+    )
+
+
+@app.get("/api/v3/{model}/{run}/manifest")
+def get_manifest(request: Request, model: str, run: str):
+    resolved = _resolve_run(model, run)
     if resolved is None:
-        return Response(status_code=404, content='{"error": "no runs found"}',
-                        media_type="application/json")
+        return Response(status_code=404, content='{"error": "run not found"}', media_type="application/json")
+    manifest = _load_manifest(model, resolved)
+    if manifest is None:
+        return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
 
-    var_ids: set[str] = set()
-    d = PUBLISHED_ROOT / model / region / resolved
-    if d.is_dir():
-        for child in d.iterdir():
-            if child.is_dir():
-                var_ids.add(child.name)
+    cache_control = "public, max-age=60"
+    etag = _make_etag(manifest)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+    return JSONResponse(
+        content=manifest,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag,
+        },
+    )
 
-    # Import VAR_SPECS for display names
+
+@app.get("/api/v3/{model}/{run}/vars")
+def list_vars(model: str, run: str):
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return Response(status_code=404, content='{"error": "run not found"}', media_type="application/json")
+
+    manifest = _load_manifest(model, resolved)
+    if manifest is None:
+        return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
+
+    variables = manifest.get("variables")
+    if not isinstance(variables, dict):
+        return []
+
     from .services.colormaps import VAR_SPECS
+
     priority = VAR_ORDER_BY_MODEL.get(model, [])
     priority_index = {var_id: idx for idx, var_id in enumerate(priority)}
-
     ordered_var_ids = sorted(
-        var_ids,
+        variables.keys(),
         key=lambda var_id: (priority_index.get(var_id, len(priority_index)), var_id),
     )
 
     result = []
-    for v in ordered_var_ids:
-        spec = VAR_SPECS.get(v, {})
-        result.append({
-            "id": v,
-            "display_name": spec.get("display_name", v),
-        })
+    for var_id in ordered_var_ids:
+        spec = VAR_SPECS.get(var_id, {})
+        result.append({"id": var_id, "display_name": spec.get("display_name", var_id)})
     return result
 
 
-@app.get("/api/v3/{model}/{region}/{run}/{var}/frames")
-def list_frames(request: Request, model: str, region: str, run: str, var: str):
-    """List available frames for a model/region/run/variable."""
-    resolved = _resolve_run(model, region, run)
+@app.get("/api/v3/{model}/{run}/{var}/frames")
+def list_frames(request: Request, model: str, run: str, var: str):
+    resolved = _resolve_run(model, run)
     if resolved is None:
-        return Response(status_code=404, content='{"error": "no runs found"}',
-                        media_type="application/json")
+        return Response(status_code=404, content='{"error": "run not found"}', media_type="application/json")
 
-    # Scan for fhNNN.rgba.cog.tif files
+    manifest = _load_manifest(model, resolved)
+    if manifest is None:
+        return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
+
+    variables = manifest.get("variables")
+    if not isinstance(variables, dict):
+        return []
+    var_entry = variables.get(var)
+    if not isinstance(var_entry, dict):
+        return []
+
+    frame_entries = var_entry.get("frames")
+    if not isinstance(frame_entries, list):
+        frame_entries = []
+
     frames: list[dict] = []
-    seen_fh: set[int] = set()
+    for item in frame_entries:
+        if not isinstance(item, dict):
+            continue
+        fh = item.get("fh")
+        if not isinstance(fh, int):
+            continue
 
-    d = PUBLISHED_ROOT / model / region / resolved / var
-    if d.is_dir():
-        for f in d.iterdir():
-            if not f.name.endswith(".rgba.cog.tif"):
-                continue
-            m = re.match(r"^fh(\d{3})\.rgba\.cog\.tif$", f.name)
-            if not m:
-                continue
-            fh = int(m.group(1))
-            if fh in seen_fh:
-                continue
-            seen_fh.add(fh)
-
-            # Load sidecar JSON for metadata if available
-            sidecar_path = f.parent / f"fh{fh:03d}.json"
-            meta = None
-            if sidecar_path.is_file():
-                try:
-                    meta = json.loads(sidecar_path.read_text())
-                except Exception:
-                    pass
-
-            frames.append({
+        meta = _resolve_sidecar(model, resolved, var, fh)
+        frames.append(
+            {
                 "fh": fh,
                 "has_cog": True,
                 "run": resolved,
                 "meta": {"meta": meta},
-            })
+            }
+        )
 
-    frames.sort(key=lambda x: x["fh"])
-
-    # Runs accumulate new forecast hours as the pipeline produces them, so the
-    # frame manifest is never immutable.  Use a short TTL + ETag for all cases.
+    frames.sort(key=lambda row: row["fh"])
     cache_control = "public, max-age=60"
-    etag_value = hashlib.md5(
-        json.dumps(frames, default=str).encode()
-    ).hexdigest()[:8]
-    etag_header = f'"{etag_value}"'
-
-    r304 = _maybe_304(request, etag=etag_header, cache_control=cache_control)
+    etag = _make_etag(frames)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
     if r304 is not None:
         return r304
 
@@ -347,150 +387,74 @@ def list_frames(request: Request, model: str, region: str, run: str, var: str):
         content=frames,
         headers={
             "Cache-Control": cache_control,
-            "ETag": etag_header,
+            "ETag": etag,
         },
     )
 
 
-# ---------------------------------------------------------------------------
-# Helpers — COG / sidecar resolution (with latest support)
-# ---------------------------------------------------------------------------
-
-def _resolve_val_cog(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
-    """Find the float32 value COG on disk in published."""
-    resolved = _resolve_run(model, region, run) or run
-    filename = f"fh{fh:03d}.val.cog.tif"
-    candidate = PUBLISHED_ROOT / model / region / resolved / var / filename
-    if candidate.is_file():
-        return candidate
-    return None
-
-
-def _resolve_sidecar(model: str, region: str, run: str, var: str, fh: int) -> dict | None:
-    """Load sidecar JSON for units/metadata from published. Cached."""
-    resolved = _resolve_run(model, region, run) or run
-    filename = f"fh{fh:03d}.json"
-    candidate = PUBLISHED_ROOT / model / region / resolved / var / filename
-    if candidate.is_file():
-        return _cached_sidecar(str(candidate))
-    return None
-
-
-def _resolve_frame_var_dir(model: str, region: str, run: str, var: str, fh: int) -> Path | None:
-    """Resolve the directory containing the requested frame artifacts.
-
-    Uses the same precedence as frame discovery: published only.
-    """
-    resolved = _resolve_run(model, region, run)
-    if resolved is None:
-        return None
-
-    fh_str = f"fh{fh:03d}"
-    var_dir = PUBLISHED_ROOT / model / region / resolved / var
-    if var_dir.is_dir():
-        frame_cog = var_dir / f"{fh_str}.rgba.cog.tif"
-        if frame_cog.is_file():
-            return var_dir
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Sample endpoint
-# ---------------------------------------------------------------------------
-
 @app.get("/api/v3/sample")
 def sample(
     model: str = Query(..., description="Model ID (e.g. hrrr)"),
-    region: str = Query(..., description="Region ID (e.g. pnw)"),
-    run: str = Query(..., description="Run ID (e.g. 20260217_20z)"),
+    run: str = Query(..., description="Run ID (e.g. 20260217_20z or latest)"),
     var: str = Query(..., description="Variable ID (e.g. tmp2m)"),
     fh: int = Query(..., description="Forecast hour"),
     lat: float = Query(..., ge=-90, le=90, description="Latitude (WGS84)"),
     lon: float = Query(..., ge=-180, le=180, description="Longitude (WGS84)"),
 ):
-    """Point query against value-grid COG for hover-for-data.
-
-    Transforms (lat, lon) from WGS84 to the COG's EPSG:3857 CRS,
-    reads the nearest pixel value, and returns it with units from
-    the sidecar JSON.
-    """
-    val_cog = _resolve_val_cog(model, region, run, var, fh)
+    val_cog = _resolve_val_cog(model, run, var, fh)
     if val_cog is None:
-        return Response(status_code=404, content='{"error": "COG not found"}',
-                        media_type="application/json")
+        return Response(status_code=404, content='{"error": "COG not found"}', media_type="application/json")
 
     try:
-        # Project WGS84 → Web Mercator
         mx, my = _wgs84_to_3857.transform(lon, lat)
-
         ds = _get_cached_dataset(val_cog)
-        # Convert map coordinates to pixel row/col
         row, col = ds.index(mx, my)
 
-        # Bounds check
         if row < 0 or row >= ds.height or col < 0 or col >= ds.width:
-            return Response(
-                status_code=204,
-                headers={"Cache-Control": "private, max-age=300"},
-            )
+            return Response(status_code=204, headers={"Cache-Control": "private, max-age=300"})
 
-        # Read single pixel
         window = Window(col, row, 1, 1)  # type: ignore[call-arg]
         pixel = ds.read(1, window=window)
         value = float(pixel[0, 0])
 
-        # NaN / nodata → 204
         if np.isnan(value):
-            return Response(
-                status_code=204,
-                headers={"Cache-Control": "private, max-age=300"},
-            )
+            return Response(status_code=204, headers={"Cache-Control": "private, max-age=300"})
 
-        # Round to reasonable precision
-        value = round(value, 1)
-
-        # Get metadata from sidecar
-        sidecar = _resolve_sidecar(model, region, run, var, fh)
-        units = sidecar.get("units", "") if sidecar else ""
-        valid_time = sidecar.get("valid_time", "") if sidecar else ""
-
+        sidecar = _resolve_sidecar(model, run, var, fh)
         payload = {
-            "value": value,
-            "units": units,
+            "value": round(value, 1),
+            "units": sidecar.get("units", "") if sidecar else "",
             "model": model,
             "var": var,
             "fh": fh,
-            "valid_time": valid_time,
+            "valid_time": sidecar.get("valid_time", "") if sidecar else "",
             "lat": lat,
             "lon": lon,
         }
-        return JSONResponse(
-            content=payload,
-            headers={"Cache-Control": "private, max-age=86400"},
-        )
+        return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=86400"})
 
     except Exception:
-        logger.exception("Sample query failed: %s/%s/%s/%s/fh%03d @ (%.4f, %.4f)",
-                         model, region, run, var, fh, lat, lon)
-        return Response(status_code=500, content='{"error": "internal error"}',
-                        media_type="application/json")
+        logger.exception(
+            "Sample query failed: %s/%s/%s/fh%03d @ (%.4f, %.4f)",
+            model,
+            run,
+            var,
+            fh,
+            lat,
+            lon,
+        )
+        return Response(status_code=500, content='{"error": "internal error"}', media_type="application/json")
 
 
-@app.get("/api/v3/{model}/{region}/{run}/{var}/{fh:int}/contours/{key}")
+@app.get("/api/v3/{model}/{run}/{var}/{fh:int}/contours/{key}")
 def get_contour_geojson(
     model: str,
-    region: str,
     run: str,
     var: str,
     fh: int,
     key: str,
 ):
-    """Return a precomputed contour GeoJSON for a frame.
-
-    Resolves the frame directory using published-only lookup, then loads
-    sidecar + contour path from that exact var directory.
-    """
-    var_dir = _resolve_frame_var_dir(model, region, run, var, fh)
+    var_dir = _resolve_frame_var_dir(model, run, var, fh)
     if var_dir is None:
         raise HTTPException(status_code=404, detail="Frame not found")
 
@@ -502,9 +466,8 @@ def get_contour_geojson(
         sidecar = json.loads(sidecar_path.read_text())
     except Exception as exc:
         logger.exception(
-            "Failed to read sidecar for contour: %s/%s/%s/%s/fh%03d (%s)",
+            "Failed to read sidecar for contour: %s/%s/%s/fh%03d (%s)",
             model,
-            region,
             run,
             var,
             fh,
@@ -529,9 +492,8 @@ def get_contour_geojson(
         return json.loads(contour_path.read_text())
     except Exception as exc:
         logger.exception(
-            "Failed to read contour GeoJSON: %s/%s/%s/%s/fh%03d/%s (%s)",
+            "Failed to read contour GeoJSON: %s/%s/%s/fh%03d/%s (%s)",
             model,
-            region,
             run,
             var,
             fh,
@@ -539,3 +501,15 @@ def get_contour_geojson(
             contour_path,
         )
         raise HTTPException(status_code=500, detail=f"Failed to read contour GeoJSON: {exc}") from exc
+
+
+@app.get("/api/v3/admin/{model}/scan-runs")
+def admin_scan_runs(model: str):
+    runs = []
+    d = PUBLISHED_ROOT / model
+    if d.is_dir():
+        runs = sorted(
+            [child.name for child in d.iterdir() if child.is_dir() and _RUN_ID_RE.match(child.name)],
+            reverse=True,
+        )
+    return {"model": model, "runs": runs}

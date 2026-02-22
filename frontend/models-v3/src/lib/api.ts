@@ -5,6 +5,15 @@ export type ModelOption = {
   name: string;
 };
 
+export type RegionPreset = {
+  label?: string;
+  bbox: [number, number, number, number];
+  defaultCenter: [number, number];
+  defaultZoom: number;
+  minZoom?: number;
+  maxZoom?: number;
+};
+
 export type LegendStops = [number | string, string][];
 
 export type LegendMeta = {
@@ -59,24 +68,78 @@ async function fetchJson<T>(url: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+const REGIONS_CACHE_KEY = "twf_v3_regions_cache";
+const REGIONS_ETAG_KEY = "twf_v3_regions_etag";
+
+type RegionsResponse = {
+  regions: Record<string, RegionPreset>;
+};
+
+export async function fetchRegionPresets(): Promise<Record<string, RegionPreset>> {
+  const cachedRaw = localStorage.getItem(REGIONS_CACHE_KEY);
+  const etag = localStorage.getItem(REGIONS_ETAG_KEY);
+  const headers: Record<string, string> = {};
+  if (etag) {
+    headers["If-None-Match"] = etag;
+  }
+
+  const response = await fetch(API_BASE.replace(/\/api\/v3$/, "") + "/api/regions", {
+    credentials: "omit",
+    headers,
+  });
+
+  if (response.status === 304 && cachedRaw) {
+    try {
+      const parsed = JSON.parse(cachedRaw) as RegionsResponse;
+      return parsed.regions ?? {};
+    } catch {
+      return {};
+    }
+  }
+
+  if (!response.ok) {
+    if (cachedRaw) {
+      try {
+        const parsed = JSON.parse(cachedRaw) as RegionsResponse;
+        return parsed.regions ?? {};
+      } catch {
+        return {};
+      }
+    }
+    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+  }
+
+  const payload = (await response.json()) as RegionsResponse;
+  const nextEtag = response.headers.get("ETag");
+  localStorage.setItem(REGIONS_CACHE_KEY, JSON.stringify(payload));
+  if (nextEtag) {
+    localStorage.setItem(REGIONS_ETAG_KEY, nextEtag);
+  }
+  return payload.regions ?? {};
+}
+
 export async function fetchModels(): Promise<ModelOption[]> {
   return fetchJson<ModelOption[]>(`${API_BASE}/models`);
 }
 
 export async function fetchRegions(model: string): Promise<string[]> {
-  return fetchJson<string[]>(`${API_BASE}/${encodeURIComponent(model)}/regions`);
+  void model;
+  const regions = await fetchRegionPresets();
+  return Object.keys(regions);
 }
 
 export async function fetchRuns(model: string, region: string): Promise<string[]> {
+  void region;
   return fetchJson<string[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(region)}/runs`
+    `${API_BASE}/${encodeURIComponent(model)}/runs`
   );
 }
 
 export async function fetchVars(model: string, region: string, run: string): Promise<VarRow[]> {
+  void region;
   const runKey = run || "latest";
   return fetchJson<VarRow[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(region)}/${encodeURIComponent(runKey)}/vars`
+    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`
   );
 }
 
@@ -86,9 +149,10 @@ export async function fetchFrames(
   run: string,
   varKey: string
 ): Promise<FrameRow[]> {
+  void region;
   const runKey = run || "latest";
   const response = await fetchJson<FrameRow[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(region)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`
+    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`
   );
   if (!Array.isArray(response)) {
     return [];
@@ -113,7 +177,7 @@ export type SampleResult = {
 
 export async function fetchSample(params: {
   model: string;
-  region: string;
+  region?: string;
   run: string;
   var: string;
   fh: number;
@@ -122,7 +186,6 @@ export async function fetchSample(params: {
 }): Promise<SampleResult | null> {
   const qs = new URLSearchParams({
     model: params.model,
-    region: params.region,
     run: params.run,
     var: params.var,
     fh: String(params.fh),
@@ -141,12 +204,12 @@ export async function fetchSample(params: {
 
 export function buildContourUrl(params: {
   model: string;
-  region: string;
+  region?: string;
   run: string;
   varKey: string;
   fh: number;
   key: string;
 }): string {
   const enc = encodeURIComponent;
-  return `${API_BASE}/${enc(params.model)}/${enc(params.region)}/${enc(params.run)}/${enc(params.varKey)}/${enc(params.fh)}/contours/${enc(params.key)}`;
+  return `${API_BASE}/${enc(params.model)}/${enc(params.run)}/${enc(params.varKey)}/${enc(params.fh)}/contours/${enc(params.key)}`;
 }

@@ -9,10 +9,11 @@ import {
   buildContourUrl,
   type FrameRow,
   type LegendMeta,
+  type RegionPreset,
   type VarRow,
   fetchFrames,
   fetchModels,
-  fetchRegions,
+  fetchRegionPresets,
   fetchRuns,
   fetchVars,
 } from "@/lib/api";
@@ -40,8 +41,8 @@ function pickPreferred(values: string[], preferred: string): string {
   return values[0] ?? "";
 }
 
-function makeRegionLabel(id: string): string {
-  return id.toUpperCase();
+function makeRegionLabel(id: string, preset?: RegionPreset): string {
+  return preset?.label ?? id.toUpperCase();
 }
 
 function makeVariableLabel(id: string, preferredLabel?: string | null): string {
@@ -251,6 +252,7 @@ export default function App() {
   const [runs, setRuns] = useState<string[]>([]);
   const [variables, setVariables] = useState<Option[]>([]);
   const [frameRows, setFrameRows] = useState<FrameRow[]>([]);
+  const [regionPresets, setRegionPresets] = useState<Record<string, RegionPreset>>({});
 
   const [model, setModel] = useState(DEFAULTS.model);
   const [region, setRegion] = useState(DEFAULTS.region);
@@ -287,6 +289,21 @@ export default function App() {
   const frameByHour = useMemo(() => {
     return new Map(frameRows.map((row) => [Number(row.fh), row]));
   }, [frameRows]);
+
+  const regionViews = useMemo(() => {
+    return Object.fromEntries(
+      Object.entries(regionPresets).map(([id, preset]) => [
+        id,
+        {
+          center: [preset.defaultCenter[0], preset.defaultCenter[1]] as [number, number],
+          zoom: preset.defaultZoom,
+          bbox: preset.bbox,
+          minZoom: preset.minZoom,
+          maxZoom: preset.maxZoom,
+        },
+      ])
+    );
+  }, [regionPresets]);
 
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
   const latestRunId = runs[0] ?? frameRows[0]?.run ?? null;
@@ -464,12 +481,12 @@ export default function App() {
 
     Promise.all([
       fetchModels(),
-      fetchRegions(DEFAULTS.model),
+      fetchRegionPresets(),
       fetchRuns(DEFAULTS.model, DEFAULTS.region),
       fetchVars(DEFAULTS.model, DEFAULTS.region, DEFAULTS.run),
       fetchFrames(DEFAULTS.model, DEFAULTS.region, DEFAULTS.run, DEFAULTS.variable),
     ])
-      .then(([modelsData, regionsData, runsData, varsData, framesData]) => {
+      .then(([modelsData, regionPresetData, runsData, varsData, framesData]) => {
         if (cancelled) return;
 
         // If the user changed a selector while requests were in-flight, bail out and
@@ -493,11 +510,12 @@ export default function App() {
         setModels(modelOptions);
         setModel(pickPreferred(modelIds, DEFAULTS.model));
 
-        const regionOptions = regionsData.map((id) => ({
+        setRegionPresets(regionPresetData);
+        const regionIds = Object.keys(regionPresetData);
+        const regionOptions = regionIds.map((id) => ({
           value: id,
-          label: makeRegionLabel(id),
+          label: makeRegionLabel(id, regionPresetData[id]),
         }));
-        const regionIds = regionOptions.map((opt) => opt.value);
         setRegions(regionOptions);
         setRegion((prev) => (regionIds.includes(prev) ? prev : pickPreferred(regionIds, DEFAULTS.region)));
 
@@ -571,9 +589,12 @@ export default function App() {
     async function loadRegions() {
       setError(null);
       try {
-        const data = await fetchRegions(model);
+        void model;
+        const presets = await fetchRegionPresets();
         if (cancelled) return;
-        const options = data.map((id) => ({ value: id, label: makeRegionLabel(id) }));
+        setRegionPresets(presets);
+        const ids = Object.keys(presets);
+        const options = ids.map((id) => ({ value: id, label: makeRegionLabel(id, presets[id]) }));
         setRegions(options);
         const regionIds = options.map((opt) => opt.value);
         const nextRegion = pickPreferred(regionIds, DEFAULTS.region);
@@ -820,6 +841,7 @@ export default function App() {
           tileUrl={tileUrl}
           contourGeoJsonUrl={contourGeoJsonUrl}
           region={region}
+          regionViews={regionViews}
           opacity={opacity}
           mode={isPlaying ? "autoplay" : "scrub"}
           variable={variable}
