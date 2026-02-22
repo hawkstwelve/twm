@@ -457,21 +457,45 @@ def build_sidecar_json(
 
 def build_iso_contour_geojson(
     *,
-    val_cog_path: Path,
+    value_data: np.ndarray,
+    value_transform: Any,
     out_geojson_path: Path,
     level: float,
     srs: str = "EPSG:4326",
 ) -> None:
-    """Generate iso-contour GeoJSON from a value COG using GDAL CLI tools."""
+    """Generate iso-contour GeoJSON from a full-resolution value grid.
+
+    Writes a temporary in-memory-source GTiff (EPSG:3857) from the provided
+    array/transform, then warps/contours via GDAL CLI. This avoids depending
+    on the on-disk hover value COG resolution.
+    """
     out_geojson_path.parent.mkdir(parents=True, exist_ok=True)
 
     gdalwarp_bin = _gdal("gdalwarp")
     gdal_contour_bin = _gdal("gdal_contour")
 
     tmp_path: Path | None = None
+    src_path: Path | None = None
     try:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as src_file:
+            src_path = Path(src_file.name)
         with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_file:
             tmp_path = Path(tmp_file.name)
+
+        value_f32 = value_data.astype(np.float32, copy=False)
+        with rasterio.open(
+            src_path,
+            "w",
+            driver="GTiff",
+            height=value_f32.shape[0],
+            width=value_f32.shape[1],
+            count=1,
+            dtype="float32",
+            crs="EPSG:3857",
+            transform=value_transform,
+            nodata=float("nan"),
+        ) as src_ds:
+            src_ds.write(value_f32, 1)
 
         subprocess.run(
             [
@@ -482,7 +506,7 @@ def build_iso_contour_geojson(
                 "bilinear",
                 "-of",
                 "GTiff",
-                str(val_cog_path),
+                str(src_path),
                 str(tmp_path),
             ],
             check=True,
@@ -507,6 +531,12 @@ def build_iso_contour_geojson(
             text=True,
         )
     finally:
+        if src_path is not None:
+            try:
+                if src_path.exists():
+                    src_path.unlink()
+            except Exception:
+                pass
         if tmp_path is not None:
             try:
                 if tmp_path.exists():
@@ -780,7 +810,8 @@ def build_frame(
             contour_geojson_path = staging_dir / contour_rel_path
             try:
                 build_iso_contour_geojson(
-                    val_cog_path=val_path,
+                    value_data=warped_data,
+                    value_transform=dst_transform,
                     out_geojson_path=contour_geojson_path,
                     level=32.0,
                     srs="EPSG:4326",
