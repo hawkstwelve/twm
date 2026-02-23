@@ -560,7 +560,7 @@ export default function App() {
     const ready = readyFramesRef.current;
     const failed = failedFramesRef.current;
     const inFlight = inFlightFramesRef.current;
-    const maxRequests = 4;
+    const maxRequests = isPreloadingForPlay ? 8 : 4;
     const targetReady = isPreloadingForPlay
       ? frameHours.length
       : Math.min(frameHours.length, playbackPolicy.bufferTarget);
@@ -1430,7 +1430,7 @@ export default function App() {
         )}
 
         {(isPlaying || isPreloadingForPlay) && (
-          <div className="absolute right-4 top-4 z-40 rounded-md border border-border/40 bg-[hsl(var(--toolbar))]/90 px-2.5 py-1.5 text-[10px] text-foreground shadow-lg backdrop-blur-md">
+          <div className="absolute left-4 top-20 z-50 rounded-md border border-border/40 bg-[hsl(var(--toolbar))]/90 px-2.5 py-1.5 text-[10px] text-foreground shadow-lg backdrop-blur-md">
             aheadReady {bufferSnapshot.bufferedAheadCount} • aheadTerminal {bufferSnapshot.terminalAheadCount} • inflightTiles {bufferSnapshot.inFlightCount} • queueDepth {bufferSnapshot.queueDepth}
           </div>
         )}

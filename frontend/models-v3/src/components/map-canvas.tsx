@@ -35,7 +35,7 @@ const AUTOPLAY_SWAP_TIMEOUT_MS = 1500;
 const SETTLE_TIMEOUT_MS = 1200;
 const CONTINUOUS_CROSSFADE_MS = 120;
 const MICRO_CROSSFADE_MS = 140;
-const PREFETCH_BUFFER_COUNT = 4;
+const PREFETCH_BUFFER_COUNT = 8;
 const OVERLAY_RASTER_CONTRAST = 0.08;
 const OVERLAY_RASTER_SATURATION = 0.08;
 const OVERLAY_RASTER_BRIGHTNESS_MIN = 0.02;
@@ -47,7 +47,7 @@ const HIDDEN_SWAP_BUFFER_OPACITY = 0.001;
 // Prefetch layers are only warmed while an active prefetch URL is being requested.
 const HIDDEN_PREFETCH_OPACITY = 0;
 const WARM_PREFETCH_OPACITY = 0.001;
-const PREFETCH_TILE_EVENT_BUDGET = 6;
+const PREFETCH_TILE_EVENT_BUDGET = 2;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -138,6 +138,23 @@ function styleFor(
     "raster-brightness-min": paintSettings.brightnessMin,
     "raster-brightness-max": paintSettings.brightnessMax,
   };
+  const prefetchSources = Object.fromEntries(
+    Array.from({ length: PREFETCH_BUFFER_COUNT }, (_, index) => [
+      prefetchSourceId(index + 1),
+      {
+        type: "raster",
+        tiles: [overlayUrl],
+        tileSize: 512,
+      },
+    ])
+  );
+  const prefetchLayers = Array.from({ length: PREFETCH_BUFFER_COUNT }, (_, index) => ({
+    id: prefetchLayerId(index + 1),
+    type: "raster" as const,
+    source: prefetchSourceId(index + 1),
+    paint: overlayPaint,
+  }));
+
   return {
     version: 8,
     sources: {
@@ -157,26 +174,7 @@ function styleFor(
         tiles: [overlayUrl],
         tileSize: 512,
       },
-      [prefetchSourceId(1)]: {
-        type: "raster",
-        tiles: [overlayUrl],
-        tileSize: 512,
-      },
-      [prefetchSourceId(2)]: {
-        type: "raster",
-        tiles: [overlayUrl],
-        tileSize: 512,
-      },
-      [prefetchSourceId(3)]: {
-        type: "raster",
-        tiles: [overlayUrl],
-        tileSize: 512,
-      },
-      [prefetchSourceId(4)]: {
-        type: "raster",
-        tiles: [overlayUrl],
-        tileSize: 512,
-      },
+      ...prefetchSources,
       "twf-labels": {
         type: "raster",
         tiles: CARTO_LIGHT_LABEL_TILES,
@@ -205,30 +203,7 @@ function styleFor(
         source: sourceId("b"),
         paint: overlayPaint,
       },
-      {
-        id: prefetchLayerId(1),
-        type: "raster",
-        source: prefetchSourceId(1),
-        paint: overlayPaint,
-      },
-      {
-        id: prefetchLayerId(2),
-        type: "raster",
-        source: prefetchSourceId(2),
-        paint: overlayPaint,
-      },
-      {
-        id: prefetchLayerId(3),
-        type: "raster",
-        source: prefetchSourceId(3),
-        paint: overlayPaint,
-      },
-      {
-        id: prefetchLayerId(4),
-        type: "raster",
-        source: prefetchSourceId(4),
-        paint: overlayPaint,
-      },
+      ...prefetchLayers,
       {
         id: CONTOUR_LAYER_ID,
         type: "line",
@@ -348,10 +323,7 @@ export function MapCanvas({
     const overlayIds = [
       layerId("a"),
       layerId("b"),
-      prefetchLayerId(1),
-      prefetchLayerId(2),
-      prefetchLayerId(3),
-      prefetchLayerId(4),
+      ...Array.from({ length: PREFETCH_BUFFER_COUNT }, (_, index) => prefetchLayerId(index + 1)),
     ];
 
     overlayIds.forEach((id) => {
@@ -863,7 +835,7 @@ export function MapCanvas({
         url,
         nextPrefetchRequestToken,
         prefetchEventBudgetThreshold,
-        "scrub",
+        "autoplay",
         () => {
           if (token !== prefetchTokenRef.current) {
             return;
