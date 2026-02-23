@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 import logging
 import os
@@ -358,6 +359,42 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
     tier_cfg = LOOP_TIER_CONFIG.get(tier)
     if tier_cfg is None:
         return False
+
+
+def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
+    tier_cfg = LOOP_TIER_CONFIG.get(tier)
+    if tier_cfg is None:
+        return None
+
+    max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
+    quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
+
+    try:
+        with rasterio.open(cog_path) as ds:
+            src_h = int(ds.height)
+            src_w = int(ds.width)
+            max_dim = max(src_h, src_w)
+            if max_dim <= 0:
+                return None
+
+            scale = min(1.0, float(max_dim_cfg) / float(max_dim))
+            out_h = max(1, int(round(src_h * scale)))
+            out_w = max(1, int(round(src_w * scale)))
+
+            data = ds.read(
+                indexes=(1, 2, 3, 4),
+                out_shape=(4, out_h, out_w),
+                resampling=Resampling.bilinear,
+            )
+
+        rgba = np.moveaxis(data, 0, -1)
+        image = Image.fromarray(rgba, mode="RGBA")
+        buffer = io.BytesIO()
+        image.save(buffer, format="WEBP", quality=quality_cfg, method=6)
+        return buffer.getvalue()
+    except Exception:
+        logger.exception("Failed in-memory loop WebP generation: %s (tier=%s)", cog_path, tier)
+        return None
 
     max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
@@ -731,7 +768,34 @@ def get_loop_webp(
         return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
 
     if not _ensure_loop_webp(cog_path, out_path, tier=tier):
-        return Response(status_code=500, headers={"Cache-Control": CACHE_MISS})
+        # Graceful degradation path: avoid surfacing hard 500s to clients when
+        # cache writes fail (permissions/disk), and allow tier-1 to fall back.
+        if tier == 1:
+            tier0_legacy = _legacy_loop_webp_path(model, resolved, var, fh, tier=0)
+            if tier0_legacy is not None:
+                return FileResponse(
+                    path=str(tier0_legacy),
+                    media_type="image/webp",
+                    headers={"Cache-Control": CACHE_MISS},
+                )
+
+            tier0_out = _loop_webp_path(model, resolved, var, fh, tier=0)
+            if tier0_out is not None and _ensure_loop_webp(cog_path, tier0_out, tier=0):
+                return FileResponse(
+                    path=str(tier0_out),
+                    media_type="image/webp",
+                    headers={"Cache-Control": CACHE_MISS},
+                )
+
+            tier0_bytes = _render_loop_webp_bytes(cog_path, tier=0)
+            if tier0_bytes is not None:
+                return Response(content=tier0_bytes, media_type="image/webp", headers={"Cache-Control": CACHE_MISS})
+
+        content = _render_loop_webp_bytes(cog_path, tier=tier)
+        if content is not None:
+            return Response(content=content, media_type="image/webp", headers={"Cache-Control": CACHE_MISS})
+
+        return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
 
     cache_control = CACHE_HIT if run != "latest" else CACHE_MISS
     return FileResponse(
