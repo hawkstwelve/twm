@@ -58,6 +58,7 @@ LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
 LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "86"))
 LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
+LOOP_URL_PREFIX = str(os.environ.get("TWF_V3_LOOP_URL_PREFIX", "/loop/v3")).strip() or "/loop/v3"
 SAMPLE_CACHE_TTL_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_CACHE_TTL_SECONDS", "2.0"))
 SAMPLE_INFLIGHT_WAIT_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_INFLIGHT_WAIT_SECONDS", "0.2"))
 SAMPLE_RATE_LIMIT_WINDOW_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_RATE_LIMIT_WINDOW_SECONDS", "1.0"))
@@ -143,6 +144,24 @@ _sample_lock = threading.Lock()
 LOOP_MANIFEST_VERSION = 1
 LOOP_MANIFEST_PROJECTION = "EPSG:4326"
 LOOP_MANIFEST_BBOX = [-125.0, 24.0, -66.5, 50.0]
+
+
+def _normalize_loop_url_prefix(prefix: str) -> str:
+    normalized = prefix.strip() or "/loop/v3"
+    if not normalized.startswith("/"):
+        normalized = "/" + normalized
+    normalized = normalized.rstrip("/")
+    return normalized or "/loop/v3"
+
+
+_LOOP_URL_PREFIX_NORMALIZED = _normalize_loop_url_prefix(LOOP_URL_PREFIX)
+
+
+def _loop_webp_url(model: str, run: str, var: str, fh: int, *, tier: int | None, version_token: str) -> str:
+    base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/{fh}/loop.webp"
+    if tier is None:
+        return f"{base}?v={version_token}"
+    return f"{base}?tier={tier}&v={version_token}"
 
 
 def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
@@ -360,42 +379,6 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
     if tier_cfg is None:
         return False
 
-
-def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
-    tier_cfg = LOOP_TIER_CONFIG.get(tier)
-    if tier_cfg is None:
-        return None
-
-    max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
-    quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
-
-    try:
-        with rasterio.open(cog_path) as ds:
-            src_h = int(ds.height)
-            src_w = int(ds.width)
-            max_dim = max(src_h, src_w)
-            if max_dim <= 0:
-                return None
-
-            scale = min(1.0, float(max_dim_cfg) / float(max_dim))
-            out_h = max(1, int(round(src_h * scale)))
-            out_w = max(1, int(round(src_w * scale)))
-
-            data = ds.read(
-                indexes=(1, 2, 3, 4),
-                out_shape=(4, out_h, out_w),
-                resampling=Resampling.bilinear,
-            )
-
-        rgba = np.moveaxis(data, 0, -1)
-        image = Image.fromarray(rgba, mode="RGBA")
-        buffer = io.BytesIO()
-        image.save(buffer, format="WEBP", quality=quality_cfg, method=6)
-        return buffer.getvalue()
-    except Exception:
-        logger.exception("Failed in-memory loop WebP generation: %s (tier=%s)", cog_path, tier)
-        return None
-
     max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
 
@@ -434,6 +417,42 @@ def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
         except Exception:
             pass
         return False
+
+
+def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
+    tier_cfg = LOOP_TIER_CONFIG.get(tier)
+    if tier_cfg is None:
+        return None
+
+    max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
+    quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
+
+    try:
+        with rasterio.open(cog_path) as ds:
+            src_h = int(ds.height)
+            src_w = int(ds.width)
+            max_dim = max(src_h, src_w)
+            if max_dim <= 0:
+                return None
+
+            scale = min(1.0, float(max_dim_cfg) / float(max_dim))
+            out_h = max(1, int(round(src_h * scale)))
+            out_w = max(1, int(round(src_w * scale)))
+
+            data = ds.read(
+                indexes=(1, 2, 3, 4),
+                out_shape=(4, out_h, out_w),
+                resampling=Resampling.bilinear,
+            )
+
+        rgba = np.moveaxis(data, 0, -1)
+        image = Image.fromarray(rgba, mode="RGBA")
+        buffer = io.BytesIO()
+        image.save(buffer, format="WEBP", quality=quality_cfg, method=6)
+        return buffer.getvalue()
+    except Exception:
+        logger.exception("Failed in-memory loop WebP generation: %s (tier=%s)", cog_path, tier)
+        return None
 
 
 def _sample_cache_key(model: str, run: str, var: str, fh: int, row: int, col: int) -> str:
@@ -634,9 +653,9 @@ def list_frames(request: Request, model: str, run: str, var: str):
                 "fh": fh,
                 "has_cog": True,
                 "run": resolved,
-                "loop_webp_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?v={version_token}",
-                "loop_webp_tier0_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=0&v={version_token}",
-                "loop_webp_tier1_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=1&v={version_token}",
+                "loop_webp_url": _loop_webp_url(model, resolved, var, fh, tier=None, version_token=version_token),
+                "loop_webp_tier0_url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
+                "loop_webp_tier1_url": _loop_webp_url(model, resolved, var, fh, tier=1, version_token=version_token),
                 "meta": {"meta": meta},
             }
         )
@@ -690,13 +709,13 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
         tier_frames[0].append(
             {
                 "fh": fh,
-                "url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=0&v={version_token}",
+                "url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
             }
         )
         tier_frames[1].append(
             {
                 "fh": fh,
-                "url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=1&v={version_token}",
+                "url": _loop_webp_url(model, resolved, var, fh, tier=1, version_token=version_token),
             }
         )
 
