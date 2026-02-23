@@ -397,8 +397,9 @@ export default function App() {
     return frameHours.every((fh) => Boolean(loopUrlByHour.get(fh)));
   }, [frameHours, loopUrlByHour]);
 
-  const isLoopActive = playbackRenderMode === "loop" && (isPlaying || isLoopPreloading);
-  const mapForecastHour = isLoopActive && Number.isFinite(loopBaseForecastHour)
+  const isLoopPlaybackLocked = playbackRenderMode === "loop" && (isPlaying || isLoopPreloading);
+  const isLoopDisplayActive = playbackRenderMode === "loop" && canUseLoopPlayback && (isPlaying || isLoopPreloading || isScrubbing);
+  const mapForecastHour = isLoopPlaybackLocked && Number.isFinite(loopBaseForecastHour)
     ? (loopBaseForecastHour as number)
     : forecastHour;
 
@@ -591,7 +592,7 @@ export default function App() {
   }, [currentFrame, frameRows, opacity]);
 
   const prefetchHours = useMemo(() => {
-    if (isLoopActive || frameHours.length === 0) {
+    if (isLoopDisplayActive || frameHours.length === 0) {
       return [] as number[];
     }
 
@@ -661,7 +662,7 @@ export default function App() {
     playbackPolicy.bufferTarget,
     isPreloadingForPlay,
     isScrubbing,
-    isLoopActive,
+    isLoopDisplayActive,
   ]);
 
   const prefetchTileUrls = useMemo(() => {
@@ -1527,7 +1528,7 @@ export default function App() {
     : isLoopPreloading
       ? `Loading loop frames ${preloadBufferedCount}/${preloadTotal}`
       : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
-  const activeLoopUrl = isLoopActive ? (loopUrlByHour.get(forecastHour) ?? null) : null;
+  const activeLoopUrl = isLoopDisplayActive ? (loopUrlByHour.get(forecastHour) ?? null) : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -1554,13 +1555,13 @@ export default function App() {
           region={region}
           regionViews={regionViews}
           opacity={opacity}
-          mode={isLoopActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
+          mode={isLoopDisplayActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
           variable={variable}
           model={model}
           prefetchTileUrls={prefetchTileUrls}
           crossfade={false}
           loopImageUrl={activeLoopUrl}
-          loopActive={isLoopActive}
+          loopActive={isLoopDisplayActive}
           onFrameSettled={handleFrameSettled}
           onTileReady={handleTileReady}
           onFrameLoadingChange={handleFrameLoadingChange}
