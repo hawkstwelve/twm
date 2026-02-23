@@ -2,6 +2,13 @@ export const API_BASE = "https://api.sodakweather.com/api/v3";
 
 export const TILES_BASE = "https://api.sodakweather.com";
 
+export const WEBP_RENDER_MODE_THRESHOLDS = {
+  tier0Max: 5.8,
+  tier1Max: 6.6,
+  hysteresis: 0.2,
+  dwellMs: 200,
+};
+
 export const DEFAULTS = {
   model: "hrrr",
   region: "conus",
@@ -72,4 +79,15 @@ export function isAnimationDebugEnabled(): boolean {
     return false;
   }
   return window.localStorage.getItem("twf_debug_animation") === "1";
+}
+
+export function isWebpDefaultRenderEnabled(): boolean {
+  const envValue = String(import.meta.env.VITE_TWF_V3_WEBP_DEFAULT_ENABLED ?? "").trim().toLowerCase();
+  if (envValue === "1" || envValue === "true" || envValue === "yes" || envValue === "on") {
+    return true;
+  }
+  if (envValue === "0" || envValue === "false" || envValue === "no" || envValue === "off") {
+    return false;
+  }
+  return true;
 }

@@ -283,6 +283,7 @@ type MapCanvasProps = {
   onFrameLoadingChange?: (tileUrl: string, isLoading: boolean) => void;
   onZoomHint?: (show: boolean) => void;
   onZoomBucketChange?: (bucket: number) => void;
+  onZoomRoutingSignal?: (payload: { zoom: number; gestureActive: boolean }) => void;
   onMapHover?: (lat: number, lon: number, x: number, y: number) => void;
   onMapHoverEnd?: () => void;
 };
@@ -305,6 +306,7 @@ export function MapCanvas({
   onFrameLoadingChange,
   onZoomHint,
   onZoomBucketChange,
+  onZoomRoutingSignal,
   onMapHover,
   onMapHoverEnd,
 }: MapCanvasProps) {
@@ -697,6 +699,28 @@ export function MapCanvas({
 
     const lastHintStateRef = { current: false };
     const lastZoomBucketRef = { current: Number.NaN };
+    const gestureActiveRef = { current: false };
+    let rafId: number | null = null;
+
+    const emitRoutingSignal = () => {
+      if (!onZoomRoutingSignal) {
+        return;
+      }
+      onZoomRoutingSignal({ zoom: map.getZoom(), gestureActive: gestureActiveRef.current });
+    };
+
+    const scheduleRoutingSignal = () => {
+      if (!onZoomRoutingSignal) {
+        return;
+      }
+      if (rafId !== null) {
+        return;
+      }
+      rafId = window.requestAnimationFrame(() => {
+        rafId = null;
+        emitRoutingSignal();
+      });
+    };
 
     const checkZoom = () => {
       const zoom = map.getZoom();
@@ -712,18 +736,40 @@ export function MapCanvas({
           onZoomHint(shouldShow);
         }
       }
+      scheduleRoutingSignal();
     };
 
+    const handleZoomStart = () => {
+      gestureActiveRef.current = true;
+      emitRoutingSignal();
+    };
+
+    const handleZoomEnd = () => {
+      gestureActiveRef.current = false;
+      emitRoutingSignal();
+    };
+
+    map.on("zoomstart", handleZoomStart);
+    map.on("zoomend", handleZoomEnd);
     map.on("moveend", checkZoom);
+    map.on("zoom", checkZoom);
     checkZoom();
+    emitRoutingSignal();
 
     return () => {
+      map.off("zoomstart", handleZoomStart);
+      map.off("zoomend", handleZoomEnd);
       map.off("moveend", checkZoom);
+      map.off("zoom", checkZoom);
+      if (rafId !== null) {
+        window.cancelAnimationFrame(rafId);
+        rafId = null;
+      }
       if (onZoomHint && lastHintStateRef.current) {
         onZoomHint(false);
       }
     };
-  }, [isLoaded, model, onZoomHint, onZoomBucketChange]);
+  }, [isLoaded, model, onZoomHint, onZoomBucketChange, onZoomRoutingSignal]);
 
   useEffect(() => {
     const map = mapRef.current;

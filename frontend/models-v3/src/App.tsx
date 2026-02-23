@@ -17,7 +17,15 @@ import {
   fetchRuns,
   fetchVars,
 } from "@/lib/api";
-import { API_BASE, DEFAULTS, getPlaybackBufferPolicy, isAnimationDebugEnabled, VARIABLE_LABELS } from "@/lib/config";
+import {
+  API_BASE,
+  DEFAULTS,
+  getPlaybackBufferPolicy,
+  isAnimationDebugEnabled,
+  isWebpDefaultRenderEnabled,
+  VARIABLE_LABELS,
+  WEBP_RENDER_MODE_THRESHOLDS,
+} from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
@@ -36,7 +44,7 @@ const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
 const LOOP_PRELOAD_MIN_READY = 2;
 
-type PlaybackRenderMode = "tiles" | "loop";
+type RenderModeState = "webp_tier0" | "webp_tier1" | "tiles";
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -109,6 +117,37 @@ function nearestFrame(frames: number[], current: number): number {
     const valueDelta = Math.abs(value - current);
     return valueDelta < nearestDelta ? value : nearest;
   }, frames[0]);
+}
+
+function getEffectiveZoom(zoom: number): number {
+  const dpr = typeof window === "undefined" ? 1 : Math.max(1, window.devicePixelRatio || 1);
+  return zoom + Math.log2(dpr);
+}
+
+function nextRenderModeByHysteresis(current: RenderModeState, effectiveZoom: number): RenderModeState {
+  const { tier0Max, tier1Max, hysteresis } = WEBP_RENDER_MODE_THRESHOLDS;
+
+  if (current === "webp_tier0") {
+    if (effectiveZoom > tier0Max + hysteresis) {
+      return effectiveZoom > tier1Max + hysteresis ? "tiles" : "webp_tier1";
+    }
+    return "webp_tier0";
+  }
+
+  if (current === "webp_tier1") {
+    if (effectiveZoom <= tier0Max - hysteresis) {
+      return "webp_tier0";
+    }
+    if (effectiveZoom > tier1Max + hysteresis) {
+      return "tiles";
+    }
+    return "webp_tier1";
+  }
+
+  if (effectiveZoom <= tier1Max - hysteresis) {
+    return effectiveZoom <= tier0Max - hysteresis ? "webp_tier0" : "webp_tier1";
+  }
+  return "tiles";
 }
 
 function runIdToIso(runId: string | null): string | null {
@@ -269,6 +308,7 @@ function buildLegend(meta: LegendMeta | null | undefined, opacity: number): Lege
 }
 
 export default function App() {
+  const webpDefaultEnabled = isWebpDefaultRenderEnabled();
   const [models, setModels] = useState<Option[]>([]);
   const [regions, setRegions] = useState<Option[]>([]);
   const [runs, setRuns] = useState<string[]>([]);
@@ -282,9 +322,11 @@ export default function App() {
   const [variable, setVariable] = useState(DEFAULTS.variable);
   const [forecastHour, setForecastHour] = useState(0);
   const [targetForecastHour, setTargetForecastHour] = useState(0);
-  const [zoomBucket, setZoomBucket] = useState(Math.round(DEFAULTS.zoom));
+  const [, setZoomBucket] = useState(Math.round(DEFAULTS.zoom));
+  const [mapZoom, setMapZoom] = useState(DEFAULTS.zoom);
+  const [zoomGestureActive, setZoomGestureActive] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackRenderMode, setPlaybackRenderMode] = useState<PlaybackRenderMode>("loop");
+  const [renderMode, setRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
   const [isLoopPreloading, setIsLoopPreloading] = useState(false);
   const [loopProgress, setLoopProgress] = useState({ total: 0, ready: 0, failed: 0 });
   const [loopBaseForecastHour, setLoopBaseForecastHour] = useState<number | null>(null);
@@ -334,6 +376,8 @@ export default function App() {
   const loopPreloadTokenRef = useRef(0);
   const loopReadyHoursRef = useRef<Set<number>>(new Set());
   const loopFailedHoursRef = useRef<Set<number>>(new Set());
+  const mapZoomRef = useRef(DEFAULTS.zoom);
+  const renderModeDwellTimerRef = useRef<number | null>(null);
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -397,8 +441,50 @@ export default function App() {
     return frameHours.every((fh) => Boolean(loopUrlByHour.get(fh)));
   }, [frameHours, loopUrlByHour]);
 
-  const isLoopPlaybackLocked = playbackRenderMode === "loop" && (isPlaying || isLoopPreloading);
-  const isLoopDisplayActive = playbackRenderMode === "loop" && canUseLoopPlayback && (isPlaying || isLoopPreloading || isScrubbing);
+  useEffect(() => {
+    mapZoomRef.current = mapZoom;
+  }, [mapZoom]);
+
+  useEffect(() => {
+    const clearDwellTimer = () => {
+      if (renderModeDwellTimerRef.current !== null) {
+        window.clearTimeout(renderModeDwellTimerRef.current);
+        renderModeDwellTimerRef.current = null;
+      }
+    };
+
+    if (!webpDefaultEnabled || !canUseLoopPlayback) {
+      clearDwellTimer();
+      if (renderMode !== "tiles") {
+        setRenderMode("tiles");
+      }
+      return clearDwellTimer;
+    }
+
+    if (zoomGestureActive) {
+      clearDwellTimer();
+      return clearDwellTimer;
+    }
+
+    const effectiveZoom = getEffectiveZoom(mapZoom);
+    const candidate = nextRenderModeByHysteresis(renderMode, effectiveZoom);
+    if (candidate === renderMode) {
+      clearDwellTimer();
+      return clearDwellTimer;
+    }
+
+    clearDwellTimer();
+    renderModeDwellTimerRef.current = window.setTimeout(() => {
+      const latestEffectiveZoom = getEffectiveZoom(mapZoomRef.current);
+      setRenderMode((current) => nextRenderModeByHysteresis(current, latestEffectiveZoom));
+      renderModeDwellTimerRef.current = null;
+    }, WEBP_RENDER_MODE_THRESHOLDS.dwellMs);
+
+    return clearDwellTimer;
+  }, [mapZoom, zoomGestureActive, renderMode, webpDefaultEnabled, canUseLoopPlayback]);
+
+  const isLoopPlaybackLocked = renderMode !== "tiles" && canUseLoopPlayback && (isPlaying || isLoopPreloading);
+  const isLoopDisplayActive = renderMode !== "tiles" && canUseLoopPlayback && (isPlaying || isLoopPreloading || isScrubbing);
   const mapForecastHour = isLoopPlaybackLocked && Number.isFinite(loopBaseForecastHour)
     ? (loopBaseForecastHour as number)
     : forecastHour;
@@ -810,7 +896,6 @@ export default function App() {
     inFlightStartedAtRef.current.clear();
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
-    setPlaybackRenderMode("loop");
     setIsLoopPreloading(false);
     setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
     setLoopBaseForecastHour(null);
@@ -818,6 +903,7 @@ export default function App() {
     loopReadyHoursRef.current.clear();
     loopFailedHoursRef.current.clear();
     setIsPreloadingForPlay(false);
+    setRenderMode(webpDefaultEnabled ? "webp_tier0" : "tiles");
     preloadProgressRef.current = {
       lastBufferedCount: 0,
       lastProgressAt: Date.now(),
@@ -827,7 +913,6 @@ export default function App() {
       model,
       run: resolvedRunForRequests,
       variable,
-      zoomBucket,
     });
     const version = ++bufferVersionRef.current;
     setBufferSnapshot({
@@ -842,7 +927,14 @@ export default function App() {
       statusText: `Buffered 0/${frameHours.length}`,
       version,
     });
-  }, [model, resolvedRunForRequests, variable, zoomBucket, frameHours.length, debugLog]);
+  }, [
+    model,
+    resolvedRunForRequests,
+    variable,
+    frameHours.length,
+    debugLog,
+    webpDefaultEnabled,
+  ]);
 
   useEffect(() => {
     if (!isLoopPreloading) {
@@ -850,7 +942,7 @@ export default function App() {
     }
     if (!canUseLoopPlayback || frameHours.length === 0) {
       setIsLoopPreloading(false);
-      setPlaybackRenderMode("tiles");
+      setRenderMode("tiles");
       return;
     }
 
@@ -886,7 +978,7 @@ export default function App() {
         setIsPlaying(true);
         return;
       }
-      setPlaybackRenderMode("tiles");
+      setRenderMode("tiles");
       setIsPlaying(false);
       showTransientFrameStatus("Loop preload failed");
     };
@@ -910,7 +1002,7 @@ export default function App() {
   }, [isLoopPreloading, canUseLoopPlayback, frameHours, loopUrlByHour, showTransientFrameStatus]);
 
   useEffect(() => {
-    if (!isPlaying || playbackRenderMode !== "loop" || frameHours.length === 0) {
+    if (!isPlaying || renderMode === "tiles" || frameHours.length === 0) {
       return;
     }
 
@@ -939,7 +1031,7 @@ export default function App() {
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, playbackRenderMode, frameHours, forecastHour]);
+  }, [isPlaying, renderMode, frameHours, forecastHour]);
 
   useEffect(() => {
     updateBufferSnapshot();
@@ -1282,7 +1374,7 @@ export default function App() {
   }, [model, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
-    if (!isPlaying || playbackRenderMode !== "tiles" || frameHours.length === 0) return;
+    if (!isPlaying || renderMode !== "tiles" || frameHours.length === 0) return;
 
     const interval = window.setInterval(() => {
       const currentIndex = frameHours.indexOf(forecastHour);
@@ -1361,7 +1453,7 @@ export default function App() {
     bufferSnapshot.bufferedAheadCount,
     playbackPolicy.minAheadWhilePlaying,
     debugLog,
-    playbackRenderMode,
+    renderMode,
   ]);
 
   useEffect(() => {
@@ -1444,8 +1536,7 @@ export default function App() {
       return;
     }
 
-    if (canUseLoopPlayback) {
-      setPlaybackRenderMode("loop");
+    if (canUseLoopPlayback && webpDefaultEnabled && renderMode !== "tiles") {
       setLoopBaseForecastHour(forecastHour);
       setIsPlaying(false);
       setIsPreloadingForPlay(false);
@@ -1454,7 +1545,7 @@ export default function App() {
       return;
     }
 
-    setPlaybackRenderMode("tiles");
+    setRenderMode("tiles");
     const remainingAheadFrames = Math.max(0, frameHours.length - forecastHour - 1);
     const minAheadReady = Math.min(playbackPolicy.minAheadWhilePlaying, remainingAheadFrames);
     const canStartImmediately =
@@ -1481,8 +1572,15 @@ export default function App() {
     playbackPolicy.minAheadWhilePlaying,
     playbackPolicy.minStartBuffer,
     canUseLoopPlayback,
+    webpDefaultEnabled,
+    renderMode,
     showTransientFrameStatus,
   ]);
+
+  const handleZoomRoutingSignal = useCallback((payload: { zoom: number; gestureActive: boolean }) => {
+    setMapZoom(payload.zoom);
+    setZoomGestureActive(payload.gestureActive);
+  }, []);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {
@@ -1567,6 +1665,7 @@ export default function App() {
           onFrameLoadingChange={handleFrameLoadingChange}
           onZoomHint={setShowZoomHint}
           onZoomBucketChange={setZoomBucket}
+          onZoomRoutingSignal={handleZoomRoutingSignal}
           onMapHover={onHover}
           onMapHoverEnd={onHoverEnd}
         />
@@ -1600,7 +1699,7 @@ export default function App() {
 
         {(isPlaying || isPreloadingForPlay || isLoopPreloading) && (
           <div className="absolute left-4 top-20 z-50 rounded-md border border-border/40 bg-[hsl(var(--toolbar))]/90 px-2.5 py-1.5 text-[10px] text-foreground shadow-lg backdrop-blur-md">
-            {isLoopPreloading || playbackRenderMode === "loop"
+            {isLoopPreloading || renderMode !== "tiles"
               ? `loopReady ${loopProgress.ready} • loopFailed ${loopProgress.failed} • loopTotal ${loopProgress.total}`
               : `aheadReady ${bufferSnapshot.bufferedAheadCount} • aheadTerminal ${bufferSnapshot.terminalAheadCount} • inflightTiles ${bufferSnapshot.inFlightCount} • queueDepth ${bufferSnapshot.queueDepth}`}
           </div>
