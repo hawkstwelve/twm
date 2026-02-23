@@ -45,7 +45,7 @@ const FRAME_RETRY_BASE_MS = 1200;
 const LOOP_PRELOAD_MIN_READY = 2;
 const LOOP_AHEAD_READY_TARGET = 8;
 const LOOP_MIN_PLAYABLE_AHEAD = 2;
-const LOOP_PREFETCH_CONCURRENCY = 3;
+const MAX_CONCURRENT_DECODES = 1;
 const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 
@@ -1410,7 +1410,7 @@ export default function App() {
         candidates.push(fh);
       }
 
-      const availableSlots = Math.max(0, LOOP_PREFETCH_CONCURRENCY - inFlight.size);
+      const availableSlots = Math.max(0, MAX_CONCURRENT_DECODES - inFlight.size);
       for (const fh of candidates.slice(0, availableSlots)) {
         launchDecode(fh);
       }
