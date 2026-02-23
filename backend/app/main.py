@@ -157,11 +157,10 @@ def _normalize_loop_url_prefix(prefix: str) -> str:
 _LOOP_URL_PREFIX_NORMALIZED = _normalize_loop_url_prefix(LOOP_URL_PREFIX)
 
 
-def _loop_webp_url(model: str, run: str, var: str, fh: int, *, tier: int | None, version_token: str) -> str:
-    base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/{fh}/loop.webp"
-    if tier is None:
-        return f"{base}?v={version_token}"
-    return f"{base}?tier={tier}&v={version_token}"
+def _loop_webp_url(model: str, run: str, var: str, fh: int, *, tier: int, version_token: str) -> str:
+    tier_segment = f"tier{tier}"
+    base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/{tier_segment}/fh{fh:03d}.loop.webp"
+    return f"{base}?v={version_token}"
 
 
 def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
@@ -653,7 +652,7 @@ def list_frames(request: Request, model: str, run: str, var: str):
                 "fh": fh,
                 "has_cog": True,
                 "run": resolved,
-                "loop_webp_url": _loop_webp_url(model, resolved, var, fh, tier=None, version_token=version_token),
+                "loop_webp_url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
                 "loop_webp_tier0_url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
                 "loop_webp_tier1_url": _loop_webp_url(model, resolved, var, fh, tier=1, version_token=version_token),
                 "meta": {"meta": meta},
