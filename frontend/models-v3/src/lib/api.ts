@@ -176,11 +176,15 @@ export type SampleResult = {
   value: number;
   units: string;
   model: string;
+  run?: string;
   var: string;
   fh: number;
   valid_time: string;
   lat: number;
   lon: number;
+  noData: boolean;
+  label?: string;
+  desc?: string;
 };
 
 export async function fetchSample(params: {
@@ -190,6 +194,7 @@ export async function fetchSample(params: {
   fh: number;
   lat: number;
   lon: number;
+  signal?: AbortSignal;
 }): Promise<SampleResult | null> {
   const qs = new URLSearchParams({
     model: params.model,
@@ -199,14 +204,21 @@ export async function fetchSample(params: {
     lat: String(params.lat),
     lon: String(params.lon),
   });
-  const response = await fetch(`${API_BASE}/sample?${qs}`, { credentials: "omit" });
-  if (response.status === 204 || response.status === 404) {
+  const response = await fetch(`${API_BASE}/sample?${qs}`, { credentials: "omit", signal: params.signal });
+  if (response.status === 404) {
     return null;
   }
   if (!response.ok) {
     throw new Error(`Sample request failed: ${response.status}`);
   }
-  return response.json() as Promise<SampleResult>;
+  const payload = (await response.json()) as SampleResult;
+  if (payload.noData || payload.value === null || Number.isNaN(Number(payload.value))) {
+    return null;
+  }
+  return {
+    ...payload,
+    value: Number(payload.value),
+  };
 }
 
 export function buildContourUrl(params: {

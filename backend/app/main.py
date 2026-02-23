@@ -57,6 +57,8 @@ LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
 LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "86"))
 LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
+SAMPLE_CACHE_TTL_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_CACHE_TTL_SECONDS", "2.0"))
+SAMPLE_INFLIGHT_WAIT_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_INFLIGHT_WAIT_SECONDS", "0.2"))
 
 LOOP_TIER_CONFIG: dict[int, dict[str, int]] = {
     0: {
@@ -122,6 +124,17 @@ _DS_CACHE_MAX = 16
 _manifest_cache: dict[str, dict[str, Any]] = {}
 _sidecar_cache: dict[str, dict[str, Any]] = {}
 _json_cache_lock = threading.Lock()
+
+
+class _SampleInflight:
+    def __init__(self) -> None:
+        self.event = threading.Event()
+        self.payload: dict[str, Any] | None = None
+
+
+_sample_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+_sample_inflight: dict[str, _SampleInflight] = {}
+_sample_lock = threading.Lock()
 
 
 def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
@@ -329,6 +342,37 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
     tier_cfg = LOOP_TIER_CONFIG.get(tier)
     if tier_cfg is None:
         return False
+
+
+def _sample_cache_key(model: str, run: str, var: str, fh: int, row: int, col: int) -> str:
+    return f"{model}:{run}:{var}:{fh}:{row}:{col}"
+
+
+def _sample_payload(
+    *,
+    model: str,
+    run: str,
+    var: str,
+    fh: int,
+    lat: float,
+    lon: float,
+    value: float | None,
+    units: str,
+    valid_time: str,
+    no_data: bool,
+) -> dict[str, Any]:
+    return {
+        "value": round(float(value), 1) if value is not None else None,
+        "units": units,
+        "model": model,
+        "run": run,
+        "var": var,
+        "fh": fh,
+        "valid_time": valid_time,
+        "lat": lat,
+        "lon": lon,
+        "noData": no_data,
+    }
 
     max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
@@ -587,37 +631,97 @@ def sample(
 ):
     val_cog = _resolve_val_cog(model, run, var, fh)
     if val_cog is None:
-        return Response(status_code=404, content='{"error": "COG not found"}', media_type="application/json")
+        return Response(status_code=404, content='{"error": "val.cog.tif not found"}', media_type="application/json")
 
     try:
         mx, my = _wgs84_to_3857.transform(lon, lat)
         ds = _get_cached_dataset(val_cog)
         row, col = ds.index(mx, my)
+        resolved_run = _resolve_run(model, run) or run
+        sidecar = _resolve_sidecar(model, run, var, fh)
+        units = sidecar.get("units", "") if sidecar else ""
+        valid_time = sidecar.get("valid_time", "") if sidecar else ""
 
         if row < 0 or row >= ds.height or col < 0 or col >= ds.width:
-            return Response(status_code=204, headers={"Cache-Control": "private, max-age=300"})
+            payload = _sample_payload(
+                model=model,
+                run=resolved_run,
+                var=var,
+                fh=fh,
+                lat=lat,
+                lon=lon,
+                value=None,
+                units=units,
+                valid_time=valid_time,
+                no_data=True,
+            )
+            return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
+
+        key = _sample_cache_key(model, resolved_run, var, fh, row, col)
+        now = time.monotonic()
+        inflight: _SampleInflight | None = None
+        is_leader = False
+
+        with _sample_lock:
+            cached = _sample_cache.get(key)
+            if cached is not None:
+                expires_at, payload = cached
+                if expires_at > now:
+                    return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
+                _sample_cache.pop(key, None)
+
+            inflight = _sample_inflight.get(key)
+            if inflight is None:
+                inflight = _SampleInflight()
+                _sample_inflight[key] = inflight
+                is_leader = True
+
+        if not is_leader:
+            assert inflight is not None
+            inflight.event.wait(timeout=SAMPLE_INFLIGHT_WAIT_SECONDS)
+            with _sample_lock:
+                cached = _sample_cache.get(key)
+                if cached is not None:
+                    expires_at, payload = cached
+                    if expires_at > time.monotonic():
+                        return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
+                payload = inflight.payload
+                if payload is not None:
+                    return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
 
         window = Window(col, row, 1, 1)  # type: ignore[call-arg]
         pixel = ds.read(1, window=window)
         value = float(pixel[0, 0])
 
-        if np.isnan(value):
-            return Response(status_code=204, headers={"Cache-Control": "private, max-age=300"})
+        payload = _sample_payload(
+            model=model,
+            run=resolved_run,
+            var=var,
+            fh=fh,
+            lat=lat,
+            lon=lon,
+            value=None if np.isnan(value) else value,
+            units=units,
+            valid_time=valid_time,
+            no_data=bool(np.isnan(value)),
+        )
 
-        sidecar = _resolve_sidecar(model, run, var, fh)
-        payload = {
-            "value": round(value, 1),
-            "units": sidecar.get("units", "") if sidecar else "",
-            "model": model,
-            "var": var,
-            "fh": fh,
-            "valid_time": sidecar.get("valid_time", "") if sidecar else "",
-            "lat": lat,
-            "lon": lon,
-        }
+        with _sample_lock:
+            _sample_cache[key] = (time.monotonic() + SAMPLE_CACHE_TTL_SECONDS, payload)
+            sample_inflight = _sample_inflight.pop(key, None)
+            if sample_inflight is not None:
+                sample_inflight.payload = payload
+                sample_inflight.event.set()
+
         return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=86400"})
 
     except Exception:
+        with _sample_lock:
+            key = locals().get("key")
+            if isinstance(key, str):
+                sample_inflight = _sample_inflight.pop(key, None)
+                if sample_inflight is not None:
+                    sample_inflight.event.set()
         logger.exception(
             "Sample query failed: %s/%s/%s/fh%03d @ (%.4f, %.4f)",
             model,

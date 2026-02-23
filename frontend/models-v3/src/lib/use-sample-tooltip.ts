@@ -77,6 +77,7 @@ export function useSampleTooltip(ctx: SampleContext) {
   const [tooltip, setTooltip] = useState<SampleTooltipState>(null);
   const genRef = useRef(0);
   const timerRef = useRef<number | null>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
   const cacheRef = useRef(new LRUCache());
   const prevCtxRef = useRef<string>("");
 
@@ -116,6 +117,9 @@ export function useSampleTooltip(ctx: SampleContext) {
         }
 
         // Fetch from API
+        requestAbortRef.current?.abort();
+        const controller = new AbortController();
+        requestAbortRef.current = controller;
         fetchSample({
           model: ctx.model,
           run: ctx.run,
@@ -123,6 +127,7 @@ export function useSampleTooltip(ctx: SampleContext) {
           fh: ctx.fh,
           lat: roundedLat,
           lon: roundedLon,
+          signal: controller.signal,
         })
           .then((result) => {
             cacheRef.current.set(key, result);
@@ -133,8 +138,11 @@ export function useSampleTooltip(ctx: SampleContext) {
             }
             setTooltip({ value: result.value, units: result.units, x, y });
           })
-          .catch(() => {
+          .catch((error) => {
             // Silently drop errors — don't flash error state for hover
+            if (error instanceof DOMException && error.name === "AbortError") {
+              return;
+            }
             if (gen !== genRef.current) return;
             setTooltip(null);
           });
@@ -150,6 +158,8 @@ export function useSampleTooltip(ctx: SampleContext) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    requestAbortRef.current?.abort();
+    requestAbortRef.current = null;
     setTooltip(null);
   }, []);
 
@@ -159,6 +169,8 @@ export function useSampleTooltip(ctx: SampleContext) {
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current);
       }
+      requestAbortRef.current?.abort();
+      requestAbortRef.current = null;
     };
   }, []);
 
