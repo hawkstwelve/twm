@@ -43,6 +43,9 @@ const FRAME_MAX_RETRIES = 3;
 const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
 const LOOP_PRELOAD_MIN_READY = 2;
+const LOOP_AHEAD_READY_TARGET = 8;
+const LOOP_MIN_PLAYABLE_AHEAD = 2;
+const LOOP_PREFETCH_CONCURRENCY = 3;
 const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 
@@ -353,6 +356,7 @@ export default function App() {
   const [visibleRenderMode, setVisibleRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
   const [loopDisplayHour, setLoopDisplayHour] = useState<number | null>(null);
   const [isLoopPreloading, setIsLoopPreloading] = useState(false);
+  const [isLoopAutoplayBuffering, setIsLoopAutoplayBuffering] = useState(false);
   const [loopProgress, setLoopProgress] = useState({ total: 0, ready: 0, failed: 0 });
   const [loopBaseForecastHour, setLoopBaseForecastHour] = useState<number | null>(null);
   const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
@@ -564,6 +568,7 @@ export default function App() {
       const cached = loopDecodedCacheRef.current.get(key);
       if (cached) {
         cached.lastUsedAt = Date.now();
+        loopReadyHoursRef.current.add(fh);
         return true;
       }
 
@@ -579,9 +584,43 @@ export default function App() {
       if (decoded.bitmap) {
         upsertLoopDecodedCache(key, decoded.bitmap, decoded.bytes);
       }
+      loopReadyHoursRef.current.add(fh);
       return true;
     },
     [loopCacheKey, resolveLoopUrlForHour, upsertLoopDecodedCache]
+  );
+
+  const hasDecodedLoopFrame = useCallback(
+    (fh: number, mode: RenderModeState): boolean => {
+      if (mode === "tiles") {
+        return false;
+      }
+      return loopDecodedCacheRef.current.has(loopCacheKey(fh, mode));
+    },
+    [loopCacheKey]
+  );
+
+  const countAheadReadyLoopFrames = useCallback(
+    (currentHour: number, mode: RenderModeState, maxAhead: number): number => {
+      if (mode === "tiles" || frameHours.length === 0 || maxAhead <= 0) {
+        return 0;
+      }
+      const currentIndex = frameHours.indexOf(currentHour);
+      if (currentIndex < 0) {
+        return 0;
+      }
+
+      let ready = 0;
+      const endIndex = Math.min(frameHours.length - 1, currentIndex + maxAhead);
+      for (let index = currentIndex + 1; index <= endIndex; index += 1) {
+        const fh = frameHours[index];
+        if (hasDecodedLoopFrame(fh, mode)) {
+          ready += 1;
+        }
+      }
+      return ready;
+    },
+    [frameHours, hasDecodedLoopFrame]
   );
 
   const canUseLoopPlayback = useMemo(() => {
@@ -1072,12 +1111,18 @@ export default function App() {
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
     setIsLoopPreloading(false);
+    setIsLoopAutoplayBuffering(false);
     setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
     setLoopBaseForecastHour(null);
     setLoopDisplayHour(null);
     loopPreloadTokenRef.current += 1;
     loopReadyHoursRef.current.clear();
     loopFailedHoursRef.current.clear();
+    for (const cached of loopDecodedCacheRef.current.values()) {
+      cached.bitmap.close();
+    }
+    loopDecodedCacheRef.current.clear();
+    loopDecodedCacheBytesRef.current = 0;
     setIsPreloadingForPlay(false);
     lastTileViewportCommitUrlRef.current = null;
     preloadProgressRef.current = {
@@ -1189,36 +1234,165 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!isLoopDisplayActive || frameHours.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const inFlight = new Set<number>();
+    const controllers = new Map<number, AbortController>();
+
+    const launchDecode = (fh: number) => {
+      if (cancelled || inFlight.has(fh)) {
+        return;
+      }
+      const controller = new AbortController();
+      inFlight.add(fh);
+      controllers.set(fh, controller);
+      ensureLoopFrameDecoded(fh, visibleRenderMode, controller.signal)
+        .catch(() => {
+          // best-effort prefetch; decode failures are handled by fallback path.
+        })
+        .finally(() => {
+          inFlight.delete(fh);
+          controllers.delete(fh);
+        });
+    };
+
+    const schedulePrefetch = () => {
+      if (cancelled) {
+        return;
+      }
+      const currentIndex = frameHours.indexOf(forecastHour);
+      if (currentIndex < 0) {
+        return;
+      }
+
+      const remainingAhead = Math.max(0, frameHours.length - 1 - currentIndex);
+      const targetAhead = Math.min(LOOP_AHEAD_READY_TARGET, remainingAhead);
+      if (targetAhead <= 0) {
+        return;
+      }
+
+      const candidates: number[] = [];
+      for (let index = currentIndex + 1; index < frameHours.length && candidates.length < targetAhead * 2; index += 1) {
+        const fh = frameHours[index];
+        if (hasDecodedLoopFrame(fh, visibleRenderMode)) {
+          continue;
+        }
+        if (inFlight.has(fh)) {
+          continue;
+        }
+        candidates.push(fh);
+      }
+
+      const availableSlots = Math.max(0, LOOP_PREFETCH_CONCURRENCY - inFlight.size);
+      for (const fh of candidates.slice(0, availableSlots)) {
+        launchDecode(fh);
+      }
+    };
+
+    schedulePrefetch();
+    const interval = window.setInterval(schedulePrefetch, 350);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      for (const controller of controllers.values()) {
+        controller.abort();
+      }
+      controllers.clear();
+      inFlight.clear();
+    };
+  }, [
+    isLoopDisplayActive,
+    visibleRenderMode,
+    frameHours,
+    forecastHour,
+    ensureLoopFrameDecoded,
+    hasDecodedLoopFrame,
+  ]);
+
+  useEffect(() => {
     if (!isPlaying || renderMode === "tiles" || frameHours.length === 0) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      const ready = loopReadyHoursRef.current;
       const currentIndex = frameHours.indexOf(forecastHour);
       if (currentIndex < 0) {
+        return;
+      }
+
+      const remainingAheadFrames = Math.max(0, frameHours.length - currentIndex - 1);
+      const minAheadRequired = Math.min(LOOP_MIN_PLAYABLE_AHEAD, remainingAheadFrames);
+      const aheadReady = countAheadReadyLoopFrames(forecastHour, visibleRenderMode, LOOP_AHEAD_READY_TARGET);
+      if (aheadReady < minAheadRequired) {
+        setIsPlaying(false);
+        setIsLoopAutoplayBuffering(true);
+        showTransientFrameStatus("Buffering");
         return;
       }
 
       const nextIndex = currentIndex + 1;
       if (nextIndex >= frameHours.length) {
         setIsPlaying(false);
+        setIsLoopAutoplayBuffering(false);
         return;
       }
 
       for (let idx = nextIndex; idx < frameHours.length; idx += 1) {
         const candidate = frameHours[idx];
-        if (ready.has(candidate)) {
+        if (hasDecodedLoopFrame(candidate, visibleRenderMode)) {
           setTargetForecastHour(candidate);
           return;
         }
       }
 
       setIsPlaying(false);
+      setIsLoopAutoplayBuffering(true);
+      showTransientFrameStatus("Buffering");
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, renderMode, frameHours, forecastHour]);
+  }, [
+    isPlaying,
+    renderMode,
+    frameHours,
+    forecastHour,
+    visibleRenderMode,
+    hasDecodedLoopFrame,
+    countAheadReadyLoopFrames,
+    showTransientFrameStatus,
+  ]);
+
+  useEffect(() => {
+    if (!isLoopAutoplayBuffering || isPlaying || renderMode === "tiles" || frameHours.length === 0) {
+      return;
+    }
+    const currentIndex = frameHours.indexOf(forecastHour);
+    if (currentIndex < 0) {
+      return;
+    }
+
+    const remainingAheadFrames = Math.max(0, frameHours.length - currentIndex - 1);
+    const minAheadRequired = Math.min(LOOP_MIN_PLAYABLE_AHEAD, remainingAheadFrames);
+    const aheadReady = countAheadReadyLoopFrames(forecastHour, visibleRenderMode, LOOP_AHEAD_READY_TARGET);
+    if (aheadReady < minAheadRequired) {
+      return;
+    }
+
+    setIsLoopAutoplayBuffering(false);
+    setIsPlaying(true);
+  }, [
+    isLoopAutoplayBuffering,
+    isPlaying,
+    renderMode,
+    frameHours,
+    forecastHour,
+    visibleRenderMode,
+    countAheadReadyLoopFrames,
+  ]);
 
   useEffect(() => {
     updateBufferSnapshot();
@@ -1769,6 +1943,7 @@ export default function App() {
   const handleSetIsPlaying = useCallback((value: boolean) => {
     if (!value) {
       setIsPlaying(false);
+      setIsLoopAutoplayBuffering(false);
       setIsLoopPreloading(false);
       setIsPreloadingForPlay(false);
       return;
@@ -1777,7 +1952,16 @@ export default function App() {
       return;
     }
 
-    if (canUseLoopPlayback && webpDefaultEnabled && renderMode !== "tiles") {
+    if (renderMode === "tiles") {
+      setIsPlaying(false);
+      setIsLoopAutoplayBuffering(false);
+      setIsLoopPreloading(false);
+      setIsPreloadingForPlay(false);
+      showTransientFrameStatus("High detail mode — zoom out for smooth loop");
+      return;
+    }
+
+    if (canUseLoopPlayback && webpDefaultEnabled) {
       setLoopBaseForecastHour(forecastHour);
       setIsPlaying(false);
       setIsPreloadingForPlay(false);
@@ -1787,6 +1971,7 @@ export default function App() {
     }
 
     setRenderMode("tiles");
+    setIsLoopAutoplayBuffering(false);
     const remainingAheadFrames = Math.max(0, frameHours.length - forecastHour - 1);
     const minAheadReady = Math.min(playbackPolicy.minAheadWhilePlaying, remainingAheadFrames);
     const canStartImmediately =
@@ -1996,6 +2181,13 @@ export default function App() {
           <div className="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
             <AlertCircle className="h-3.5 w-3.5" />
             GFS is low-resolution at this zoom. Switch to HRRR for sharper detail.
+          </div>
+        )}
+
+        {renderMode === "tiles" && (
+          <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+            <AlertCircle className="h-3.5 w-3.5" />
+            High detail mode — zoom out for smooth loop
           </div>
         )}
 
