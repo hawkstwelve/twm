@@ -280,6 +280,7 @@ type MapCanvasProps = {
   loopActive?: boolean;
   onFrameSettled?: (tileUrl: string) => void;
   onTileReady?: (tileUrl: string) => void;
+  onTileViewportReady?: (tileUrl: string) => void;
   onFrameLoadingChange?: (tileUrl: string, isLoading: boolean) => void;
   onZoomHint?: (show: boolean) => void;
   onZoomBucketChange?: (bucket: number) => void;
@@ -303,6 +304,7 @@ export function MapCanvas({
   loopActive = false,
   onFrameSettled,
   onTileReady,
+  onTileViewportReady,
   onFrameLoadingChange,
   onZoomHint,
   onZoomBucketChange,
@@ -323,6 +325,7 @@ export function MapCanvas({
   const sourceEventCountRef = useRef<Map<string, number>>(new Map());
   const fadeTokenRef = useRef(0);
   const fadeRafRef = useRef<number | null>(null);
+  const tileViewportReadyTokenRef = useRef(0);
 
   const view = useMemo(() => {
     return regionViews?.[region] ?? {
@@ -990,10 +993,10 @@ export function MapCanvas({
 
     setLayerVisibility(map, LOOP_LAYER_ID, Boolean(loopActive && loopImageUrl));
     setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m" && !loopActive);
-    setLayerVisibility(map, layerId("a"), !loopActive);
-    setLayerVisibility(map, layerId("b"), !loopActive);
+    setLayerVisibility(map, layerId("a"), true);
+    setLayerVisibility(map, layerId("b"), true);
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
-      setLayerVisibility(map, prefetchLayerId(idx), !loopActive);
+      setLayerVisibility(map, prefetchLayerId(idx), true);
     }
     enforceLayerOrder(map);
   }, [isLoaded, loopImageUrl, loopActive, variable, enforceLayerOrder]);
@@ -1011,13 +1014,49 @@ export function MapCanvas({
       cancelCrossfade();
     }
 
-    setLayerOpacity(map, layerId(activeBuffer), opacity);
-    setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+    if (loopActive) {
+      setLayerOpacity(map, layerId(activeBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+      setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+    } else {
+      setLayerOpacity(map, layerId(activeBuffer), opacity);
+      setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+    }
     setLayerOpacity(map, LOOP_LAYER_ID, opacity);
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
       setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
     }
-  }, [opacity, isLoaded, crossfade, cancelCrossfade, setLayerOpacity]);
+  }, [opacity, isLoaded, crossfade, cancelCrossfade, setLayerOpacity, loopActive]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded || loopActive) {
+      return;
+    }
+
+    const token = ++tileViewportReadyTokenRef.current;
+    const activeSource = sourceId(activeBufferRef.current);
+    const expectedTileUrl = tileUrl;
+
+    const maybeNotify = () => {
+      if (token !== tileViewportReadyTokenRef.current) {
+        return;
+      }
+      if (activeTileUrlRef.current !== expectedTileUrl) {
+        return;
+      }
+      if (!map.isSourceLoaded(activeSource)) {
+        return;
+      }
+      onTileViewportReady?.(expectedTileUrl);
+    };
+
+    map.on("idle", maybeNotify);
+    window.requestAnimationFrame(() => maybeNotify());
+
+    return () => {
+      map.off("idle", maybeNotify);
+    };
+  }, [isLoaded, loopActive, tileUrl, onTileViewportReady]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -150,6 +150,26 @@ function nextRenderModeByHysteresis(current: RenderModeState, effectiveZoom: num
   return "tiles";
 }
 
+function preloadLoopFrame(url: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = async () => {
+      try {
+        if (typeof createImageBitmap === "function") {
+          const bitmap = await createImageBitmap(image);
+          bitmap.close();
+        }
+        resolve(true);
+      } catch {
+        resolve(true);
+      }
+    };
+    image.onerror = () => resolve(false);
+    image.src = url;
+  });
+}
+
 function runIdToIso(runId: string | null): string | null {
   if (!runId) return null;
   const match = runId.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})z$/i);
@@ -327,6 +347,7 @@ export default function App() {
   const [zoomGestureActive, setZoomGestureActive] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [renderMode, setRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
+  const [visibleRenderMode, setVisibleRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
   const [isLoopPreloading, setIsLoopPreloading] = useState(false);
   const [loopProgress, setLoopProgress] = useState({ total: 0, ready: 0, failed: 0 });
   const [loopBaseForecastHour, setLoopBaseForecastHour] = useState<number | null>(null);
@@ -378,6 +399,7 @@ export default function App() {
   const loopFailedHoursRef = useRef<Set<number>>(new Set());
   const mapZoomRef = useRef(DEFAULTS.zoom);
   const renderModeDwellTimerRef = useRef<number | null>(null);
+  const transitionTokenRef = useRef(0);
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -483,8 +505,41 @@ export default function App() {
     return clearDwellTimer;
   }, [mapZoom, zoomGestureActive, renderMode, webpDefaultEnabled, canUseLoopPlayback]);
 
+  useEffect(() => {
+    transitionTokenRef.current += 1;
+
+    if (!canUseLoopPlayback) {
+      setVisibleRenderMode("tiles");
+      return;
+    }
+
+    if (renderMode === visibleRenderMode) {
+      return;
+    }
+
+    if (renderMode === "tiles") {
+      return;
+    }
+
+    const url = loopUrlByHour.get(forecastHour);
+    if (!url) {
+      setVisibleRenderMode("tiles");
+      return;
+    }
+
+    const token = transitionTokenRef.current;
+    preloadLoopFrame(url).then((ready) => {
+      if (token !== transitionTokenRef.current) {
+        return;
+      }
+      if (ready) {
+        setVisibleRenderMode(renderMode);
+      }
+    });
+  }, [renderMode, visibleRenderMode, canUseLoopPlayback, forecastHour, loopUrlByHour]);
+
   const isLoopPlaybackLocked = renderMode !== "tiles" && canUseLoopPlayback && (isPlaying || isLoopPreloading);
-  const isLoopDisplayActive = renderMode !== "tiles" && canUseLoopPlayback && (isPlaying || isLoopPreloading || isScrubbing);
+  const isLoopDisplayActive = visibleRenderMode !== "tiles" && canUseLoopPlayback;
   const mapForecastHour = isLoopPlaybackLocked && Number.isFinite(loopBaseForecastHour)
     ? (loopBaseForecastHour as number)
     : forecastHour;
@@ -904,6 +959,7 @@ export default function App() {
     loopFailedHoursRef.current.clear();
     setIsPreloadingForPlay(false);
     setRenderMode(webpDefaultEnabled ? "webp_tier0" : "tiles");
+    setVisibleRenderMode(webpDefaultEnabled ? "webp_tier0" : "tiles");
     preloadProgressRef.current = {
       lastBufferedCount: 0,
       lastProgressAt: Date.now(),
@@ -975,6 +1031,9 @@ export default function App() {
       setIsLoopPreloading(false);
       const minReady = Math.min(LOOP_PRELOAD_MIN_READY, frameHours.length);
       if (readySet.size >= minReady) {
+        if (renderMode !== "tiles") {
+          setVisibleRenderMode(renderMode);
+        }
         setIsPlaying(true);
         return;
       }
@@ -999,7 +1058,14 @@ export default function App() {
     return () => {
       loopPreloadTokenRef.current += 1;
     };
-  }, [isLoopPreloading, canUseLoopPlayback, frameHours, loopUrlByHour, showTransientFrameStatus]);
+  }, [
+    isLoopPreloading,
+    canUseLoopPlayback,
+    frameHours,
+    loopUrlByHour,
+    showTransientFrameStatus,
+    renderMode,
+  ]);
 
   useEffect(() => {
     if (!isPlaying || renderMode === "tiles" || frameHours.length === 0) {
@@ -1582,6 +1648,16 @@ export default function App() {
     setZoomGestureActive(payload.gestureActive);
   }, []);
 
+  const handleTileViewportReady = useCallback((readyTileUrl: string) => {
+    if (renderMode !== "tiles") {
+      return;
+    }
+    if (readyTileUrl !== tileUrl) {
+      return;
+    }
+    setVisibleRenderMode("tiles");
+  }, [renderMode, tileUrl]);
+
   useEffect(() => {
     if (isPlaying && isScrubbing) {
       setIsScrubbing(false);
@@ -1663,6 +1739,7 @@ export default function App() {
           onFrameSettled={handleFrameSettled}
           onTileReady={handleTileReady}
           onFrameLoadingChange={handleFrameLoadingChange}
+          onTileViewportReady={handleTileViewportReady}
           onZoomHint={setShowZoomHint}
           onZoomBucketChange={setZoomBucket}
           onZoomRoutingSignal={handleZoomRoutingSignal}
