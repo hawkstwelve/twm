@@ -487,14 +487,15 @@ export default function App() {
     const inFlight = inFlightFramesRef.current;
     const maxRequests = 4;
     const targetReady = Math.min(frameHours.length, playbackPolicy.bufferTarget);
+    const activeInFlight = frameHours.filter((fh) => inFlight.has(fh)).slice(0, maxRequests);
     if (ready.size + inFlight.size >= targetReady) {
-      return [] as number[];
+      return activeInFlight;
     }
 
     const currentIndex = frameHours.indexOf(forecastHour);
     const pivot = currentIndex >= 0 ? currentIndex : 0;
-    const candidates: number[] = [];
-    const seen = new Set<number>();
+    const candidates: number[] = [...activeInFlight];
+    const seen = new Set<number>(activeInFlight);
 
     const pushCandidate = (fh: number) => {
       if (seen.has(fh)) return;
@@ -673,9 +674,28 @@ export default function App() {
   }, [updateBufferSnapshot]);
 
   useEffect(() => {
+    const interval = window.setInterval(() => {
+      updateBufferSnapshot();
+    }, 1000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [updateBufferSnapshot]);
+
+  useEffect(() => {
     const inFlight = inFlightFramesRef.current;
     const ready = readyFramesRef.current;
+    const requested = new Set(prefetchHours);
     let changed = false;
+
+    for (const fh of inFlight) {
+      if (!requested.has(fh) || ready.has(fh)) {
+        inFlight.delete(fh);
+        inFlightStartedAtRef.current.delete(fh);
+        changed = true;
+      }
+    }
+
     for (const fh of prefetchHours) {
       if (!ready.has(fh) && !inFlight.has(fh)) {
         inFlight.add(fh);
