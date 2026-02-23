@@ -170,6 +170,14 @@ def _derive_radar_ptype_combo(
     ptype_codes = np.array(RADAR_PTYPE_ORDER)
     ptype = ptype_codes[ptype_idx]
 
+    rain_mask = mask_stack[0]
+    snow_mask = mask_stack[1]
+    frzr_transition = (ptype == "frzr") & ((rain_mask > 0) | (snow_mask > 0))
+    if np.any(frzr_transition):
+        prefer_rain = rain_mask >= snow_mask
+        ptype[frzr_transition & prefer_rain] = "rain"
+        ptype[frzr_transition & ~prefer_rain] = "snow"
+
     refl_safe = np.where(np.isfinite(refl), np.maximum(refl, 0.0), np.nan)
     bins_per_type = {k: int(v["count"]) for k, v in RADAR_PTYPE_BREAKS.items()}
     normalized = np.clip(refl_safe / 70.0, 0.0, 1.0)
