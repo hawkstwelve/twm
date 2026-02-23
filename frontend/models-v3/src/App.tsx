@@ -271,6 +271,7 @@ export default function App() {
   const [forecastHour, setForecastHour] = useState(0);
   const [targetForecastHour, setTargetForecastHour] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
   const [loading, setLoading] = useState(true);
@@ -486,7 +487,9 @@ export default function App() {
     const ready = readyFramesRef.current;
     const inFlight = inFlightFramesRef.current;
     const maxRequests = 4;
-    const targetReady = Math.min(frameHours.length, playbackPolicy.bufferTarget);
+    const targetReady = isPreloadingForPlay
+      ? frameHours.length
+      : Math.min(frameHours.length, playbackPolicy.bufferTarget);
     const activeInFlight = frameHours.filter((fh) => inFlight.has(fh)).slice(0, maxRequests);
     if (ready.size + inFlight.size >= targetReady) {
       return activeInFlight;
@@ -513,15 +516,24 @@ export default function App() {
       }
     }
 
-    for (let i = pivot - 1; i >= 0; i -= 1) {
-      pushCandidate(frameHours[i]);
-      if (candidates.length >= maxRequests) {
-        return candidates.slice(0, maxRequests);
+    if (isPreloadingForPlay) {
+      for (let i = 0; i < frameHours.length; i += 1) {
+        pushCandidate(frameHours[i]);
+        if (candidates.length >= maxRequests) {
+          return candidates.slice(0, maxRequests);
+        }
+      }
+    } else {
+      for (let i = pivot - 1; i >= 0; i -= 1) {
+        pushCandidate(frameHours[i]);
+        if (candidates.length >= maxRequests) {
+          return candidates.slice(0, maxRequests);
+        }
       }
     }
 
     return candidates.slice(0, maxRequests);
-  }, [frameHours, forecastHour, bufferSnapshot.version, playbackPolicy.bufferTarget]);
+  }, [frameHours, forecastHour, bufferSnapshot.version, playbackPolicy.bufferTarget, isPreloadingForPlay]);
 
   const prefetchTileUrls = useMemo(() => {
     return prefetchHours.map((fh) => tileUrlForHour(fh));
@@ -660,6 +672,7 @@ export default function App() {
     inFlightStartedAtRef.current.clear();
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
+    setIsPreloadingForPlay(false);
     debugLog("dataset generation changed", {
       generation: datasetGenerationRef.current,
       model,
@@ -1093,6 +1106,22 @@ export default function App() {
   ]);
 
   useEffect(() => {
+    if (!isPreloadingForPlay) {
+      return;
+    }
+    if (frameHours.length === 0) {
+      setIsPreloadingForPlay(false);
+      return;
+    }
+    if (bufferSnapshot.bufferedCount < frameHours.length) {
+      return;
+    }
+    setIsPreloadingForPlay(false);
+    autoplayPrimedRef.current = false;
+    setIsPlaying(true);
+  }, [isPreloadingForPlay, bufferSnapshot.bufferedCount, frameHours.length]);
+
+  useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
       setIsPlaying(false);
     }
@@ -1104,6 +1133,25 @@ export default function App() {
       clearFrameStatusTimer();
     }
   }, [isPlaying, clearFrameStatusTimer]);
+
+  const handleSetIsPlaying = useCallback((value: boolean) => {
+    if (!value) {
+      setIsPlaying(false);
+      setIsPreloadingForPlay(false);
+      return;
+    }
+    if (loading || frameHours.length === 0) {
+      return;
+    }
+    if (bufferSnapshot.bufferedCount >= frameHours.length) {
+      setIsPreloadingForPlay(false);
+      setIsPlaying(true);
+      return;
+    }
+    setIsPlaying(false);
+    setIsPreloadingForPlay(true);
+    showTransientFrameStatus("Loading frames");
+  }, [loading, frameHours.length, bufferSnapshot.bufferedCount, showTransientFrameStatus]);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {
@@ -1132,23 +1180,18 @@ export default function App() {
     setForecastHour(nextTarget);
   }, [targetForecastHour, forecastHour, frameHours]);
 
-  const canStartPlayback = useMemo(() => {
-    if (loading || frameHours.length === 0) {
-      return false;
-    }
-    const minStart = Math.min(playbackPolicy.minStartBuffer, frameHours.length);
-    return bufferSnapshot.bufferedCount >= minStart;
-  }, [loading, frameHours.length, bufferSnapshot.bufferedCount, playbackPolicy.minStartBuffer]);
-
-  const showBufferStatus = useMemo(() => {
-    if (frameHours.length === 0) {
-      return false;
-    }
-    if (isScrubLoading) {
-      return true;
-    }
-    return bufferSnapshot.bufferedCount < bufferSnapshot.totalFrames;
-  }, [frameHours.length, isScrubLoading, bufferSnapshot.bufferedCount, bufferSnapshot.totalFrames]);
+  const controlsIsPlaying = isPlaying || isPreloadingForPlay;
+  const preloadBufferedCount = Math.max(
+    0,
+    Math.min(bufferSnapshot.bufferedCount, bufferSnapshot.totalFrames)
+  );
+  const preloadPercent = bufferSnapshot.totalFrames > 0
+    ? Math.round((preloadBufferedCount / bufferSnapshot.totalFrames) * 100)
+    : 0;
+  const showBufferStatus = isScrubLoading || (isPreloadingForPlay && bufferSnapshot.totalFrames > 0);
+  const bufferStatusText = isScrubLoading
+    ? "Loading frame"
+    : `Loading frames ${preloadBufferedCount}/${bufferSnapshot.totalFrames}`;
 
   return (
     <div className="flex h-full flex-col">
@@ -1189,9 +1232,22 @@ export default function App() {
         />
 
         {showBufferStatus && (
-          <div className="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
-            <AlertCircle className="h-3.5 w-3.5" />
-            {bufferSnapshot.statusText}
+          <div className="absolute left-1/2 top-4 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-1.5 font-medium">
+                <AlertCircle className="h-3.5 w-3.5" />
+                {bufferStatusText}
+              </span>
+              {!isScrubLoading ? <span className="font-mono tabular-nums">{preloadPercent}%</span> : null}
+            </div>
+            {!isScrubLoading ? (
+              <div className="h-1.5 overflow-hidden rounded-full bg-muted/70">
+                <div
+                  className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
+                  style={{ width: `${preloadPercent}%` }}
+                />
+              </div>
+            ) : null}
           </div>
         )}
 
@@ -1228,11 +1284,11 @@ export default function App() {
           availableFrames={frameHours}
           onForecastHourChange={requestForecastHour}
           onScrubStateChange={setIsScrubbing}
-          isPlaying={isPlaying}
-          setIsPlaying={setIsPlaying}
+          isPlaying={controlsIsPlaying}
+          setIsPlaying={handleSetIsPlaying}
           runDateTimeISO={runDateTimeISO}
           disabled={loading}
-          playDisabled={!canStartPlayback}
+          playDisabled={loading || frameHours.length === 0}
           transientStatus={frameStatusMessage}
         />
       </div>
