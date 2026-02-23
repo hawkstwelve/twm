@@ -69,6 +69,16 @@ type Option = {
   label: string;
 };
 
+function percentile(values: number[], pct: number): number | null {
+  if (!values.length) {
+    return null;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
+  const value = sorted[rank];
+  return Number.isFinite(value) ? value : null;
+}
+
 function pickPreferred(values: string[], preferred: string): string {
   if (values.includes(preferred)) {
     return preferred;
@@ -155,24 +165,47 @@ function nextRenderModeByHysteresis(current: RenderModeState, effectiveZoom: num
   return "tiles";
 }
 
-async function preloadLoopFrame(url: string, signal?: AbortSignal): Promise<{ ok: boolean; bitmap: ImageBitmap | null; bytes: number }> {
+async function preloadLoopFrame(
+  url: string,
+  signal?: AbortSignal
+): Promise<{ ok: boolean; bitmap: ImageBitmap | null; bytes: number; readyMs: number; fetchMs: number; decodeMs: number }> {
+  const startedAt = performance.now();
   try {
+    const fetchStart = performance.now();
     const response = await fetch(url, {
       credentials: "omit",
       signal,
       cache: "force-cache",
     });
+    const fetchEnd = performance.now();
     if (!response.ok) {
-      return { ok: false, bitmap: null, bytes: 0 };
+      return { ok: false, bitmap: null, bytes: 0, readyMs: 0, fetchMs: 0, decodeMs: 0 };
     }
     const blob = await response.blob();
     if (typeof createImageBitmap !== "function") {
-      return { ok: true, bitmap: null, bytes: 0 };
+      const readyEnd = performance.now();
+      return {
+        ok: true,
+        bitmap: null,
+        bytes: 0,
+        readyMs: Math.max(0, Math.round(readyEnd - startedAt)),
+        fetchMs: Math.max(0, Math.round(fetchEnd - fetchStart)),
+        decodeMs: 0,
+      };
     }
+    const decodeStart = performance.now();
     const bitmap = await createImageBitmap(blob);
-    return { ok: true, bitmap, bytes: bitmap.width * bitmap.height * 4 };
+    const decodeEnd = performance.now();
+    return {
+      ok: true,
+      bitmap,
+      bytes: bitmap.width * bitmap.height * 4,
+      readyMs: Math.max(0, Math.round(decodeEnd - startedAt)),
+      fetchMs: Math.max(0, Math.round(fetchEnd - fetchStart)),
+      decodeMs: Math.max(0, Math.round(decodeEnd - decodeStart)),
+    };
   } catch {
-    return { ok: false, bitmap: null, bytes: 0 };
+    return { ok: false, bitmap: null, bytes: 0, readyMs: 0, fetchMs: 0, decodeMs: 0 };
   }
 }
 
@@ -413,6 +446,10 @@ export default function App() {
   const loopDisplayDecodeAbortRef = useRef<AbortController | null>(null);
   const loopDecodedCacheRef = useRef<Map<string, { bitmap: ImageBitmap; bytes: number; lastUsedAt: number }>>(new Map());
   const loopDecodedCacheBytesRef = useRef(0);
+  const loopDecodedCacheHighWaterRef = useRef(0);
+  const loopDecodeReadySamplesRef = useRef<number[]>([]);
+  const loopDecodeFetchSamplesRef = useRef<number[]>([]);
+  const loopDecodeOnlySamplesRef = useRef<number[]>([]);
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -534,6 +571,9 @@ export default function App() {
       }
       cache.set(key, { bitmap, bytes, lastUsedAt: now });
       loopDecodedCacheBytesRef.current += bytes;
+      if (loopDecodedCacheBytesRef.current > loopDecodedCacheHighWaterRef.current) {
+        loopDecodedCacheHighWaterRef.current = loopDecodedCacheBytesRef.current;
+      }
 
       while (loopDecodedCacheBytesRef.current > webpDecodeCacheBudgetBytes && cache.size > 1) {
         let lruKey: string | null = null;
@@ -580,6 +620,27 @@ export default function App() {
       const decoded = await preloadLoopFrame(url, signal);
       if (!decoded.ok) {
         return false;
+      }
+      if (decoded.readyMs > 0) {
+        const readySamples = loopDecodeReadySamplesRef.current;
+        readySamples.push(decoded.readyMs);
+        if (readySamples.length > 256) {
+          readySamples.splice(0, readySamples.length - 256);
+        }
+      }
+      if (decoded.fetchMs > 0) {
+        const fetchSamples = loopDecodeFetchSamplesRef.current;
+        fetchSamples.push(decoded.fetchMs);
+        if (fetchSamples.length > 256) {
+          fetchSamples.splice(0, fetchSamples.length - 256);
+        }
+      }
+      if (decoded.decodeMs > 0) {
+        const decodeSamples = loopDecodeOnlySamplesRef.current;
+        decodeSamples.push(decoded.decodeMs);
+        if (decodeSamples.length > 256) {
+          decodeSamples.splice(0, decodeSamples.length - 256);
+        }
       }
       if (decoded.bitmap) {
         upsertLoopDecodedCache(key, decoded.bitmap, decoded.bytes);
@@ -630,9 +691,42 @@ export default function App() {
     return frameHours.every((fh) => Boolean(loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh)));
   }, [frameHours, loopTier0UrlByHour, loopUrlByHour]);
 
+  const debugLog = useCallback((message: string, payload?: Record<string, unknown>) => {
+    if (!animationDebugRef.current) {
+      return;
+    }
+    if (payload) {
+      console.debug(`[animation] ${message}`, payload);
+      return;
+    }
+    console.debug(`[animation] ${message}`);
+  }, []);
+
   useEffect(() => {
     mapZoomRef.current = mapZoom;
   }, [mapZoom]);
+
+  useEffect(() => {
+    if (!webpDefaultEnabled || !animationDebugRef.current) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      const readyP50 = percentile(loopDecodeReadySamplesRef.current, 50);
+      const readyP95 = percentile(loopDecodeReadySamplesRef.current, 95);
+      const fetchP95 = percentile(loopDecodeFetchSamplesRef.current, 95);
+      const decodeP95 = percentile(loopDecodeOnlySamplesRef.current, 95);
+      debugLog("telemetry decode/cache", {
+        webp_ready_p50_ms: readyP50,
+        webp_ready_p95_ms: readyP95,
+        webp_fetch_p95_ms: fetchP95,
+        webp_decode_p95_ms: decodeP95,
+        decoded_cache_high_water_bytes: loopDecodedCacheHighWaterRef.current,
+      });
+    }, 15000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [webpDefaultEnabled, debugLog]);
 
   useEffect(() => {
     const clearDwellTimer = () => {
@@ -760,17 +854,6 @@ export default function App() {
       }),
     [frameHours.length]
   );
-
-  const debugLog = useCallback((message: string, payload?: Record<string, unknown>) => {
-    if (!animationDebugRef.current) {
-      return;
-    }
-    if (payload) {
-      console.debug(`[animation] ${message}`, payload);
-      return;
-    }
-    console.debug(`[animation] ${message}`);
-  }, []);
 
   const updateBufferSnapshot = useCallback(() => {
     const totalFrames = frameHours.length;

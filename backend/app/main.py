@@ -274,6 +274,15 @@ def _load_manifest(model: str, run: str) -> dict | None:
     return _load_json_cached(path, _manifest_cache)
 
 
+def _run_version_token(model: str, run: str) -> str:
+    path = _manifest_path(model, run)
+    try:
+        mtime_ns = int(path.stat().st_mtime_ns)
+    except OSError:
+        mtime_ns = 0
+    return f"{run}-{mtime_ns}"
+
+
 def _published_var_dir(model: str, run: str, var: str) -> Path:
     return PUBLISHED_ROOT / model / run / var
 
@@ -543,6 +552,8 @@ def list_frames(request: Request, model: str, run: str, var: str):
     if not isinstance(frame_entries, list):
         frame_entries = []
 
+    version_token = _run_version_token(model, resolved)
+
     frames: list[dict] = []
     for item in frame_entries:
         if not isinstance(item, dict):
@@ -557,9 +568,9 @@ def list_frames(request: Request, model: str, run: str, var: str):
                 "fh": fh,
                 "has_cog": True,
                 "run": resolved,
-                "loop_webp_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp",
-                "loop_webp_tier0_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=0",
-                "loop_webp_tier1_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=1",
+                "loop_webp_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?v={version_token}",
+                "loop_webp_tier0_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=0&v={version_token}",
+                "loop_webp_tier1_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=1&v={version_token}",
                 "meta": {"meta": meta},
             }
         )
