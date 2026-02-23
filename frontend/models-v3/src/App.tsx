@@ -43,6 +43,8 @@ const FRAME_MAX_RETRIES = 3;
 const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
 const LOOP_PRELOAD_MIN_READY = 2;
+const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
+const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 
 type RenderModeState = "webp_tier0" | "webp_tier1" | "tiles";
 
@@ -150,24 +152,25 @@ function nextRenderModeByHysteresis(current: RenderModeState, effectiveZoom: num
   return "tiles";
 }
 
-function preloadLoopFrame(url: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = async () => {
-      try {
-        if (typeof createImageBitmap === "function") {
-          const bitmap = await createImageBitmap(image);
-          bitmap.close();
-        }
-        resolve(true);
-      } catch {
-        resolve(true);
-      }
-    };
-    image.onerror = () => resolve(false);
-    image.src = url;
-  });
+async function preloadLoopFrame(url: string, signal?: AbortSignal): Promise<{ ok: boolean; bitmap: ImageBitmap | null; bytes: number }> {
+  try {
+    const response = await fetch(url, {
+      credentials: "omit",
+      signal,
+      cache: "force-cache",
+    });
+    if (!response.ok) {
+      return { ok: false, bitmap: null, bytes: 0 };
+    }
+    const blob = await response.blob();
+    if (typeof createImageBitmap !== "function") {
+      return { ok: true, bitmap: null, bytes: 0 };
+    }
+    const bitmap = await createImageBitmap(blob);
+    return { ok: true, bitmap, bytes: bitmap.width * bitmap.height * 4 };
+  } catch {
+    return { ok: false, bitmap: null, bytes: 0 };
+  }
 }
 
 function runIdToIso(runId: string | null): string | null {
@@ -348,6 +351,7 @@ export default function App() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [renderMode, setRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
   const [visibleRenderMode, setVisibleRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
+  const [loopDisplayHour, setLoopDisplayHour] = useState<number | null>(null);
   const [isLoopPreloading, setIsLoopPreloading] = useState(false);
   const [loopProgress, setLoopProgress] = useState({ total: 0, ready: 0, failed: 0 });
   const [loopBaseForecastHour, setLoopBaseForecastHour] = useState<number | null>(null);
@@ -401,6 +405,10 @@ export default function App() {
   const renderModeDwellTimerRef = useRef<number | null>(null);
   const transitionTokenRef = useRef(0);
   const lastTileViewportCommitUrlRef = useRef<string | null>(null);
+  const loopDisplayDecodeTokenRef = useRef(0);
+  const loopDisplayDecodeAbortRef = useRef<AbortController | null>(null);
+  const loopDecodedCacheRef = useRef<Map<string, { bitmap: ImageBitmap; bytes: number; lastUsedAt: number }>>(new Map());
+  const loopDecodedCacheBytesRef = useRef(0);
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -499,6 +507,83 @@ export default function App() {
     [loopTier0UrlByHour, loopTier1UrlByHour, loopUrlByHour]
   );
 
+  const webpDecodeCacheBudgetBytes = useMemo(() => {
+    if (typeof navigator === "undefined") {
+      return WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES;
+    }
+    const isMobile = /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent);
+    return isMobile ? WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES : WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES;
+  }, []);
+
+  const loopCacheKey = useCallback((fh: number, mode: RenderModeState) => {
+    return `${mode}:${fh}`;
+  }, []);
+
+  const upsertLoopDecodedCache = useCallback(
+    (key: string, bitmap: ImageBitmap, bytes: number) => {
+      const now = Date.now();
+      const cache = loopDecodedCacheRef.current;
+      const previous = cache.get(key);
+      if (previous) {
+        loopDecodedCacheBytesRef.current -= previous.bytes;
+        previous.bitmap.close();
+      }
+      cache.set(key, { bitmap, bytes, lastUsedAt: now });
+      loopDecodedCacheBytesRef.current += bytes;
+
+      while (loopDecodedCacheBytesRef.current > webpDecodeCacheBudgetBytes && cache.size > 1) {
+        let lruKey: string | null = null;
+        let oldest = Number.POSITIVE_INFINITY;
+        for (const [candidateKey, candidate] of cache.entries()) {
+          if (candidate.lastUsedAt < oldest) {
+            oldest = candidate.lastUsedAt;
+            lruKey = candidateKey;
+          }
+        }
+        if (!lruKey || lruKey === key) {
+          break;
+        }
+        const evicted = cache.get(lruKey);
+        if (!evicted) {
+          break;
+        }
+        evicted.bitmap.close();
+        loopDecodedCacheBytesRef.current -= evicted.bytes;
+        cache.delete(lruKey);
+      }
+    },
+    [webpDecodeCacheBudgetBytes]
+  );
+
+  const ensureLoopFrameDecoded = useCallback(
+    async (fh: number, mode: RenderModeState, signal?: AbortSignal): Promise<boolean> => {
+      if (mode === "tiles") {
+        return false;
+      }
+      const key = loopCacheKey(fh, mode);
+      const cached = loopDecodedCacheRef.current.get(key);
+      if (cached) {
+        cached.lastUsedAt = Date.now();
+        return true;
+      }
+
+      const url = resolveLoopUrlForHour(fh, mode);
+      if (!url) {
+        return false;
+      }
+
+      const decoded = await preloadLoopFrame(url, signal);
+      if (!decoded.ok) {
+        return false;
+      }
+      if (decoded.bitmap) {
+        upsertLoopDecodedCache(key, decoded.bitmap, decoded.bytes);
+      }
+      return true;
+    },
+    [loopCacheKey, resolveLoopUrlForHour, upsertLoopDecodedCache]
+  );
+
   const canUseLoopPlayback = useMemo(() => {
     if (frameHours.length <= 1) {
       return false;
@@ -553,6 +638,7 @@ export default function App() {
 
     if (!canUseLoopPlayback) {
       setVisibleRenderMode("tiles");
+      setLoopDisplayHour(null);
       return;
     }
 
@@ -564,22 +650,35 @@ export default function App() {
       return;
     }
 
-    const url = resolveLoopUrlForHour(forecastHour, renderMode);
-    if (!url) {
+    if (!resolveLoopUrlForHour(forecastHour, renderMode)) {
       setVisibleRenderMode("tiles");
+      setLoopDisplayHour(null);
       return;
     }
 
     const token = transitionTokenRef.current;
-    preloadLoopFrame(url).then((ready) => {
+    const controller = new AbortController();
+    ensureLoopFrameDecoded(forecastHour, renderMode, controller.signal).then((ready) => {
       if (token !== transitionTokenRef.current) {
         return;
       }
       if (ready) {
         setVisibleRenderMode(renderMode);
+        setLoopDisplayHour(forecastHour);
       }
     });
-  }, [renderMode, visibleRenderMode, canUseLoopPlayback, forecastHour, resolveLoopUrlForHour]);
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    renderMode,
+    visibleRenderMode,
+    canUseLoopPlayback,
+    forecastHour,
+    resolveLoopUrlForHour,
+    ensureLoopFrameDecoded,
+  ]);
 
   const isLoopPlaybackLocked = renderMode !== "tiles" && canUseLoopPlayback && (isPlaying || isLoopPreloading);
   const isLoopDisplayActive = visibleRenderMode !== "tiles" && canUseLoopPlayback;
@@ -975,6 +1074,7 @@ export default function App() {
     setIsLoopPreloading(false);
     setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
     setLoopBaseForecastHour(null);
+    setLoopDisplayHour(null);
     loopPreloadTokenRef.current += 1;
     loopReadyHoursRef.current.clear();
     loopFailedHoursRef.current.clear();
@@ -1054,6 +1154,7 @@ export default function App() {
         if (renderMode !== "tiles") {
           setVisibleRenderMode(renderMode);
         }
+        setLoopDisplayHour(forecastHour);
         setIsPlaying(true);
         return;
       }
@@ -1063,16 +1164,14 @@ export default function App() {
     };
 
     frameHours.forEach((fh) => {
-      const url = resolveLoopUrlForHour(fh, renderMode);
-      if (!url) {
+      if (!resolveLoopUrlForHour(fh, renderMode)) {
         mark(fh, false);
         return;
       }
-      const img = new Image();
-      img.decoding = "async";
-      img.onload = () => mark(fh, true);
-      img.onerror = () => mark(fh, false);
-      img.src = url;
+      const controller = new AbortController();
+      ensureLoopFrameDecoded(fh, renderMode, controller.signal)
+        .then((ready) => mark(fh, ready))
+        .catch(() => mark(fh, false));
     });
 
     return () => {
@@ -1085,6 +1184,8 @@ export default function App() {
     resolveLoopUrlForHour,
     showTransientFrameStatus,
     renderMode,
+    forecastHour,
+    ensureLoopFrameDecoded,
   ]);
 
   useEffect(() => {
@@ -1183,11 +1284,65 @@ export default function App() {
         if (!Number.isFinite(latestRequestedHour)) {
           return;
         }
-        setTargetForecastHour(latestRequestedHour as number);
+        const nextHour = latestRequestedHour as number;
+        setTargetForecastHour(nextHour);
+
+        if (!isLoopDisplayActive) {
+          return;
+        }
+        loopDisplayDecodeTokenRef.current += 1;
+        const decodeToken = loopDisplayDecodeTokenRef.current;
+        loopDisplayDecodeAbortRef.current?.abort();
+        const controller = new AbortController();
+        loopDisplayDecodeAbortRef.current = controller;
+        ensureLoopFrameDecoded(nextHour, visibleRenderMode, controller.signal)
+          .then((ready) => {
+            if (!ready) {
+              return;
+            }
+            if (decodeToken !== loopDisplayDecodeTokenRef.current) {
+              return;
+            }
+            setLoopDisplayHour(nextHour);
+          })
+          .catch(() => {
+            // best-effort decode path for scrub; keep previous visible frame on failure.
+          });
       });
     },
-    [isScrubbing]
+    [isScrubbing, isLoopDisplayActive, ensureLoopFrameDecoded, visibleRenderMode]
   );
+
+  useEffect(() => {
+    if (!isLoopDisplayActive) {
+      setLoopDisplayHour(null);
+      return;
+    }
+
+    loopDisplayDecodeTokenRef.current += 1;
+    const decodeToken = loopDisplayDecodeTokenRef.current;
+    loopDisplayDecodeAbortRef.current?.abort();
+    const controller = new AbortController();
+    loopDisplayDecodeAbortRef.current = controller;
+
+    ensureLoopFrameDecoded(forecastHour, visibleRenderMode, controller.signal)
+      .then((ready) => {
+        if (!ready) {
+          return;
+        }
+        if (decodeToken !== loopDisplayDecodeTokenRef.current) {
+          return;
+        }
+        setLoopDisplayHour(forecastHour);
+      })
+      .catch(() => {
+        // keep previous display hour when decode fails.
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [isLoopDisplayActive, forecastHour, visibleRenderMode, ensureLoopFrameDecoded]);
 
   // ── Fast-path: fire all discovery fetches in parallel on mount ─────────────────────────────
   // On a 50 ms RTT connection the standard sequential waterfall (models → regions →
@@ -1699,6 +1854,12 @@ export default function App() {
       if (scrubRafRef.current !== null) {
         window.cancelAnimationFrame(scrubRafRef.current);
       }
+      loopDisplayDecodeAbortRef.current?.abort();
+      for (const cached of loopDecodedCacheRef.current.values()) {
+        cached.bitmap.close();
+      }
+      loopDecodedCacheRef.current.clear();
+      loopDecodedCacheBytesRef.current = 0;
     };
   }, [clearFrameStatusTimer]);
 
@@ -1731,7 +1892,8 @@ export default function App() {
     : isLoopPreloading
       ? `Loading loop frames ${preloadBufferedCount}/${preloadTotal}`
       : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
-  const activeLoopUrl = isLoopDisplayActive ? resolveLoopUrlForHour(forecastHour, visibleRenderMode) : null;
+  const activeLoopHour = loopDisplayHour ?? forecastHour;
+  const activeLoopUrl = isLoopDisplayActive ? resolveLoopUrlForHour(activeLoopHour, visibleRenderMode) : null;
 
   return (
     <div className="flex h-full flex-col">
