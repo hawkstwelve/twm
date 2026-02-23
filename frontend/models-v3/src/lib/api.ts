@@ -54,6 +54,27 @@ export type FrameRow = {
   } | null;
 };
 
+export type LoopManifestFrame = {
+  fh: number;
+  url: string;
+};
+
+export type LoopManifestTier = {
+  tier: number;
+  max_dim?: number;
+  frames: LoopManifestFrame[];
+};
+
+export type LoopManifestResponse = {
+  manifest_version: number;
+  run: string;
+  model: string;
+  var: string;
+  bbox?: [number, number, number, number];
+  projection?: string;
+  loop_tiers: LoopManifestTier[];
+};
+
 export type VarRow =
   | string
   | {
@@ -168,6 +189,27 @@ export async function fetchFrames(
   return response
     .filter((row) => row && row.has_cog && Number.isFinite(Number(row.fh)))
     .sort((a, b) => Number(a.fh) - Number(b.fh));
+}
+
+export async function fetchLoopManifest(
+  model: string,
+  run: string,
+  varKey: string,
+  options?: FetchOptions
+): Promise<LoopManifestResponse | null> {
+  const runKey = run || "latest";
+  try {
+    const response = await fetchJson<LoopManifestResponse>(
+      `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/loop-manifest`,
+      options
+    );
+    if (!response || !Array.isArray(response.loop_tiers)) {
+      return null;
+    }
+    return response;
+  } catch {
+    return null;
+  }
 }
 
 // ── Sample (hover-for-data) ──────────────────────────────────────────

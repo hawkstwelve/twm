@@ -53,6 +53,7 @@ VAR_ORDER_BY_MODEL = {
 }
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
+_LOOP_FRAME_FILE_RE = re.compile(r"^fh(\d{3})\.loop\.webp$")
 _JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
 LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
@@ -685,38 +686,29 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
     if manifest is None:
         return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
 
-    variables = manifest.get("variables")
-    if not isinstance(variables, dict):
-        return Response(status_code=404, content='{"error": "variable not found"}', media_type="application/json")
-    var_entry = variables.get(var)
-    if not isinstance(var_entry, dict):
-        return Response(status_code=404, content='{"error": "variable not found"}', media_type="application/json")
-
-    frame_entries = var_entry.get("frames")
-    if not isinstance(frame_entries, list):
-        frame_entries = []
-
     version_token = _run_version_token(model, resolved)
 
     tier_frames: dict[int, list[dict[str, Any]]] = {0: [], 1: []}
-    for item in frame_entries:
-        if not isinstance(item, dict):
+    for tier in (0, 1):
+        tier_dir = LOOP_CACHE_ROOT / model / resolved / var / f"tier{tier}"
+        if not tier_dir.is_dir():
             continue
-        fh = item.get("fh")
-        if not isinstance(fh, int):
-            continue
-        tier_frames[0].append(
-            {
-                "fh": fh,
-                "url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
-            }
-        )
-        tier_frames[1].append(
-            {
-                "fh": fh,
-                "url": _loop_webp_url(model, resolved, var, fh, tier=1, version_token=version_token),
-            }
-        )
+
+        discovered: list[int] = []
+        for file_path in tier_dir.glob("fh*.loop.webp"):
+            match = _LOOP_FRAME_FILE_RE.match(file_path.name)
+            if not match:
+                continue
+            fh = int(match.group(1))
+            discovered.append(fh)
+
+        for fh in sorted(set(discovered)):
+            tier_frames[tier].append(
+                {
+                    "fh": fh,
+                    "url": _loop_webp_url(model, resolved, var, fh, tier=tier, version_token=version_token),
+                }
+            )
 
     tier0_dim = LOOP_TIER_CONFIG.get(0, {}).get("max_dim", LOOP_WEBP_MAX_DIM)
     tier1_dim = LOOP_TIER_CONFIG.get(1, {}).get("max_dim", LOOP_WEBP_TIER1_MAX_DIM)

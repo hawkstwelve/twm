@@ -9,9 +9,11 @@ import {
   buildContourUrl,
   type FrameRow,
   type LegendMeta,
+  type LoopManifestResponse,
   type RegionPreset,
   type VarRow,
   fetchFrames,
+  fetchLoopManifest,
   fetchModels,
   fetchRegionPresets,
   fetchRuns,
@@ -373,6 +375,7 @@ export default function App() {
   const [runs, setRuns] = useState<string[]>([]);
   const [variables, setVariables] = useState<Option[]>([]);
   const [frameRows, setFrameRows] = useState<FrameRow[]>([]);
+  const [loopManifest, setLoopManifest] = useState<LoopManifestResponse | null>(null);
   const [regionPresets, setRegionPresets] = useState<Record<string, RegionPreset>>({});
 
   const [model, setModel] = useState(DEFAULTS.model);
@@ -491,28 +494,15 @@ export default function App() {
     return buildRunOptions(runs, latestRunId);
   }, [runs, latestRunId]);
 
-  const loopUrlByHour = useMemo(() => {
-    const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
-    const map = new Map<number, string>();
-    for (const [fh, row] of frameByHour.entries()) {
-      const loopUrl = row?.loop_webp_url ?? row?.loop_webp_tier0_url;
-      if (!loopUrl) {
-        continue;
-      }
-      const absolute = /^https?:\/\//i.test(loopUrl)
-        ? loopUrl
-        : `${apiRoot}${loopUrl.startsWith("/") ? "" : "/"}${loopUrl}`;
-      map.set(fh, absolute);
-    }
-    return map;
-  }, [frameByHour]);
-
   const loopTier0UrlByHour = useMemo(() => {
     const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
     const map = new Map<number, string>();
-    for (const [fh, row] of frameByHour.entries()) {
-      const loopUrl = row?.loop_webp_tier0_url ?? row?.loop_webp_url;
-      if (!loopUrl) {
+    const tier0 = loopManifest?.loop_tiers.find((entry) => Number(entry?.tier) === 0);
+    const frames = Array.isArray(tier0?.frames) ? tier0.frames : [];
+    for (const frame of frames) {
+      const fh = Number(frame?.fh);
+      const loopUrl = frame?.url;
+      if (!Number.isFinite(fh) || !loopUrl) {
         continue;
       }
       const absolute = /^https?:\/\//i.test(loopUrl)
@@ -521,14 +511,17 @@ export default function App() {
       map.set(fh, absolute);
     }
     return map;
-  }, [frameByHour]);
+  }, [loopManifest]);
 
   const loopTier1UrlByHour = useMemo(() => {
     const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
     const map = new Map<number, string>();
-    for (const [fh, row] of frameByHour.entries()) {
-      const loopUrl = row?.loop_webp_tier1_url;
-      if (!loopUrl) {
+    const tier1 = loopManifest?.loop_tiers.find((entry) => Number(entry?.tier) === 1);
+    const frames = Array.isArray(tier1?.frames) ? tier1.frames : [];
+    for (const frame of frames) {
+      const fh = Number(frame?.fh);
+      const loopUrl = frame?.url;
+      if (!Number.isFinite(fh) || !loopUrl) {
         continue;
       }
       const absolute = /^https?:\/\//i.test(loopUrl)
@@ -537,7 +530,20 @@ export default function App() {
       map.set(fh, absolute);
     }
     return map;
-  }, [frameByHour]);
+  }, [loopManifest]);
+
+  const loopUrlByHour = useMemo(() => new Map(loopTier0UrlByHour), [loopTier0UrlByHour]);
+
+  const loopFrameHours = useMemo(() => {
+    return Array.from(loopTier0UrlByHour.keys()).sort((a, b) => a - b);
+  }, [loopTier0UrlByHour]);
+
+  const resolvedLoopForecastHour = useMemo(() => {
+    if (loopFrameHours.length === 0) {
+      return forecastHour;
+    }
+    return nearestFrame(loopFrameHours, forecastHour);
+  }, [loopFrameHours, forecastHour]);
 
   const resolveLoopUrlForHour = useCallback(
     (fh: number, preferredMode: RenderModeState): string | null => {
@@ -664,33 +670,33 @@ export default function App() {
 
   const countAheadReadyLoopFrames = useCallback(
     (currentHour: number, mode: RenderModeState, maxAhead: number): number => {
-      if (mode === "tiles" || frameHours.length === 0 || maxAhead <= 0) {
+      if (mode === "tiles" || loopFrameHours.length === 0 || maxAhead <= 0) {
         return 0;
       }
-      const currentIndex = frameHours.indexOf(currentHour);
+      const currentIndex = loopFrameHours.indexOf(currentHour);
       if (currentIndex < 0) {
         return 0;
       }
 
       let ready = 0;
-      const endIndex = Math.min(frameHours.length - 1, currentIndex + maxAhead);
+      const endIndex = Math.min(loopFrameHours.length - 1, currentIndex + maxAhead);
       for (let index = currentIndex + 1; index <= endIndex; index += 1) {
-        const fh = frameHours[index];
+        const fh = loopFrameHours[index];
         if (hasDecodedLoopFrame(fh, mode)) {
           ready += 1;
         }
       }
       return ready;
     },
-    [frameHours, hasDecodedLoopFrame]
+    [loopFrameHours, hasDecodedLoopFrame]
   );
 
   const canUseLoopPlayback = useMemo(() => {
-    if (frameHours.length <= 1) {
+    if (loopFrameHours.length <= 1) {
       return false;
     }
-    return frameHours.every((fh) => Boolean(loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh)));
-  }, [frameHours, loopTier0UrlByHour, loopUrlByHour]);
+    return loopFrameHours.every((fh) => Boolean(loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh)));
+  }, [loopFrameHours, loopTier0UrlByHour, loopUrlByHour]);
 
   const debugLog = useCallback((message: string, payload?: Record<string, unknown>) => {
     if (!animationDebugRef.current) {
@@ -824,7 +830,7 @@ export default function App() {
       return;
     }
 
-    if (!resolveLoopUrlForHour(forecastHour, renderMode)) {
+    if (!resolveLoopUrlForHour(resolvedLoopForecastHour, renderMode)) {
       setVisibleRenderMode("tiles");
       setLoopDisplayHour(null);
       return;
@@ -832,13 +838,13 @@ export default function App() {
 
     const token = transitionTokenRef.current;
     const controller = new AbortController();
-    ensureLoopFrameDecoded(forecastHour, renderMode, controller.signal).then((ready) => {
+    ensureLoopFrameDecoded(resolvedLoopForecastHour, renderMode, controller.signal).then((ready) => {
       if (token !== transitionTokenRef.current) {
         return;
       }
       if (ready) {
         setVisibleRenderMode(renderMode);
-        setLoopDisplayHour(forecastHour);
+        setLoopDisplayHour(resolvedLoopForecastHour);
       }
     });
 
@@ -849,7 +855,7 @@ export default function App() {
     renderMode,
     visibleRenderMode,
     canUseLoopPlayback,
-    forecastHour,
+    resolvedLoopForecastHour,
     resolveLoopUrlForHour,
     ensureLoopFrameDecoded,
   ]);
@@ -1236,7 +1242,7 @@ export default function App() {
     autoplayPrimedRef.current = false;
     setIsLoopPreloading(false);
     setIsLoopAutoplayBuffering(false);
-    setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
+    setLoopProgress({ total: loopFrameHours.length, ready: 0, failed: 0 });
     setLoopBaseForecastHour(null);
     setLoopDisplayHour(null);
     loopPreloadTokenRef.current += 1;
@@ -1271,6 +1277,7 @@ export default function App() {
     resolvedRunForRequests,
     variable,
     frameHours.length,
+    loopFrameHours.length,
   ]);
 
   useEffect(() => {
@@ -1285,7 +1292,7 @@ export default function App() {
     if (!isLoopPreloading) {
       return;
     }
-    if (!canUseLoopPlayback || frameHours.length === 0) {
+    if (!canUseLoopPlayback || loopFrameHours.length === 0) {
       setIsLoopPreloading(false);
       setRenderMode("tiles");
       return;
@@ -1296,7 +1303,7 @@ export default function App() {
     const failedSet = new Set<number>();
     loopReadyHoursRef.current = readySet;
     loopFailedHoursRef.current = failedSet;
-    setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
+    setLoopProgress({ total: loopFrameHours.length, ready: 0, failed: 0 });
 
     const mark = (fh: number, ok: boolean) => {
       if (token !== loopPreloadTokenRef.current) {
@@ -1308,17 +1315,17 @@ export default function App() {
         failedSet.add(fh);
       }
       setLoopProgress({
-        total: frameHours.length,
+        total: loopFrameHours.length,
         ready: readySet.size,
         failed: failedSet.size,
       });
 
-      if (readySet.size + failedSet.size < frameHours.length) {
+      if (readySet.size + failedSet.size < loopFrameHours.length) {
         return;
       }
 
       setIsLoopPreloading(false);
-      const minReady = Math.min(LOOP_PRELOAD_MIN_READY, frameHours.length);
+      const minReady = Math.min(LOOP_PRELOAD_MIN_READY, loopFrameHours.length);
       if (readySet.size >= minReady) {
         if (renderMode !== "tiles") {
           setVisibleRenderMode(renderMode);
@@ -1332,7 +1339,7 @@ export default function App() {
       showTransientFrameStatus("Loop preload failed");
     };
 
-    frameHours.forEach((fh) => {
+    loopFrameHours.forEach((fh) => {
       if (!resolveLoopUrlForHour(fh, renderMode)) {
         mark(fh, false);
         return;
@@ -1349,7 +1356,7 @@ export default function App() {
   }, [
     isLoopPreloading,
     canUseLoopPlayback,
-    frameHours,
+    loopFrameHours,
     resolveLoopUrlForHour,
     showTransientFrameStatus,
     renderMode,
@@ -1358,7 +1365,7 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!isLoopDisplayActive || frameHours.length === 0) {
+    if (!isLoopDisplayActive || loopFrameHours.length === 0) {
       return;
     }
 
@@ -1387,20 +1394,20 @@ export default function App() {
       if (cancelled) {
         return;
       }
-      const currentIndex = frameHours.indexOf(forecastHour);
+      const currentIndex = loopFrameHours.indexOf(forecastHour);
       if (currentIndex < 0) {
         return;
       }
 
-      const remainingAhead = Math.max(0, frameHours.length - 1 - currentIndex);
+      const remainingAhead = Math.max(0, loopFrameHours.length - 1 - currentIndex);
       const targetAhead = Math.min(LOOP_AHEAD_READY_TARGET, remainingAhead);
       if (targetAhead <= 0) {
         return;
       }
 
       const candidates: number[] = [];
-      for (let index = currentIndex + 1; index < frameHours.length && candidates.length < targetAhead * 2; index += 1) {
-        const fh = frameHours[index];
+      for (let index = currentIndex + 1; index < loopFrameHours.length && candidates.length < targetAhead * 2; index += 1) {
+        const fh = loopFrameHours[index];
         if (hasDecodedLoopFrame(fh, visibleRenderMode)) {
           continue;
         }
@@ -1431,24 +1438,24 @@ export default function App() {
   }, [
     isLoopDisplayActive,
     visibleRenderMode,
-    frameHours,
+    loopFrameHours,
     forecastHour,
     ensureLoopFrameDecoded,
     hasDecodedLoopFrame,
   ]);
 
   useEffect(() => {
-    if (!isPlaying || renderMode === "tiles" || frameHours.length === 0) {
+    if (!isPlaying || renderMode === "tiles" || loopFrameHours.length === 0) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      const currentIndex = frameHours.indexOf(forecastHour);
+      const currentIndex = loopFrameHours.indexOf(forecastHour);
       if (currentIndex < 0) {
         return;
       }
 
-      const remainingAheadFrames = Math.max(0, frameHours.length - currentIndex - 1);
+      const remainingAheadFrames = Math.max(0, loopFrameHours.length - currentIndex - 1);
       const minAheadRequired = Math.min(LOOP_MIN_PLAYABLE_AHEAD, remainingAheadFrames);
       const aheadReady = countAheadReadyLoopFrames(forecastHour, visibleRenderMode, LOOP_AHEAD_READY_TARGET);
       if (aheadReady < minAheadRequired) {
@@ -1459,14 +1466,14 @@ export default function App() {
       }
 
       const nextIndex = currentIndex + 1;
-      if (nextIndex >= frameHours.length) {
+      if (nextIndex >= loopFrameHours.length) {
         setIsPlaying(false);
         setIsLoopAutoplayBuffering(false);
         return;
       }
 
-      for (let idx = nextIndex; idx < frameHours.length; idx += 1) {
-        const candidate = frameHours[idx];
+      for (let idx = nextIndex; idx < loopFrameHours.length; idx += 1) {
+        const candidate = loopFrameHours[idx];
         if (hasDecodedLoopFrame(candidate, visibleRenderMode)) {
           setTargetForecastHour(candidate);
           return;
@@ -1482,7 +1489,7 @@ export default function App() {
   }, [
     isPlaying,
     renderMode,
-    frameHours,
+    loopFrameHours,
     forecastHour,
     visibleRenderMode,
     hasDecodedLoopFrame,
@@ -1491,15 +1498,15 @@ export default function App() {
   ]);
 
   useEffect(() => {
-    if (!isLoopAutoplayBuffering || isPlaying || renderMode === "tiles" || frameHours.length === 0) {
+    if (!isLoopAutoplayBuffering || isPlaying || renderMode === "tiles" || loopFrameHours.length === 0) {
       return;
     }
-    const currentIndex = frameHours.indexOf(forecastHour);
+    const currentIndex = loopFrameHours.indexOf(forecastHour);
     if (currentIndex < 0) {
       return;
     }
 
-    const remainingAheadFrames = Math.max(0, frameHours.length - currentIndex - 1);
+    const remainingAheadFrames = Math.max(0, loopFrameHours.length - currentIndex - 1);
     const minAheadRequired = Math.min(LOOP_MIN_PLAYABLE_AHEAD, remainingAheadFrames);
     const aheadReady = countAheadReadyLoopFrames(forecastHour, visibleRenderMode, LOOP_AHEAD_READY_TARGET);
     if (aheadReady < minAheadRequired) {
@@ -1512,7 +1519,7 @@ export default function App() {
     isLoopAutoplayBuffering,
     isPlaying,
     renderMode,
-    frameHours,
+    loopFrameHours,
     forecastHour,
     visibleRenderMode,
     countAheadReadyLoopFrames,
@@ -1582,7 +1589,10 @@ export default function App() {
         if (!Number.isFinite(latestRequestedHour)) {
           return;
         }
-        const nextHour = latestRequestedHour as number;
+        const requested = latestRequestedHour as number;
+        const nextHour = isLoopDisplayActive && loopFrameHours.length > 0
+          ? nearestFrame(loopFrameHours, requested)
+          : requested;
         setTargetForecastHour(nextHour);
 
         if (!isLoopDisplayActive) {
@@ -1608,7 +1618,7 @@ export default function App() {
           });
       });
     },
-    [isScrubbing, isLoopDisplayActive, ensureLoopFrameDecoded, visibleRenderMode]
+    [isScrubbing, isLoopDisplayActive, loopFrameHours, ensureLoopFrameDecoded, visibleRenderMode]
   );
 
   useEffect(() => {
@@ -1623,7 +1633,7 @@ export default function App() {
     const controller = new AbortController();
     loopDisplayDecodeAbortRef.current = controller;
 
-    ensureLoopFrameDecoded(forecastHour, visibleRenderMode, controller.signal)
+    ensureLoopFrameDecoded(resolvedLoopForecastHour, visibleRenderMode, controller.signal)
       .then((ready) => {
         if (!ready) {
           return;
@@ -1631,7 +1641,7 @@ export default function App() {
         if (decodeToken !== loopDisplayDecodeTokenRef.current) {
           return;
         }
-        setLoopDisplayHour(forecastHour);
+        setLoopDisplayHour(resolvedLoopForecastHour);
       })
       .catch(() => {
         // keep previous display hour when decode fails.
@@ -1640,7 +1650,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [isLoopDisplayActive, forecastHour, visibleRenderMode, ensureLoopFrameDecoded]);
+  }, [isLoopDisplayActive, resolvedLoopForecastHour, visibleRenderMode, ensureLoopFrameDecoded]);
 
   // ── Fast-path: fire all discovery fetches in parallel on mount ─────────────────────────────
   // On a 50 ms RTT connection the standard sequential waterfall (models → regions →
@@ -1834,9 +1844,38 @@ export default function App() {
 
   useEffect(() => {
     setFrameRows([]);
+    setLoopManifest(null);
     setForecastHour(0);
     setTargetForecastHour(0);
   }, [model, run, variable]);
+
+  useEffect(() => {
+    if (!model || !variable) {
+      setLoopManifest(null);
+      return;
+    }
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
+
+    async function loadLoopManifest() {
+      const manifest = await fetchLoopManifest(model, resolvedRunForRequests, variable, { signal: controller.signal });
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) {
+        return;
+      }
+      setLoopManifest(manifest);
+    }
+
+    loadLoopManifest().catch(() => {
+      if (controller.signal.aborted || generation !== requestGenerationRef.current) {
+        return;
+      }
+      setLoopManifest(null);
+    });
+
+    return () => {
+      controller.abort();
+    };
+  }, [model, variable, resolvedRunForRequests]);
 
   useEffect(() => {
     if (!model || !variable) return;
