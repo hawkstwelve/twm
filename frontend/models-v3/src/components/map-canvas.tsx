@@ -47,6 +47,7 @@ const HIDDEN_SWAP_BUFFER_OPACITY = 0.001;
 // Prefetch layers are only warmed while an active prefetch URL is being requested.
 const HIDDEN_PREFETCH_OPACITY = 0;
 const WARM_PREFETCH_OPACITY = 0.001;
+const PREFETCH_TILE_EVENT_BUDGET = 6;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -266,6 +267,7 @@ type MapCanvasProps = {
   onTileReady?: (tileUrl: string) => void;
   onFrameLoadingChange?: (tileUrl: string, isLoading: boolean) => void;
   onZoomHint?: (show: boolean) => void;
+  onZoomBucketChange?: (bucket: number) => void;
   onMapHover?: (lat: number, lon: number, x: number, y: number) => void;
   onMapHoverEnd?: () => void;
 };
@@ -285,6 +287,7 @@ export function MapCanvas({
   onTileReady,
   onFrameLoadingChange,
   onZoomHint,
+  onZoomBucketChange,
   onMapHover,
   onMapHoverEnd,
 }: MapCanvasProps) {
@@ -669,18 +672,26 @@ export function MapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isLoaded || !onZoomHint) {
+    if (!map || !isLoaded) {
       return;
     }
 
     const lastHintStateRef = { current: false };
+    const lastZoomBucketRef = { current: Number.NaN };
 
     const checkZoom = () => {
       const zoom = map.getZoom();
-      const shouldShow = model === "gfs" && zoom >= 7;
-      if (shouldShow !== lastHintStateRef.current) {
-        lastHintStateRef.current = shouldShow;
-        onZoomHint(shouldShow);
+      const bucket = Math.max(0, Math.floor(zoom));
+      if (bucket !== lastZoomBucketRef.current) {
+        lastZoomBucketRef.current = bucket;
+        onZoomBucketChange?.(bucket);
+      }
+      if (onZoomHint) {
+        const shouldShow = model === "gfs" && zoom >= 7;
+        if (shouldShow !== lastHintStateRef.current) {
+          lastHintStateRef.current = shouldShow;
+          onZoomHint(shouldShow);
+        }
       }
     };
 
@@ -689,11 +700,11 @@ export function MapCanvas({
 
     return () => {
       map.off("moveend", checkZoom);
-      if (lastHintStateRef.current) {
+      if (onZoomHint && lastHintStateRef.current) {
         onZoomHint(false);
       }
     };
-  }, [isLoaded, model, onZoomHint]);
+  }, [isLoaded, model, onZoomHint, onZoomBucketChange]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -844,13 +855,14 @@ export function MapCanvas({
       const nextPrefetchRequestToken = (sourceRequestTokenRef.current.get(prefetchSource) ?? 0) + 1;
       sourceRequestTokenRef.current.set(prefetchSource, nextPrefetchRequestToken);
       const prefetchEventBaseline = sourceEventCountRef.current.get(prefetchSource) ?? 0;
+      const prefetchEventBudgetThreshold = prefetchEventBaseline + PREFETCH_TILE_EVENT_BUDGET - 1;
 
       const cleanup = waitForSourceReady(
         map,
         prefetchSource,
         url,
         nextPrefetchRequestToken,
-        prefetchEventBaseline,
+        prefetchEventBudgetThreshold,
         "scrub",
         () => {
           if (token !== prefetchTokenRef.current) {

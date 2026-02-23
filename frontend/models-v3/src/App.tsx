@@ -31,12 +31,19 @@ const READY_URL_LIMIT = 160;
 const INFLIGHT_FRAME_TTL_MS = 12_000;
 const PRELOAD_START_RATIO = 0.7;
 const PRELOAD_STALL_MS = 8000;
+const FRAME_MAX_RETRIES = 3;
+const FRAME_HARD_DEADLINE_MS = 30_000;
+const FRAME_RETRY_BASE_MS = 1200;
 
 type BufferSnapshot = {
   totalFrames: number;
   bufferedCount: number;
   bufferedAheadCount: number;
+  terminalCount: number;
+  terminalAheadCount: number;
+  failedCount: number;
   inFlightCount: number;
+  queueDepth: number;
   statusText: string;
   version: number;
 };
@@ -272,6 +279,7 @@ export default function App() {
   const [variable, setVariable] = useState(DEFAULTS.variable);
   const [forecastHour, setForecastHour] = useState(0);
   const [targetForecastHour, setTargetForecastHour] = useState(0);
+  const [zoomBucket, setZoomBucket] = useState(Math.round(DEFAULTS.zoom));
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -286,7 +294,11 @@ export default function App() {
     totalFrames: 0,
     bufferedCount: 0,
     bufferedAheadCount: 0,
+    terminalCount: 0,
+    terminalAheadCount: 0,
+    failedCount: 0,
     inFlightCount: 0,
+    queueDepth: 0,
     statusText: "Buffered 0/0",
     version: 0,
   });
@@ -294,6 +306,10 @@ export default function App() {
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
   const readyFramesRef = useRef<Set<number>>(new Set());
   const inFlightFramesRef = useRef<Set<number>>(new Set());
+  const failedFramesRef = useRef<Set<number>>(new Set());
+  const frameRetryCountRef = useRef<Map<number, number>>(new Map());
+  const frameCycleStartedAtRef = useRef<Map<number, number>>(new Map());
+  const frameNextRetryAtRef = useRef<Map<number, number>>(new Map());
   const inFlightStartedAtRef = useRef<Map<number, number>>(new Map());
   const readyLatencyStatsRef = useRef({ totalMs: 0, count: 0 });
   const bufferVersionRef = useRef(0);
@@ -399,6 +415,8 @@ export default function App() {
     const totalFrames = frameHours.length;
     const ready = readyFramesRef.current;
     const inFlight = inFlightFramesRef.current;
+    const failed = failedFramesRef.current;
+    const now = Date.now();
 
     if (totalFrames === 0) {
       const version = ++bufferVersionRef.current;
@@ -406,7 +424,11 @@ export default function App() {
         totalFrames: 0,
         bufferedCount: 0,
         bufferedAheadCount: 0,
+        terminalCount: 0,
+        terminalAheadCount: 0,
+        failedCount: 0,
         inFlightCount: 0,
+        queueDepth: 0,
         statusText: "Buffered 0/0",
         version,
       });
@@ -419,6 +441,11 @@ export default function App() {
         ready.delete(fh);
       }
     }
+    for (const fh of failed) {
+      if (!frameSet.has(fh)) {
+        failed.delete(fh);
+      }
+    }
     for (const fh of inFlight) {
       if (!frameSet.has(fh) || ready.has(fh)) {
         inFlight.delete(fh);
@@ -426,38 +453,78 @@ export default function App() {
         continue;
       }
       const startedAt = inFlightStartedAtRef.current.get(fh);
-      if (Number.isFinite(startedAt) && Date.now() - (startedAt as number) > INFLIGHT_FRAME_TTL_MS) {
+      if (Number.isFinite(startedAt) && now - (startedAt as number) > INFLIGHT_FRAME_TTL_MS) {
+        const nextRetry = (frameRetryCountRef.current.get(fh) ?? 0) + 1;
+        frameRetryCountRef.current.set(fh, nextRetry);
+        const cycleStartedAt = frameCycleStartedAtRef.current.get(fh) ?? now;
+        frameCycleStartedAtRef.current.set(fh, cycleStartedAt);
+        const ageMs = now - cycleStartedAt;
+
         inFlight.delete(fh);
         inFlightStartedAtRef.current.delete(fh);
-        debugLog("inflight frame expired", { fh, ttlMs: INFLIGHT_FRAME_TTL_MS });
+        if (nextRetry >= FRAME_MAX_RETRIES || ageMs >= FRAME_HARD_DEADLINE_MS) {
+          failed.add(fh);
+          frameNextRetryAtRef.current.delete(fh);
+          debugLog("frame failed", {
+            fh,
+            retries: nextRetry,
+            ageMs,
+            hardDeadlineMs: FRAME_HARD_DEADLINE_MS,
+          });
+        } else {
+          const retryDelayMs = FRAME_RETRY_BASE_MS * 2 ** (nextRetry - 1);
+          frameNextRetryAtRef.current.set(fh, now + retryDelayMs);
+          debugLog("inflight frame expired", {
+            fh,
+            ttlMs: INFLIGHT_FRAME_TTL_MS,
+            retries: nextRetry,
+            retryDelayMs,
+          });
+        }
       }
     }
 
     const currentIndex = frameHours.indexOf(forecastHour);
     let bufferedAheadCount = 0;
+    let terminalAheadCount = 0;
     if (currentIndex >= 0) {
       for (let i = currentIndex + 1; i < frameHours.length; i += 1) {
-        if (ready.has(frameHours[i])) {
+        const hour = frameHours[i];
+        if (ready.has(hour)) {
           bufferedAheadCount += 1;
+        }
+        if (ready.has(hour) || failed.has(hour)) {
+          terminalAheadCount += 1;
         }
       }
     }
 
     const bufferedCount = ready.size;
+    const failedCount = failed.size;
+    const terminalCount = Math.min(totalFrames, bufferedCount + failedCount);
+    const queueDepth = Math.max(0, totalFrames - terminalCount - inFlight.size);
     const version = ++bufferVersionRef.current;
     const snapshot = {
       totalFrames,
       bufferedCount,
       bufferedAheadCount,
+      terminalCount,
+      terminalAheadCount,
+      failedCount,
       inFlightCount: inFlight.size,
-      statusText: `Buffered ${bufferedCount}/${totalFrames}`,
+      queueDepth,
+      statusText: `Loaded ${terminalCount}/${totalFrames} (${bufferedCount} ready)`,
       version,
     };
     setBufferSnapshot(snapshot);
     debugLog("buffer snapshot", {
       bufferedCount,
       bufferedAheadCount,
+      terminalCount,
+      terminalAheadCount,
+      failedCount,
       inFlightCount: inFlight.size,
+      queueDepth,
       totalFrames,
     });
   }, [frameHours, forecastHour, debugLog]);
@@ -491,6 +558,7 @@ export default function App() {
     }
 
     const ready = readyFramesRef.current;
+    const failed = failedFramesRef.current;
     const inFlight = inFlightFramesRef.current;
     const maxRequests = 4;
     const targetReady = isPreloadingForPlay
@@ -510,6 +578,15 @@ export default function App() {
       if (seen.has(fh)) return;
       seen.add(fh);
       if (ready.has(fh) || inFlight.has(fh)) return;
+      if (failed.has(fh)) {
+        if (isScrubbing) {
+          return;
+        }
+        const retryAt = frameNextRetryAtRef.current.get(fh) ?? 0;
+        if (Date.now() < retryAt) {
+          return;
+        }
+      }
       candidates.push(fh);
     };
 
@@ -539,7 +616,14 @@ export default function App() {
     }
 
     return candidates.slice(0, maxRequests);
-  }, [frameHours, forecastHour, bufferSnapshot.version, playbackPolicy.bufferTarget, isPreloadingForPlay]);
+  }, [
+    frameHours,
+    forecastHour,
+    bufferSnapshot.version,
+    playbackPolicy.bufferTarget,
+    isPreloadingForPlay,
+    isScrubbing,
+  ]);
 
   const prefetchTileUrls = useMemo(() => {
     return prefetchHours.map((fh) => tileUrlForHour(fh));
@@ -582,6 +666,10 @@ export default function App() {
     }
     readyFramesRef.current.add(frameHour as number);
     inFlightFramesRef.current.delete(frameHour as number);
+    failedFramesRef.current.delete(frameHour as number);
+    frameRetryCountRef.current.delete(frameHour as number);
+    frameCycleStartedAtRef.current.delete(frameHour as number);
+    frameNextRetryAtRef.current.delete(frameHour as number);
 
     const startedAt = inFlightStartedAtRef.current.get(frameHour as number);
     if (Number.isFinite(startedAt)) {
@@ -675,6 +763,10 @@ export default function App() {
     datasetGenerationRef.current += 1;
     readyFramesRef.current.clear();
     inFlightFramesRef.current.clear();
+    failedFramesRef.current.clear();
+    frameRetryCountRef.current.clear();
+    frameCycleStartedAtRef.current.clear();
+    frameNextRetryAtRef.current.clear();
     inFlightStartedAtRef.current.clear();
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
@@ -688,17 +780,22 @@ export default function App() {
       model,
       run: resolvedRunForRequests,
       variable,
+      zoomBucket,
     });
     const version = ++bufferVersionRef.current;
     setBufferSnapshot({
       totalFrames: frameHours.length,
       bufferedCount: 0,
       bufferedAheadCount: 0,
+      terminalCount: 0,
+      terminalAheadCount: 0,
+      failedCount: 0,
       inFlightCount: 0,
+      queueDepth: frameHours.length,
       statusText: `Buffered 0/${frameHours.length}`,
       version,
     });
-  }, [model, resolvedRunForRequests, variable, frameHours.length, debugLog]);
+  }, [model, resolvedRunForRequests, variable, zoomBucket, frameHours.length, debugLog]);
 
   useEffect(() => {
     updateBufferSnapshot();
@@ -716,6 +813,7 @@ export default function App() {
   useEffect(() => {
     const inFlight = inFlightFramesRef.current;
     const ready = readyFramesRef.current;
+    const failed = failedFramesRef.current;
     const requested = new Set(prefetchHours);
     let changed = false;
 
@@ -729,7 +827,13 @@ export default function App() {
 
     for (const fh of prefetchHours) {
       if (!ready.has(fh) && !inFlight.has(fh)) {
+        if (failed.has(fh)) {
+          failed.delete(fh);
+        }
         inFlight.add(fh);
+        if (!frameCycleStartedAtRef.current.has(fh)) {
+          frameCycleStartedAtRef.current.set(fh, Date.now());
+        }
         inFlightStartedAtRef.current.set(fh, Date.now());
         changed = true;
       }
@@ -1136,13 +1240,19 @@ export default function App() {
       progress.lastProgressAt = now;
     }
 
+    const remainingAheadFrames = Math.max(0, frameHours.length - forecastHour - 1);
+    const minAheadReady = Math.min(playbackPolicy.minAheadWhilePlaying, remainingAheadFrames);
+    const canStartByAheadReady = bufferSnapshot.bufferedAheadCount >= minAheadReady;
     const preloadStartThreshold = Math.min(
       frameHours.length,
       Math.max(playbackPolicy.minStartBuffer, Math.ceil(frameHours.length * PRELOAD_START_RATIO))
     );
     const stalledMs = now - progress.lastProgressAt;
-    const canStartByThreshold = bufferedCount >= preloadStartThreshold;
-    const canStartByStall = bufferedCount >= playbackPolicy.minStartBuffer && stalledMs >= PRELOAD_STALL_MS;
+    const canStartByThreshold = bufferedCount >= preloadStartThreshold && canStartByAheadReady;
+    const canStartByStall =
+      bufferedCount >= playbackPolicy.minStartBuffer &&
+      canStartByAheadReady &&
+      stalledMs >= PRELOAD_STALL_MS;
 
     if (!canStartByThreshold && !canStartByStall) {
       return;
@@ -1157,7 +1267,10 @@ export default function App() {
   }, [
     isPreloadingForPlay,
     bufferSnapshot.bufferedCount,
+    bufferSnapshot.bufferedAheadCount,
     frameHours.length,
+    forecastHour,
+    playbackPolicy.minAheadWhilePlaying,
     playbackPolicy.minStartBuffer,
     showTransientFrameStatus,
   ]);
@@ -1184,7 +1297,12 @@ export default function App() {
     if (loading || frameHours.length === 0) {
       return;
     }
-    if (bufferSnapshot.bufferedCount >= frameHours.length) {
+    const remainingAheadFrames = Math.max(0, frameHours.length - forecastHour - 1);
+    const minAheadReady = Math.min(playbackPolicy.minAheadWhilePlaying, remainingAheadFrames);
+    const canStartImmediately =
+      bufferSnapshot.bufferedCount >= playbackPolicy.minStartBuffer &&
+      bufferSnapshot.bufferedAheadCount >= minAheadReady;
+    if (canStartImmediately) {
       setIsPreloadingForPlay(false);
       setIsPlaying(true);
       return;
@@ -1196,7 +1314,16 @@ export default function App() {
     };
     setIsPreloadingForPlay(true);
     showTransientFrameStatus("Loading frames");
-  }, [loading, frameHours.length, bufferSnapshot.bufferedCount, showTransientFrameStatus]);
+  }, [
+    loading,
+    frameHours.length,
+    forecastHour,
+    bufferSnapshot.bufferedCount,
+    bufferSnapshot.bufferedAheadCount,
+    playbackPolicy.minAheadWhilePlaying,
+    playbackPolicy.minStartBuffer,
+    showTransientFrameStatus,
+  ]);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {
@@ -1228,7 +1355,7 @@ export default function App() {
   const controlsIsPlaying = isPlaying || isPreloadingForPlay;
   const preloadBufferedCount = Math.max(
     0,
-    Math.min(bufferSnapshot.bufferedCount, bufferSnapshot.totalFrames)
+    Math.min(bufferSnapshot.terminalCount, bufferSnapshot.totalFrames)
   );
   const preloadPercent = bufferSnapshot.totalFrames > 0
     ? Math.round((preloadBufferedCount / bufferSnapshot.totalFrames) * 100)
@@ -1272,6 +1399,7 @@ export default function App() {
           onTileReady={handleTileReady}
           onFrameLoadingChange={handleFrameLoadingChange}
           onZoomHint={setShowZoomHint}
+          onZoomBucketChange={setZoomBucket}
           onMapHover={onHover}
           onMapHoverEnd={onHoverEnd}
         />
@@ -1286,6 +1414,11 @@ export default function App() {
               {!isScrubLoading ? <span className="font-mono tabular-nums">{preloadPercent}%</span> : null}
             </div>
             {!isScrubLoading ? (
+              <div className="text-[10px] text-muted-foreground">
+                Ready {bufferSnapshot.bufferedCount} • Failed {bufferSnapshot.failedCount}
+              </div>
+            ) : null}
+            {!isScrubLoading ? (
               <div className="h-1.5 overflow-hidden rounded-full bg-muted/70">
                 <div
                   className="h-full rounded-full bg-primary transition-[width] duration-200 ease-out"
@@ -1293,6 +1426,12 @@ export default function App() {
                 />
               </div>
             ) : null}
+          </div>
+        )}
+
+        {(isPlaying || isPreloadingForPlay) && (
+          <div className="absolute right-4 top-4 z-40 rounded-md border border-border/40 bg-[hsl(var(--toolbar))]/90 px-2.5 py-1.5 text-[10px] text-foreground shadow-lg backdrop-blur-md">
+            aheadReady {bufferSnapshot.bufferedAheadCount} • aheadTerminal {bufferSnapshot.terminalAheadCount} • inflightTiles {bufferSnapshot.inFlightCount} • queueDepth {bufferSnapshot.queueDepth}
           </div>
         )}
 
