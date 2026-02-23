@@ -2120,7 +2120,11 @@ export default function App() {
       setIsLoopAutoplayBuffering(false);
       setIsLoopPreloading(false);
       setIsPreloadingForPlay(false);
-      showTransientFrameStatus("High detail mode — zoom out for smooth loop");
+      if (canUseLoopPlayback) {
+        showTransientFrameStatus("High detail mode — zoom out for smooth loop");
+      } else {
+        showTransientFrameStatus("Loop unavailable for this variable/run — showing tiles");
+      }
       return;
     }
 
@@ -2347,10 +2351,17 @@ export default function App() {
           </div>
         )}
 
-        {renderMode === "tiles" && (
+        {renderMode === "tiles" && canUseLoopPlayback && (
           <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
             <AlertCircle className="h-3.5 w-3.5" />
             High detail mode — zoom out for smooth loop
+          </div>
+        )}
+
+        {renderMode === "tiles" && !canUseLoopPlayback && (
+          <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Loop unavailable for this variable/run — showing tiles
           </div>
         )}
 
