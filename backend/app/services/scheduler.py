@@ -44,12 +44,16 @@ ENV_LOOP_CACHE_ROOT = "TWF_V3_LOOP_CACHE_ROOT"
 ENV_LOOP_PREGENERATE_WORKERS = "TWF_V3_LOOP_PREGENERATE_WORKERS"
 ENV_LOOP_WEBP_QUALITY = "TWF_V3_LOOP_WEBP_QUALITY"
 ENV_LOOP_WEBP_MAX_DIM = "TWF_V3_LOOP_WEBP_MAX_DIM"
+ENV_LOOP_WEBP_TIER1_QUALITY = "TWF_V3_LOOP_WEBP_TIER1_QUALITY"
+ENV_LOOP_WEBP_TIER1_MAX_DIM = "TWF_V3_LOOP_WEBP_TIER1_MAX_DIM"
 
 DEFAULT_LOOP_PREGENERATE_ENABLED = True
 DEFAULT_LOOP_CACHE_ROOT = Path("/tmp/twf_v3_loop_webp_cache")
 DEFAULT_LOOP_PREGENERATE_WORKERS = 4
 DEFAULT_LOOP_WEBP_QUALITY = 82
 DEFAULT_LOOP_WEBP_MAX_DIM = 1600
+DEFAULT_LOOP_WEBP_TIER1_QUALITY = 86
+DEFAULT_LOOP_WEBP_TIER1_MAX_DIM = 2400
 
 
 class SchedulerConfigError(RuntimeError):
@@ -522,34 +526,44 @@ def _pregenerate_loop_webp_for_run(
     run_id: str,
     loop_cache_root: Path,
     workers: int,
-    quality: int,
-    max_dim: int,
+    tier0_quality: int,
+    tier0_max_dim: int,
+    tier1_quality: int,
+    tier1_max_dim: int,
 ) -> tuple[int, int]:
     published_run = data_root / "published" / model / run_id
     if not published_run.is_dir():
         return 0, 0
 
-    jobs: list[tuple[Path, Path]] = []
+    tier_specs = (
+        (0, int(tier0_quality), int(tier0_max_dim)),
+        (1, int(tier1_quality), int(tier1_max_dim)),
+    )
+
+    jobs: list[tuple[Path, Path, int, int, int]] = []
     for var_dir in sorted([p for p in published_run.iterdir() if p.is_dir()]):
         variable = var_dir.name
         for cog_path in sorted(var_dir.glob("fh*.rgba.cog.tif")):
             fh = cog_path.name.split(".")[0]
-            out_path = loop_cache_root / model / run_id / variable / f"{fh}.loop.webp"
-            if out_path.is_file():
-                continue
-            jobs.append((cog_path, out_path))
+            for tier, quality, max_dim in tier_specs:
+                out_path = loop_cache_root / model / run_id / variable / f"tier{tier}" / f"{fh}.loop.webp"
+                if out_path.is_file():
+                    continue
+                jobs.append((cog_path, out_path, quality, max_dim, tier))
 
     if not jobs:
         return 0, 0
 
     logger.info(
-        "Loop pre-generate start: model=%s run=%s jobs=%d workers=%d quality=%d max_dim=%d root=%s",
+        "Loop pre-generate start: model=%s run=%s jobs=%d workers=%d tier0=(q=%d,max=%d) tier1=(q=%d,max=%d) root=%s",
         model,
         run_id,
         len(jobs),
         workers,
-        quality,
-        max_dim,
+        tier0_quality,
+        tier0_max_dim,
+        tier1_quality,
+        tier1_max_dim,
         loop_cache_root,
     )
 
@@ -564,7 +578,7 @@ def _pregenerate_loop_webp_for_run(
                 quality=quality,
                 max_dim=max_dim,
             )
-            for cog_path, out_path in jobs
+            for cog_path, out_path, quality, max_dim, _tier in jobs
         ]
         for future in concurrent.futures.as_completed(futures):
             if future.result():
@@ -595,8 +609,10 @@ def _process_run(
     loop_pregenerate_enabled: bool,
     loop_cache_root: Path,
     loop_workers: int,
-    loop_quality: int,
-    loop_max_dim: int,
+    loop_tier0_quality: int,
+    loop_tier0_max_dim: int,
+    loop_tier1_quality: int,
+    loop_tier1_max_dim: int,
 ) -> tuple[str, int, int]:
     run_id = _run_id_from_dt(run_dt)
     cycle_hour = run_dt.hour
@@ -667,8 +683,10 @@ def _process_run(
                 run_id=run_id,
                 loop_cache_root=loop_cache_root,
                 workers=loop_workers,
-                quality=loop_quality,
-                max_dim=loop_max_dim,
+                tier0_quality=loop_tier0_quality,
+                tier0_max_dim=loop_tier0_max_dim,
+                tier1_quality=loop_tier1_quality,
+                tier1_max_dim=loop_tier1_max_dim,
             )
 
     _enforce_run_retention(data_root / "staging" / model_id, keep_runs)
@@ -697,8 +715,10 @@ def run_scheduler(
     loop_pregenerate_enabled: bool,
     loop_cache_root: Path,
     loop_workers: int,
-    loop_quality: int,
-    loop_max_dim: int,
+    loop_tier0_quality: int,
+    loop_tier0_max_dim: int,
+    loop_tier1_quality: int,
+    loop_tier1_max_dim: int,
 ) -> int:
     plugin = _resolve_model(model)
     if plugin.get_region(CANONICAL_COVERAGE) is None:
@@ -761,8 +781,10 @@ def run_scheduler(
             loop_pregenerate_enabled=loop_pregenerate_enabled,
             loop_cache_root=loop_cache_root,
             loop_workers=loop_workers,
-            loop_quality=loop_quality,
-            loop_max_dim=loop_max_dim,
+            loop_tier0_quality=loop_tier0_quality,
+            loop_tier0_max_dim=loop_tier0_max_dim,
+            loop_tier1_quality=loop_tier1_quality,
+            loop_tier1_max_dim=loop_tier1_max_dim,
         )
         last_run_id = processed_run_id
         last_run_available = available
@@ -832,9 +854,12 @@ def main(argv: list[str] | None = None) -> int:
         DEFAULT_LOOP_PREGENERATE_WORKERS,
         min_value=1,
     )
-    loop_quality = _int_from_env(ENV_LOOP_WEBP_QUALITY, DEFAULT_LOOP_WEBP_QUALITY, min_value=1)
-    loop_quality = max(1, min(100, loop_quality))
-    loop_max_dim = _int_from_env(ENV_LOOP_WEBP_MAX_DIM, DEFAULT_LOOP_WEBP_MAX_DIM, min_value=64)
+    loop_tier0_quality = _int_from_env(ENV_LOOP_WEBP_QUALITY, DEFAULT_LOOP_WEBP_QUALITY, min_value=1)
+    loop_tier0_quality = max(1, min(100, loop_tier0_quality))
+    loop_tier0_max_dim = _int_from_env(ENV_LOOP_WEBP_MAX_DIM, DEFAULT_LOOP_WEBP_MAX_DIM, min_value=64)
+    loop_tier1_quality = _int_from_env(ENV_LOOP_WEBP_TIER1_QUALITY, DEFAULT_LOOP_WEBP_TIER1_QUALITY, min_value=1)
+    loop_tier1_quality = max(1, min(100, loop_tier1_quality))
+    loop_tier1_max_dim = _int_from_env(ENV_LOOP_WEBP_TIER1_MAX_DIM, DEFAULT_LOOP_WEBP_TIER1_MAX_DIM, min_value=64)
 
     vars_list = _parse_vars(vars_raw)
     primary_list = _parse_vars(primary_raw)
@@ -854,8 +879,10 @@ def main(argv: list[str] | None = None) -> int:
             loop_pregenerate_enabled=loop_pregenerate_enabled,
             loop_cache_root=loop_cache_root,
             loop_workers=loop_workers,
-            loop_quality=loop_quality,
-            loop_max_dim=loop_max_dim,
+            loop_tier0_quality=loop_tier0_quality,
+            loop_tier0_max_dim=loop_tier0_max_dim,
+            loop_tier1_quality=loop_tier1_quality,
+            loop_tier1_max_dim=loop_tier1_max_dim,
         )
     except SchedulerConfigError as exc:
         logger.error("Scheduler configuration error: %s", exc)
