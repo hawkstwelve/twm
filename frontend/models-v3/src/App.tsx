@@ -1559,6 +1559,8 @@ export default function App() {
           model={model}
           prefetchTileUrls={prefetchTileUrls}
           crossfade={false}
+          loopImageUrl={activeLoopUrl}
+          loopActive={isLoopActive}
           onFrameSettled={handleFrameSettled}
           onTileReady={handleTileReady}
           onFrameLoadingChange={handleFrameLoadingChange}
@@ -1567,17 +1569,6 @@ export default function App() {
           onMapHover={onHover}
           onMapHoverEnd={onHoverEnd}
         />
-
-        {activeLoopUrl && (
-          <div className="absolute inset-0 z-30 flex items-center justify-center">
-            <img
-              src={activeLoopUrl}
-              alt="Loop frame"
-              className="h-full w-full object-contain"
-              draggable={false}
-            />
-          </div>
-        )}
 
         {showBufferStatus && (
           <div className="absolute left-1/2 top-4 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">

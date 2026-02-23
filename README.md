@@ -20,3 +20,11 @@ Optional flags:
 - `--quality` and `--max-dim` to tune output size/quality
 
 By default loop WebP files are written to `TWF_V3_LOOP_CACHE_ROOT` (or `/tmp/twf_v3_loop_webp_cache`) so production `published/` can remain read-only.
+
+For production scheduler automation, set:
+
+```bash
+export TWF_V3_LOOP_PREGENERATE_ENABLED=1
+export TWF_V3_LOOP_CACHE_ROOT=/opt/twf_v3/data/v3/loop_cache
+export TWF_V3_LOOP_PREGENERATE_WORKERS=4
+```

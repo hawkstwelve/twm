@@ -51,10 +51,22 @@ const PREFETCH_TILE_EVENT_BUDGET = 1;
 const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
+const LOOP_SOURCE_ID = "twf-loop-image";
+const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
   type: "FeatureCollection",
   features: [],
 };
+
+const TRANSPARENT_PIXEL_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII=";
+
+const LOOP_CONUS_COORDINATES: [[number, number], [number, number], [number, number], [number, number]] = [
+  [-125.0, 50.0],
+  [-66.5, 50.0],
+  [-66.5, 24.0],
+  [-125.0, 24.0],
+];
 
 type OverlayBuffer = "a" | "b";
 type PlaybackMode = "autoplay" | "scrub";
@@ -116,6 +128,13 @@ function getOverlayPaintSettings(variable?: string): {
     brightnessMin: OVERLAY_RASTER_BRIGHTNESS_MIN,
     brightnessMax: OVERLAY_RASTER_BRIGHTNESS_MAX,
   };
+}
+
+function setLayerVisibility(map: maplibregl.Map, id: string, visible: boolean) {
+  if (!map.getLayer(id)) {
+    return;
+  }
+  map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
 }
 
 function styleFor(
@@ -185,6 +204,11 @@ function styleFor(
         type: "geojson",
         data: contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION,
       },
+      [LOOP_SOURCE_ID]: {
+        type: "image",
+        url: TRANSPARENT_PIXEL_DATA_URL,
+        coordinates: LOOP_CONUS_COORDINATES,
+      },
     },
     layers: [
       {
@@ -220,6 +244,19 @@ function styleFor(
         },
       },
       {
+        id: LOOP_LAYER_ID,
+        type: "raster",
+        source: LOOP_SOURCE_ID,
+        layout: {
+          visibility: "none",
+        },
+        paint: {
+          "raster-opacity": opacity,
+          "raster-resampling": "nearest",
+          "raster-fade-duration": 0,
+        },
+      },
+      {
         id: "twf-labels",
         type: "raster",
         source: "twf-labels",
@@ -239,6 +276,8 @@ type MapCanvasProps = {
   model?: string;
   prefetchTileUrls?: string[];
   crossfade?: boolean;
+  loopImageUrl?: string | null;
+  loopActive?: boolean;
   onFrameSettled?: (tileUrl: string) => void;
   onTileReady?: (tileUrl: string) => void;
   onFrameLoadingChange?: (tileUrl: string, isLoading: boolean) => void;
@@ -259,6 +298,8 @@ export function MapCanvas({
   model,
   prefetchTileUrls = [],
   crossfade = false,
+  loopImageUrl,
+  loopActive = false,
   onFrameSettled,
   onTileReady,
   onFrameLoadingChange,
@@ -335,6 +376,9 @@ export function MapCanvas({
 
     if (map.getLayer(CONTOUR_LAYER_ID)) {
       map.moveLayer(CONTOUR_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(LOOP_LAYER_ID)) {
+      map.moveLayer(LOOP_LAYER_ID, "twf-labels");
     }
     map.moveLayer("twf-labels");
   }, []);
@@ -886,6 +930,34 @@ export function MapCanvas({
       return;
     }
 
+    const loopSource = map.getSource(LOOP_SOURCE_ID) as maplibregl.ImageSource | undefined;
+    if (loopSource && typeof loopSource.updateImage === "function" && loopImageUrl) {
+      try {
+        loopSource.updateImage({
+          url: loopImageUrl,
+          coordinates: LOOP_CONUS_COORDINATES,
+        });
+      } catch (error) {
+        console.warn("[map] failed to update loop image source", { loopImageUrl, error });
+      }
+    }
+
+    setLayerVisibility(map, LOOP_LAYER_ID, Boolean(loopActive && loopImageUrl));
+    setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m" && !loopActive);
+    setLayerVisibility(map, layerId("a"), !loopActive);
+    setLayerVisibility(map, layerId("b"), !loopActive);
+    for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
+      setLayerVisibility(map, prefetchLayerId(idx), !loopActive);
+    }
+    enforceLayerOrder(map);
+  }, [isLoaded, loopImageUrl, loopActive, variable, enforceLayerOrder]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) {
+      return;
+    }
+
     const activeBuffer = activeBufferRef.current;
     const inactiveBuffer = otherBuffer(activeBuffer);
 
@@ -895,6 +967,7 @@ export function MapCanvas({
 
     setLayerOpacity(map, layerId(activeBuffer), opacity);
     setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+    setLayerOpacity(map, LOOP_LAYER_ID, opacity);
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
       setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
     }

@@ -12,6 +12,11 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
+import numpy as np
+import rasterio
+from PIL import Image
+from rasterio.enums import Resampling
+
 from app.models.registry import MODEL_REGISTRY
 from app.services.builder.pipeline import build_frame
 
@@ -34,6 +39,17 @@ ENV_DEFAULT_POLL_SECONDS = "TWF_V3_SCHEDULER_POLL_SECONDS"
 ENV_DEFAULT_KEEP_RUNS = "TWF_V3_SCHEDULER_KEEP_RUNS"
 ENV_PROBE_VAR = "TWF_V3_SCHEDULER_PROBE_VAR"
 ENV_HERBIE_PRIORITY = "TWF_HERBIE_PRIORITY"
+ENV_LOOP_PREGENERATE_ENABLED = "TWF_V3_LOOP_PREGENERATE_ENABLED"
+ENV_LOOP_CACHE_ROOT = "TWF_V3_LOOP_CACHE_ROOT"
+ENV_LOOP_PREGENERATE_WORKERS = "TWF_V3_LOOP_PREGENERATE_WORKERS"
+ENV_LOOP_WEBP_QUALITY = "TWF_V3_LOOP_WEBP_QUALITY"
+ENV_LOOP_WEBP_MAX_DIM = "TWF_V3_LOOP_WEBP_MAX_DIM"
+
+DEFAULT_LOOP_PREGENERATE_ENABLED = True
+DEFAULT_LOOP_CACHE_ROOT = Path("/tmp/twf_v3_loop_webp_cache")
+DEFAULT_LOOP_PREGENERATE_WORKERS = 4
+DEFAULT_LOOP_WEBP_QUALITY = 82
+DEFAULT_LOOP_WEBP_MAX_DIM = 1600
 
 
 class SchedulerConfigError(RuntimeError):
@@ -106,6 +122,18 @@ def _int_from_env(env_name: str, fallback: int, *, min_value: int) -> int:
         logger.warning("Invalid %s=%r; using fallback=%d", env_name, raw, fallback)
         return fallback
     return parsed if parsed >= min_value else fallback
+
+
+def _bool_from_env(env_name: str, fallback: bool) -> bool:
+    raw = os.getenv(env_name, "").strip().lower()
+    if not raw:
+        return fallback
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("Invalid %s=%r; using fallback=%s", env_name, raw, fallback)
+    return fallback
 
 
 def _resolve_model(model_id: str):
@@ -452,6 +480,108 @@ def _enforce_run_retention(root: Path, keep_runs: int) -> None:
         shutil.rmtree(old_run_dir, ignore_errors=True)
 
 
+def _convert_rgba_cog_to_loop_webp(
+    *,
+    cog_path: Path,
+    out_path: Path,
+    quality: int,
+    max_dim: int,
+) -> bool:
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with rasterio.open(cog_path) as ds:
+            src_h = int(ds.height)
+            src_w = int(ds.width)
+            max_side = max(src_h, src_w)
+            if max_side <= 0:
+                return False
+
+            scale = min(1.0, float(max_dim) / float(max_side))
+            out_h = max(1, int(round(src_h * scale)))
+            out_w = max(1, int(round(src_w * scale)))
+
+            data = ds.read(
+                indexes=(1, 2, 3, 4),
+                out_shape=(4, out_h, out_w),
+                resampling=Resampling.bilinear,
+            )
+
+        rgba = np.moveaxis(data, 0, -1)
+        image = Image.fromarray(rgba, mode="RGBA")
+        image.save(out_path, format="WEBP", quality=quality, method=6)
+        return True
+    except Exception:
+        logger.exception("Loop WebP conversion failed: %s -> %s", cog_path, out_path)
+        return False
+
+
+def _pregenerate_loop_webp_for_run(
+    *,
+    data_root: Path,
+    model: str,
+    run_id: str,
+    loop_cache_root: Path,
+    workers: int,
+    quality: int,
+    max_dim: int,
+) -> tuple[int, int]:
+    published_run = data_root / "published" / model / run_id
+    if not published_run.is_dir():
+        return 0, 0
+
+    jobs: list[tuple[Path, Path]] = []
+    for var_dir in sorted([p for p in published_run.iterdir() if p.is_dir()]):
+        variable = var_dir.name
+        for cog_path in sorted(var_dir.glob("fh*.rgba.cog.tif")):
+            fh = cog_path.name.split(".")[0]
+            out_path = loop_cache_root / model / run_id / variable / f"{fh}.loop.webp"
+            if out_path.is_file():
+                continue
+            jobs.append((cog_path, out_path))
+
+    if not jobs:
+        return 0, 0
+
+    logger.info(
+        "Loop pre-generate start: model=%s run=%s jobs=%d workers=%d quality=%d max_dim=%d root=%s",
+        model,
+        run_id,
+        len(jobs),
+        workers,
+        quality,
+        max_dim,
+        loop_cache_root,
+    )
+
+    ok = 0
+    fail = 0
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = [
+            pool.submit(
+                _convert_rgba_cog_to_loop_webp,
+                cog_path=cog_path,
+                out_path=out_path,
+                quality=quality,
+                max_dim=max_dim,
+            )
+            for cog_path, out_path in jobs
+        ]
+        for future in concurrent.futures.as_completed(futures):
+            if future.result():
+                ok += 1
+            else:
+                fail += 1
+
+    logger.info(
+        "Loop pre-generate done: model=%s run=%s success=%d failed=%d",
+        model,
+        run_id,
+        ok,
+        fail,
+    )
+    return ok, fail
+
+
 def _process_run(
     *,
     plugin,
@@ -462,6 +592,11 @@ def _process_run(
     data_root: Path,
     workers: int,
     keep_runs: int,
+    loop_pregenerate_enabled: bool,
+    loop_cache_root: Path,
+    loop_workers: int,
+    loop_quality: int,
+    loop_max_dim: int,
 ) -> tuple[str, int, int]:
     run_id = _run_id_from_dt(run_dt)
     cycle_hour = run_dt.hour
@@ -525,9 +660,20 @@ def _process_run(
             targets=targets,
         )
         _write_latest_pointer(data_root, model_id, run_id)
+        if loop_pregenerate_enabled:
+            _pregenerate_loop_webp_for_run(
+                data_root=data_root,
+                model=model_id,
+                run_id=run_id,
+                loop_cache_root=loop_cache_root,
+                workers=loop_workers,
+                quality=loop_quality,
+                max_dim=loop_max_dim,
+            )
 
     _enforce_run_retention(data_root / "staging" / model_id, keep_runs)
     _enforce_run_retention(data_root / "published" / model_id, keep_runs)
+    _enforce_run_retention(loop_cache_root / model_id, keep_runs)
 
     available = 0
     for var_id, fh in targets:
@@ -548,6 +694,11 @@ def run_scheduler(
     run_arg: str | None,
     once: bool,
     probe_var: str,
+    loop_pregenerate_enabled: bool,
+    loop_cache_root: Path,
+    loop_workers: int,
+    loop_quality: int,
+    loop_max_dim: int,
 ) -> int:
     plugin = _resolve_model(model)
     if plugin.get_region(CANONICAL_COVERAGE) is None:
@@ -607,6 +758,11 @@ def run_scheduler(
             data_root=data_root,
             workers=workers,
             keep_runs=keep_runs,
+            loop_pregenerate_enabled=loop_pregenerate_enabled,
+            loop_cache_root=loop_cache_root,
+            loop_workers=loop_workers,
+            loop_quality=loop_quality,
+            loop_max_dim=loop_max_dim,
         )
         last_run_id = processed_run_id
         last_run_available = available
@@ -669,6 +825,16 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(args.probe_var, str) and args.probe_var.strip()
         else os.getenv(ENV_PROBE_VAR, DEFAULT_PROBE_VAR)
     )
+    loop_pregenerate_enabled = _bool_from_env(ENV_LOOP_PREGENERATE_ENABLED, DEFAULT_LOOP_PREGENERATE_ENABLED)
+    loop_cache_root = Path(os.getenv(ENV_LOOP_CACHE_ROOT, str(DEFAULT_LOOP_CACHE_ROOT))).resolve()
+    loop_workers = _int_from_env(
+        ENV_LOOP_PREGENERATE_WORKERS,
+        DEFAULT_LOOP_PREGENERATE_WORKERS,
+        min_value=1,
+    )
+    loop_quality = _int_from_env(ENV_LOOP_WEBP_QUALITY, DEFAULT_LOOP_WEBP_QUALITY, min_value=1)
+    loop_quality = max(1, min(100, loop_quality))
+    loop_max_dim = _int_from_env(ENV_LOOP_WEBP_MAX_DIM, DEFAULT_LOOP_WEBP_MAX_DIM, min_value=64)
 
     vars_list = _parse_vars(vars_raw)
     primary_list = _parse_vars(primary_raw)
@@ -685,6 +851,11 @@ def main(argv: list[str] | None = None) -> int:
             run_arg=args.run.strip().lower() if isinstance(args.run, str) and args.run.strip() else None,
             once=bool(args.once),
             probe_var=probe_var,
+            loop_pregenerate_enabled=loop_pregenerate_enabled,
+            loop_cache_root=loop_cache_root,
+            loop_workers=loop_workers,
+            loop_quality=loop_quality,
+            loop_max_dim=loop_max_dim,
         )
     except SchedulerConfigError as exc:
         logger.error("Scheduler configuration error: %s", exc)
