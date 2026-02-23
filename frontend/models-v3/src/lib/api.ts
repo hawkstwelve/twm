@@ -60,8 +60,12 @@ export type VarRow =
       label?: string;
     };
 
-async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url, { credentials: "omit" });
+type FetchOptions = {
+  signal?: AbortSignal;
+};
+
+async function fetchJson<T>(url: string, options?: FetchOptions): Promise<T> {
+  const response = await fetch(url, { credentials: "omit", signal: options?.signal });
   if (!response.ok) {
     throw new Error(`Request failed: ${response.status} ${response.statusText}`);
   }
@@ -75,7 +79,7 @@ type RegionsResponse = {
   regions: Record<string, RegionPreset>;
 };
 
-export async function fetchRegionPresets(): Promise<Record<string, RegionPreset>> {
+export async function fetchRegionPresets(options?: FetchOptions): Promise<Record<string, RegionPreset>> {
   const cachedRaw = localStorage.getItem(REGIONS_CACHE_KEY);
   const etag = localStorage.getItem(REGIONS_ETAG_KEY);
   const headers: Record<string, string> = {};
@@ -86,6 +90,7 @@ export async function fetchRegionPresets(): Promise<Record<string, RegionPreset>
   const response = await fetch(API_BASE.replace(/\/api\/v3$/, "") + "/api/regions", {
     credentials: "omit",
     headers,
+    signal: options?.signal,
   });
 
   if (response.status === 304 && cachedRaw) {
@@ -118,37 +123,41 @@ export async function fetchRegionPresets(): Promise<Record<string, RegionPreset>
   return payload.regions ?? {};
 }
 
-export async function fetchModels(): Promise<ModelOption[]> {
-  return fetchJson<ModelOption[]>(`${API_BASE}/models`);
+export async function fetchModels(options?: FetchOptions): Promise<ModelOption[]> {
+  return fetchJson<ModelOption[]>(`${API_BASE}/models`, options);
 }
 
-export async function fetchRegions(model: string): Promise<string[]> {
+export async function fetchRegions(model: string, options?: FetchOptions): Promise<string[]> {
   void model;
-  const regions = await fetchRegionPresets();
+  const regions = await fetchRegionPresets(options);
   return Object.keys(regions);
 }
 
-export async function fetchRuns(model: string): Promise<string[]> {
+export async function fetchRuns(model: string, options?: FetchOptions): Promise<string[]> {
   return fetchJson<string[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/runs`
+    `${API_BASE}/${encodeURIComponent(model)}/runs`,
+    options
   );
 }
 
-export async function fetchVars(model: string, run: string): Promise<VarRow[]> {
+export async function fetchVars(model: string, run: string, options?: FetchOptions): Promise<VarRow[]> {
   const runKey = run || "latest";
   return fetchJson<VarRow[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`
+    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`,
+    options
   );
 }
 
 export async function fetchFrames(
   model: string,
   run: string,
-  varKey: string
+  varKey: string,
+  options?: FetchOptions
 ): Promise<FrameRow[]> {
   const runKey = run || "latest";
   const response = await fetchJson<FrameRow[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`
+    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`,
+    options
   );
   if (!Array.isArray(response)) {
     return [];

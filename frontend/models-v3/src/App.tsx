@@ -28,6 +28,18 @@ const AUTOPLAY_SKIP_WINDOW = 3;
 const FRAME_STATUS_BADGE_MS = 900;
 const READY_URL_TTL_MS = 30_000;
 const READY_URL_LIMIT = 160;
+const BUFFER_TARGET_FRAMES = 12;
+const MIN_START_BUFFER_FRAMES = 3;
+const MIN_AHEAD_WHILE_PLAYING_FRAMES = 6;
+
+type BufferSnapshot = {
+  totalFrames: number;
+  bufferedCount: number;
+  bufferedAheadCount: number;
+  inFlightCount: number;
+  statusText: string;
+  version: number;
+};
 
 type Option = {
   value: string;
@@ -269,8 +281,23 @@ export default function App() {
   const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
   const [frameStatusMessage, setFrameStatusMessage] = useState<string | null>(null);
   const [showZoomHint, setShowZoomHint] = useState(false);
+  const [bufferSnapshot, setBufferSnapshot] = useState<BufferSnapshot>({
+    totalFrames: 0,
+    bufferedCount: 0,
+    bufferedAheadCount: 0,
+    inFlightCount: 0,
+    statusText: "Buffered 0/0",
+    version: 0,
+  });
   const latestTileUrlRef = useRef<string>("");
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
+  const readyFramesRef = useRef<Set<number>>(new Set());
+  const inFlightFramesRef = useRef<Set<number>>(new Set());
+  const bufferVersionRef = useRef(0);
+  const datasetGenerationRef = useRef(0);
+  const requestGenerationRef = useRef(0);
+  const scrubRafRef = useRef<number | null>(null);
+  const pendingScrubHourRef = useRef<number | null>(null);
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
   // Tracks current selector values so the async fast-path callback can guard against
@@ -332,6 +359,66 @@ export default function App() {
     return tileUrlForHour(forecastHour);
   }, [tileUrlForHour, forecastHour]);
 
+  const tileUrlToHour = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const fh of frameHours) {
+      map.set(tileUrlForHour(fh), fh);
+    }
+    return map;
+  }, [frameHours, tileUrlForHour]);
+
+  const updateBufferSnapshot = useCallback(() => {
+    const totalFrames = frameHours.length;
+    const ready = readyFramesRef.current;
+    const inFlight = inFlightFramesRef.current;
+
+    if (totalFrames === 0) {
+      const version = ++bufferVersionRef.current;
+      setBufferSnapshot({
+        totalFrames: 0,
+        bufferedCount: 0,
+        bufferedAheadCount: 0,
+        inFlightCount: 0,
+        statusText: "Buffered 0/0",
+        version,
+      });
+      return;
+    }
+
+    const frameSet = new Set(frameHours);
+    for (const fh of ready) {
+      if (!frameSet.has(fh)) {
+        ready.delete(fh);
+      }
+    }
+    for (const fh of inFlight) {
+      if (!frameSet.has(fh) || ready.has(fh)) {
+        inFlight.delete(fh);
+      }
+    }
+
+    const currentIndex = frameHours.indexOf(forecastHour);
+    let bufferedAheadCount = 0;
+    if (currentIndex >= 0) {
+      for (let i = currentIndex + 1; i < frameHours.length; i += 1) {
+        if (ready.has(frameHours[i])) {
+          bufferedAheadCount += 1;
+        }
+      }
+    }
+
+    const bufferedCount = ready.size;
+    const version = ++bufferVersionRef.current;
+    setBufferSnapshot({
+      totalFrames,
+      bufferedCount,
+      bufferedAheadCount,
+      inFlightCount: inFlight.size,
+      statusText: `Buffered ${bufferedCount}/${totalFrames}`,
+      version,
+    });
+  }, [frameHours, forecastHour]);
+
   const contourGeoJsonUrl = useMemo(() => {
     if (variable !== "tmp2m") {
       return null;
@@ -355,23 +442,53 @@ export default function App() {
     return buildLegend(normalizedMeta, opacity);
   }, [currentFrame, frameRows, opacity]);
 
-  const prefetchTileUrls = useMemo(() => {
-    if (frameHours.length < 2) return [];
+  const prefetchHours = useMemo(() => {
+    if (frameHours.length === 0) {
+      return [] as number[];
+    }
 
-    const prefetchCount = isPlaying ? 4 : isScrubbing ? 2 : 0;
-    if (prefetchCount <= 0) {
-      return [];
+    const ready = readyFramesRef.current;
+    const inFlight = inFlightFramesRef.current;
+    const maxRequests = 4;
+    const targetReady = Math.min(frameHours.length, BUFFER_TARGET_FRAMES);
+    if (ready.size + inFlight.size >= targetReady) {
+      return [] as number[];
     }
 
     const currentIndex = frameHours.indexOf(forecastHour);
-    const start = currentIndex >= 0 ? currentIndex : 0;
-    const nextHours = Array.from({ length: prefetchCount }, (_, idx) => {
-      const i = start + idx + 1;
-      return i >= frameHours.length ? Number.NaN : frameHours[i];
-    });
-    const dedup = Array.from(new Set(nextHours.filter((fh) => Number.isFinite(fh) && fh !== forecastHour)));
-    return dedup.map((fh) => tileUrlForHour(fh));
-  }, [frameHours, forecastHour, tileUrlForHour, isPlaying, isScrubbing]);
+    const pivot = currentIndex >= 0 ? currentIndex : 0;
+    const candidates: number[] = [];
+    const seen = new Set<number>();
+
+    const pushCandidate = (fh: number) => {
+      if (seen.has(fh)) return;
+      seen.add(fh);
+      if (ready.has(fh) || inFlight.has(fh)) return;
+      candidates.push(fh);
+    };
+
+    pushCandidate(frameHours[pivot]);
+
+    for (let i = pivot + 1; i < frameHours.length; i += 1) {
+      pushCandidate(frameHours[i]);
+      if (candidates.length >= maxRequests) {
+        return candidates.slice(0, maxRequests);
+      }
+    }
+
+    for (let i = pivot - 1; i >= 0; i -= 1) {
+      pushCandidate(frameHours[i]);
+      if (candidates.length >= maxRequests) {
+        return candidates.slice(0, maxRequests);
+      }
+    }
+
+    return candidates.slice(0, maxRequests);
+  }, [frameHours, forecastHour, bufferSnapshot.version]);
+
+  const prefetchTileUrls = useMemo(() => {
+    return prefetchHours.map((fh) => tileUrlForHour(fh));
+  }, [prefetchHours, tileUrlForHour]);
 
   const effectiveRunId = currentFrame?.run ?? (run !== "latest" ? run : latestRunId);
   const runDateTimeISO = runIdToIso(effectiveRunId);
@@ -403,6 +520,16 @@ export default function App() {
     }
   }, []);
 
+  const markFrameReady = useCallback((readyUrl: string) => {
+    const frameHour = tileUrlToHour.get(readyUrl);
+    if (!Number.isFinite(frameHour)) {
+      return;
+    }
+    readyFramesRef.current.add(frameHour as number);
+    inFlightFramesRef.current.delete(frameHour as number);
+    updateBufferSnapshot();
+  }, [tileUrlToHour, updateBufferSnapshot]);
+
   const isTileReady = useCallback((url: string): boolean => {
     const ts = readyTileUrlsRef.current.get(url);
     if (!ts) return false;
@@ -427,17 +554,19 @@ export default function App() {
 
   const handleFrameSettled = useCallback((loadedTileUrl: string) => {
     markTileReady(loadedTileUrl);
+    markFrameReady(loadedTileUrl);
     if (loadedTileUrl === latestTileUrlRef.current) {
       setSettledTileUrl(loadedTileUrl);
     }
-  }, [markTileReady]);
+  }, [markTileReady, markFrameReady]);
 
   const handleTileReady = useCallback((loadedTileUrl: string) => {
     markTileReady(loadedTileUrl);
+    markFrameReady(loadedTileUrl);
     if (loadedTileUrl === latestTileUrlRef.current) {
       setSettledTileUrl(loadedTileUrl);
     }
-  }, [markTileReady]);
+  }, [markTileReady, markFrameReady]);
 
   const handleFrameLoadingChange = useCallback((loadingTileUrl: string, isLoadingValue: boolean) => {
     if (isLoadingValue) {
@@ -466,6 +595,61 @@ export default function App() {
     }, FRAME_STATUS_BADGE_MS);
   }, []);
 
+  useEffect(() => {
+    requestGenerationRef.current += 1;
+  }, [model, run, variable, resolvedRunForRequests]);
+
+  useEffect(() => {
+    datasetGenerationRef.current += 1;
+    readyFramesRef.current.clear();
+    inFlightFramesRef.current.clear();
+    autoplayPrimedRef.current = false;
+    updateBufferSnapshot();
+  }, [model, resolvedRunForRequests, variable, updateBufferSnapshot]);
+
+  useEffect(() => {
+    updateBufferSnapshot();
+  }, [updateBufferSnapshot]);
+
+  useEffect(() => {
+    const inFlight = inFlightFramesRef.current;
+    const ready = readyFramesRef.current;
+    let changed = false;
+    for (const fh of prefetchHours) {
+      if (!ready.has(fh) && !inFlight.has(fh)) {
+        inFlight.add(fh);
+        changed = true;
+      }
+    }
+    if (changed) {
+      updateBufferSnapshot();
+    }
+  }, [prefetchHours, updateBufferSnapshot]);
+
+  const requestForecastHour = useCallback(
+    (requestedHour: number) => {
+      if (!isScrubbing) {
+        setTargetForecastHour(requestedHour);
+        return;
+      }
+
+      pendingScrubHourRef.current = requestedHour;
+      if (scrubRafRef.current !== null) {
+        return;
+      }
+
+      scrubRafRef.current = window.requestAnimationFrame(() => {
+        scrubRafRef.current = null;
+        const latestRequestedHour = pendingScrubHourRef.current;
+        if (!Number.isFinite(latestRequestedHour)) {
+          return;
+        }
+        setTargetForecastHour(latestRequestedHour as number);
+      });
+    },
+    [isScrubbing]
+  );
+
   // ── Fast-path: fire all discovery fetches in parallel on mount ─────────────────────────────
   // On a 50 ms RTT connection the standard sequential waterfall (models → regions →
   // runs + vars → frames) costs 200-400 ms before MapLibre can start loading tiles.
@@ -474,17 +658,18 @@ export default function App() {
   // the waterfall entirely. If any fetch fails we bail out silently and let the
   // sequential waterfall effects (which run in parallel on mount) finish normally.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
 
     Promise.all([
-      fetchModels(),
-      fetchRegionPresets(),
-      fetchRuns(DEFAULTS.model),
-      fetchVars(DEFAULTS.model, DEFAULTS.run),
-      fetchFrames(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable),
+      fetchModels({ signal: controller.signal }),
+      fetchRegionPresets({ signal: controller.signal }),
+      fetchRuns(DEFAULTS.model, { signal: controller.signal }),
+      fetchVars(DEFAULTS.model, DEFAULTS.run, { signal: controller.signal }),
+      fetchFrames(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable, { signal: controller.signal }),
     ])
       .then(([modelsData, regionPresetData, runsData, varsData, framesData]) => {
-        if (cancelled) return;
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
 
         // If the user changed a selector while requests were in-flight, bail out and
         // let the sequential waterfall (still running concurrently) handle things.
@@ -538,35 +723,39 @@ export default function App() {
         bootstrappedRef.current = true;
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
         // Fast-path failed silently. The sequential waterfall handles recovery.
       });
 
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
 
     async function loadModels() {
       setLoading(true);
       setError(null);
       try {
-        const data = await fetchModels();
-        if (cancelled) return;
+        const data = await fetchModels({ signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         const options = data.map((item) => ({ value: item.id, label: item.name || item.id }));
         setModels(options);
         const modelIds = options.map((opt) => opt.value);
         const nextModel = pickPreferred(modelIds, DEFAULTS.model);
         setModel(nextModel);
       } catch (err) {
-        if (cancelled) return;
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load models");
       } finally {
-        if (!cancelled) {
+        if (!controller.signal.aborted && generation === requestGenerationRef.current) {
           setLoading(false);
         }
       }
@@ -574,21 +763,22 @@ export default function App() {
 
     loadModels();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, []);
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
     if (!model) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
 
     async function loadRegions() {
       setError(null);
       try {
         void model;
-        const presets = await fetchRegionPresets();
-        if (cancelled) return;
+        const presets = await fetchRegionPresets({ signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setRegionPresets(presets);
         const ids = Object.keys(presets);
         const options = ids.map((id) => ({ value: id, label: makeRegionLabel(id, presets[id]) }));
@@ -597,31 +787,32 @@ export default function App() {
         const nextRegion = pickPreferred(regionIds, DEFAULTS.region);
         setRegion((prev) => (regionIds.includes(prev) ? prev : nextRegion));
       } catch (err) {
-        if (cancelled) return;
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load regions");
       }
     }
 
     loadRegions();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [model]);
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
     if (!model) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
 
     async function loadRunsAndVars() {
       setError(null);
       try {
-        const runData = await fetchRuns(model);
-        if (cancelled) return;
+        const runData = await fetchRuns(model, { signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
 
         const nextRun = run !== "latest" && runData.includes(run) ? run : "latest";
-        const varData = await fetchVars(model, nextRun);
-        if (cancelled) return;
+        const varData = await fetchVars(model, nextRun, { signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
 
         setRuns(runData);
 
@@ -638,14 +829,14 @@ export default function App() {
         const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
         setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
       } catch (err) {
-        if (cancelled) return;
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load runs/variables");
       }
     }
 
     loadRunsAndVars();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [model, run]);
 
@@ -657,13 +848,14 @@ export default function App() {
 
   useEffect(() => {
     if (!model || !variable) return;
-    let cancelled = false;
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
 
     async function loadFrames() {
       setError(null);
       try {
-        const rows = await fetchFrames(model, resolvedRunForRequests, variable);
-        if (cancelled) return;
+        const rows = await fetchFrames(model, resolvedRunForRequests, variable, { signal: controller.signal });
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setFrameRows(rows);
         const frameMeta = extractLegendMeta(rows[0] ?? null);
         const variableDisplayName = frameMeta?.display_name?.trim();
@@ -678,7 +870,7 @@ export default function App() {
         setForecastHour((prev) => nearestFrame(frames, prev));
         setTargetForecastHour((prev) => nearestFrame(frames, prev));
       } catch (err) {
-        if (cancelled) return;
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load frames");
         setFrameRows([]);
       }
@@ -686,23 +878,26 @@ export default function App() {
 
     loadFrames();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [model, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
     let cancelled = false;
+    let tickController: AbortController | null = null;
 
     const interval = window.setInterval(() => {
       if (document.hidden || !model || !variable) {
         return;
       }
+      tickController?.abort();
+      tickController = new AbortController();
       // Use `run` ("latest" when in live mode) rather than the resolved run ID so
       // the request hits the short-TTL ETag path and bypasses any stale immutable
       // browser-cache entries for the resolved run URL.
-      fetchFrames(model, run, variable)
+      fetchFrames(model, run, variable, { signal: tickController.signal })
         .then((rows) => {
-          if (cancelled) {
+          if (cancelled || tickController?.signal.aborted) {
             return;
           }
           setFrameRows(rows);
@@ -710,13 +905,17 @@ export default function App() {
           setForecastHour((prev) => nearestFrame(frames, prev));
           setTargetForecastHour((prev) => nearestFrame(frames, prev));
         })
-        .catch(() => {
+        .catch((err) => {
+          if (err instanceof DOMException && err.name === "AbortError") {
+            return;
+          }
           // Background refresh should not interrupt active UI.
         });
     }, 30000);
 
     return () => {
       cancelled = true;
+      tickController?.abort();
       window.clearInterval(interval);
     };
   }, [model, run, variable, resolvedRunForRequests]);
@@ -727,6 +926,15 @@ export default function App() {
     const interval = window.setInterval(() => {
       const currentIndex = frameHours.indexOf(forecastHour);
       if (currentIndex < 0) return;
+
+      const remainingAheadFrames = Math.max(0, frameHours.length - currentIndex - 1);
+      const minAheadRequired = Math.min(MIN_AHEAD_WHILE_PLAYING_FRAMES, remainingAheadFrames);
+      if (bufferSnapshot.bufferedAheadCount < minAheadRequired) {
+        setIsPlaying(false);
+        showTransientFrameStatus("Buffering frames");
+        autoplayPrimedRef.current = false;
+        return;
+      }
 
       const nextIndex = currentIndex + 1;
       if (nextIndex >= frameHours.length) {
@@ -776,7 +984,7 @@ export default function App() {
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, showTransientFrameStatus]);
+  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, showTransientFrameStatus, bufferSnapshot.bufferedAheadCount]);
 
   useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
@@ -800,6 +1008,9 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearFrameStatusTimer();
+      if (scrubRafRef.current !== null) {
+        window.cancelAnimationFrame(scrubRafRef.current);
+      }
     };
   }, [clearFrameStatusTimer]);
 
@@ -814,6 +1025,24 @@ export default function App() {
     }
     setForecastHour(nextTarget);
   }, [targetForecastHour, forecastHour, frameHours]);
+
+  const canStartPlayback = useMemo(() => {
+    if (loading || frameHours.length === 0) {
+      return false;
+    }
+    const minStart = Math.min(MIN_START_BUFFER_FRAMES, frameHours.length);
+    return bufferSnapshot.bufferedCount >= minStart;
+  }, [loading, frameHours.length, bufferSnapshot.bufferedCount]);
+
+  const showBufferStatus = useMemo(() => {
+    if (frameHours.length === 0) {
+      return false;
+    }
+    if (isScrubLoading) {
+      return true;
+    }
+    return bufferSnapshot.bufferedCount < bufferSnapshot.totalFrames;
+  }, [frameHours.length, isScrubLoading, bufferSnapshot.bufferedCount, bufferSnapshot.totalFrames]);
 
   return (
     <div className="flex h-full flex-col">
@@ -853,10 +1082,10 @@ export default function App() {
           onMapHoverEnd={onHoverEnd}
         />
 
-        {isScrubLoading && (
+        {showBufferStatus && (
           <div className="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
             <AlertCircle className="h-3.5 w-3.5" />
-            Loading...
+            {bufferSnapshot.statusText}
           </div>
         )}
 
@@ -891,12 +1120,13 @@ export default function App() {
         <BottomForecastControls
           forecastHour={forecastHour}
           availableFrames={frameHours}
-          onForecastHourChange={setTargetForecastHour}
+          onForecastHourChange={requestForecastHour}
           onScrubStateChange={setIsScrubbing}
           isPlaying={isPlaying}
           setIsPlaying={setIsPlaying}
           runDateTimeISO={runDateTimeISO}
           disabled={loading}
+          playDisabled={!canStartPlayback}
           transientStatus={frameStatusMessage}
         />
       </div>

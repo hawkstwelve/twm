@@ -19,6 +19,7 @@ type BottomForecastControlsProps = {
   setIsPlaying: (value: boolean) => void;
   runDateTimeISO: string | null;
   disabled: boolean;
+  playDisabled?: boolean;
   transientStatus?: string | null;
 };
 
@@ -61,9 +62,10 @@ export function BottomForecastControls({
   setIsPlaying,
   runDateTimeISO,
   disabled,
+  playDisabled = false,
   transientStatus,
 }: BottomForecastControlsProps) {
-  const DRAG_UPDATE_MS = 200;
+  const DRAG_UPDATE_MS = 80;
   const [previewHour, setPreviewHour] = useState<number | null>(null);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const lastDragEmitAtRef = useRef(0);
@@ -120,7 +122,7 @@ export function BottomForecastControls({
                   variant={isPlaying ? "default" : "outline"}
                   size="sm"
                   onClick={() => setIsPlaying(!isPlaying)}
-                  disabled={disabled || !hasFrames}
+                  disabled={disabled || !hasFrames || playDisabled}
                   aria-label={isPlaying ? "Pause animation" : "Play animation"}
                   className="h-10 w-10 p-0 transition-all duration-150 hover:scale-105 active:scale-95"
                 >
