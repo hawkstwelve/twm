@@ -9,6 +9,7 @@ Optional:
     --var tmp2m          # only one variable
     --overwrite          # regenerate existing .loop.webp files
     --workers 6          # parallel conversion workers
+    --output-root /tmp/twf_v3_loop_webp_cache
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from rasterio.enums import Resampling
 RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 DEFAULT_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 DEFAULT_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
+DEFAULT_LOOP_OUTPUT_ROOT = os.environ.get("TWF_V3_LOOP_CACHE_ROOT", "/tmp/twf_v3_loop_webp_cache")
 
 
 @dataclass
@@ -57,11 +59,23 @@ def parse_args() -> argparse.Namespace:
         help="Max output dimension in px (default: 1600)",
     )
     parser.add_argument("--workers", type=int, default=4, help="Parallel workers (default: 4)")
+    parser.add_argument(
+        "--output-root",
+        default=DEFAULT_LOOP_OUTPUT_ROOT,
+        help="Directory to write loop WebP cache (default: env TWF_V3_LOOP_CACHE_ROOT or /tmp/twf_v3_loop_webp_cache)",
+    )
     parser.add_argument("--overwrite", action="store_true", help="Regenerate existing .loop.webp files")
     return parser.parse_args()
 
 
-def discover_jobs(run_dir: Path, variable_filter: str | None, overwrite: bool) -> list[Job]:
+def discover_jobs(
+    run_dir: Path,
+    output_root: Path,
+    model: str,
+    run_id: str,
+    variable_filter: str | None,
+    overwrite: bool,
+) -> list[Job]:
     jobs: list[Job] = []
     if not run_dir.is_dir():
         return jobs
@@ -73,7 +87,7 @@ def discover_jobs(run_dir: Path, variable_filter: str | None, overwrite: bool) -
 
         for cog_path in sorted(var_dir.glob("fh*.rgba.cog.tif")):
             fh = cog_path.name.split(".")[0]
-            webp_path = var_dir / f"{fh}.loop.webp"
+            webp_path = output_root / model / run_id / variable / f"{fh}.loop.webp"
             if webp_path.is_file() and not overwrite:
                 continue
             jobs.append(Job(variable=variable, fh=fh, cog_path=cog_path, webp_path=webp_path))
@@ -129,7 +143,15 @@ def main() -> int:
         print(f"ERROR: run directory not found: {run_dir}")
         return 1
 
-    jobs = discover_jobs(run_dir, args.variable, args.overwrite)
+    output_root = Path(args.output_root)
+    jobs = discover_jobs(
+        run_dir=run_dir,
+        output_root=output_root,
+        model=args.model,
+        run_id=args.run,
+        variable_filter=args.variable,
+        overwrite=args.overwrite,
+    )
     if not jobs:
         msg_var = f" variable={args.variable}" if args.variable else ""
         print(f"No conversion jobs found for model={args.model} run={args.run}{msg_var}")
@@ -137,7 +159,8 @@ def main() -> int:
 
     print(
         f"Generating loop WebP frames: model={args.model} run={args.run} "
-        f"jobs={len(jobs)} workers={args.workers} quality={args.quality} max_dim={args.max_dim}"
+        f"jobs={len(jobs)} workers={args.workers} quality={args.quality} max_dim={args.max_dim} "
+        f"output_root={output_root}"
     )
 
     ok = 0

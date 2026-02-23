@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
 PUBLISHED_ROOT = DATA_ROOT / "published"
 MANIFESTS_ROOT = DATA_ROOT / "manifests"
+LOOP_CACHE_ROOT = Path(os.environ.get("TWF_V3_LOOP_CACHE_ROOT", "/tmp/twf_v3_loop_webp_cache"))
 
 MODEL_NAMES = {
     "hrrr": "HRRR",
@@ -293,7 +294,17 @@ def _loop_webp_path(model: str, run: str, var: str, fh: int) -> Path | None:
     resolved = _resolve_run(model, run)
     if resolved is None:
         return None
-    return _published_var_dir(model, resolved, var) / f"fh{fh:03d}.loop.webp"
+    return LOOP_CACHE_ROOT / model / resolved / var / f"fh{fh:03d}.loop.webp"
+
+
+def _legacy_loop_webp_path(model: str, run: str, var: str, fh: int) -> Path | None:
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return None
+    candidate = _published_var_dir(model, resolved, var) / f"fh{fh:03d}.loop.webp"
+    if candidate.is_file():
+        return candidate
+    return None
 
 
 def _ensure_loop_webp(cog_path: Path, out_path: Path) -> bool:
@@ -510,6 +521,15 @@ def get_loop_webp(model: str, run: str, var: str, fh: int):
     cog_path = _resolve_rgba_cog(model, resolved, var, fh)
     if cog_path is None:
         return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
+
+    legacy_path = _legacy_loop_webp_path(model, resolved, var, fh)
+    if legacy_path is not None:
+        cache_control = CACHE_HIT if run != "latest" else CACHE_MISS
+        return FileResponse(
+            path=str(legacy_path),
+            media_type="image/webp",
+            headers={"Cache-Control": cache_control},
+        )
 
     out_path = _loop_webp_path(model, resolved, var, fh)
     if out_path is None:
