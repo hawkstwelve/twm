@@ -17,7 +17,7 @@ import {
   fetchRuns,
   fetchVars,
 } from "@/lib/api";
-import { DEFAULTS, VARIABLE_LABELS } from "@/lib/config";
+import { DEFAULTS, getPlaybackBufferPolicy, isAnimationDebugEnabled, VARIABLE_LABELS } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
@@ -28,9 +28,6 @@ const AUTOPLAY_SKIP_WINDOW = 3;
 const FRAME_STATUS_BADGE_MS = 900;
 const READY_URL_TTL_MS = 30_000;
 const READY_URL_LIMIT = 160;
-const BUFFER_TARGET_FRAMES = 12;
-const MIN_START_BUFFER_FRAMES = 3;
-const MIN_AHEAD_WHILE_PLAYING_FRAMES = 6;
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -293,11 +290,14 @@ export default function App() {
   const readyTileUrlsRef = useRef<Map<string, number>>(new Map());
   const readyFramesRef = useRef<Set<number>>(new Set());
   const inFlightFramesRef = useRef<Set<number>>(new Set());
+  const inFlightStartedAtRef = useRef<Map<number, number>>(new Map());
+  const readyLatencyStatsRef = useRef({ totalMs: 0, count: 0 });
   const bufferVersionRef = useRef(0);
   const datasetGenerationRef = useRef(0);
   const requestGenerationRef = useRef(0);
   const scrubRafRef = useRef<number | null>(null);
   const pendingScrubHourRef = useRef<number | null>(null);
+  const animationDebugRef = useRef(isAnimationDebugEnabled());
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
   // Tracks current selector values so the async fast-path callback can guard against
@@ -367,6 +367,26 @@ export default function App() {
     return map;
   }, [frameHours, tileUrlForHour]);
 
+  const playbackPolicy = useMemo(
+    () =>
+      getPlaybackBufferPolicy({
+        totalFrames: frameHours.length,
+        autoplayTickMs: AUTOPLAY_TICK_MS,
+      }),
+    [frameHours.length]
+  );
+
+  const debugLog = useCallback((message: string, payload?: Record<string, unknown>) => {
+    if (!animationDebugRef.current) {
+      return;
+    }
+    if (payload) {
+      console.debug(`[animation] ${message}`, payload);
+      return;
+    }
+    console.debug(`[animation] ${message}`);
+  }, []);
+
   const updateBufferSnapshot = useCallback(() => {
     const totalFrames = frameHours.length;
     const ready = readyFramesRef.current;
@@ -394,6 +414,7 @@ export default function App() {
     for (const fh of inFlight) {
       if (!frameSet.has(fh) || ready.has(fh)) {
         inFlight.delete(fh);
+        inFlightStartedAtRef.current.delete(fh);
       }
     }
 
@@ -409,15 +430,22 @@ export default function App() {
 
     const bufferedCount = ready.size;
     const version = ++bufferVersionRef.current;
-    setBufferSnapshot({
+    const snapshot = {
       totalFrames,
       bufferedCount,
       bufferedAheadCount,
       inFlightCount: inFlight.size,
       statusText: `Buffered ${bufferedCount}/${totalFrames}`,
       version,
+    };
+    setBufferSnapshot(snapshot);
+    debugLog("buffer snapshot", {
+      bufferedCount,
+      bufferedAheadCount,
+      inFlightCount: inFlight.size,
+      totalFrames,
     });
-  }, [frameHours, forecastHour]);
+  }, [frameHours, forecastHour, debugLog]);
 
   const contourGeoJsonUrl = useMemo(() => {
     if (variable !== "tmp2m") {
@@ -450,7 +478,7 @@ export default function App() {
     const ready = readyFramesRef.current;
     const inFlight = inFlightFramesRef.current;
     const maxRequests = 4;
-    const targetReady = Math.min(frameHours.length, BUFFER_TARGET_FRAMES);
+    const targetReady = Math.min(frameHours.length, playbackPolicy.bufferTarget);
     if (ready.size + inFlight.size >= targetReady) {
       return [] as number[];
     }
@@ -484,7 +512,7 @@ export default function App() {
     }
 
     return candidates.slice(0, maxRequests);
-  }, [frameHours, forecastHour, bufferSnapshot.version]);
+  }, [frameHours, forecastHour, bufferSnapshot.version, playbackPolicy.bufferTarget]);
 
   const prefetchTileUrls = useMemo(() => {
     return prefetchHours.map((fh) => tileUrlForHour(fh));
@@ -527,8 +555,25 @@ export default function App() {
     }
     readyFramesRef.current.add(frameHour as number);
     inFlightFramesRef.current.delete(frameHour as number);
+
+    const startedAt = inFlightStartedAtRef.current.get(frameHour as number);
+    if (Number.isFinite(startedAt)) {
+      const deltaMs = Date.now() - (startedAt as number);
+      if (deltaMs >= 0) {
+        readyLatencyStatsRef.current.totalMs += deltaMs;
+        readyLatencyStatsRef.current.count += 1;
+      }
+      inFlightStartedAtRef.current.delete(frameHour as number);
+    }
+    const stats = readyLatencyStatsRef.current;
+    const avgReadyMs = stats.count > 0 ? Math.round(stats.totalMs / stats.count) : null;
+    debugLog("frame ready", {
+      fh: frameHour,
+      avgReadyMs,
+      samples: stats.count,
+    });
     updateBufferSnapshot();
-  }, [tileUrlToHour, updateBufferSnapshot]);
+  }, [tileUrlToHour, updateBufferSnapshot, debugLog]);
 
   const isTileReady = useCallback((url: string): boolean => {
     const ts = readyTileUrlsRef.current.get(url);
@@ -603,9 +648,17 @@ export default function App() {
     datasetGenerationRef.current += 1;
     readyFramesRef.current.clear();
     inFlightFramesRef.current.clear();
+    inFlightStartedAtRef.current.clear();
+    readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
+    debugLog("dataset generation changed", {
+      generation: datasetGenerationRef.current,
+      model,
+      run: resolvedRunForRequests,
+      variable,
+    });
     updateBufferSnapshot();
-  }, [model, resolvedRunForRequests, variable, updateBufferSnapshot]);
+  }, [model, resolvedRunForRequests, variable, updateBufferSnapshot, debugLog]);
 
   useEffect(() => {
     updateBufferSnapshot();
@@ -618,6 +671,7 @@ export default function App() {
     for (const fh of prefetchHours) {
       if (!ready.has(fh) && !inFlight.has(fh)) {
         inFlight.add(fh);
+        inFlightStartedAtRef.current.set(fh, Date.now());
         changed = true;
       }
     }
@@ -928,11 +982,17 @@ export default function App() {
       if (currentIndex < 0) return;
 
       const remainingAheadFrames = Math.max(0, frameHours.length - currentIndex - 1);
-      const minAheadRequired = Math.min(MIN_AHEAD_WHILE_PLAYING_FRAMES, remainingAheadFrames);
+      const minAheadRequired = Math.min(playbackPolicy.minAheadWhilePlaying, remainingAheadFrames);
       if (bufferSnapshot.bufferedAheadCount < minAheadRequired) {
         setIsPlaying(false);
         showTransientFrameStatus("Buffering frames");
         autoplayPrimedRef.current = false;
+        debugLog("autopause low ahead buffer", {
+          ahead: bufferSnapshot.bufferedAheadCount,
+          minAheadRequired,
+          totalFrames: frameHours.length,
+          fh: forecastHour,
+        });
         return;
       }
 
@@ -984,7 +1044,17 @@ export default function App() {
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
-  }, [isPlaying, frameHours, forecastHour, isTileReady, tileUrlForHour, showTransientFrameStatus, bufferSnapshot.bufferedAheadCount]);
+  }, [
+    isPlaying,
+    frameHours,
+    forecastHour,
+    isTileReady,
+    tileUrlForHour,
+    showTransientFrameStatus,
+    bufferSnapshot.bufferedAheadCount,
+    playbackPolicy.minAheadWhilePlaying,
+    debugLog,
+  ]);
 
   useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
@@ -1030,9 +1100,9 @@ export default function App() {
     if (loading || frameHours.length === 0) {
       return false;
     }
-    const minStart = Math.min(MIN_START_BUFFER_FRAMES, frameHours.length);
+    const minStart = Math.min(playbackPolicy.minStartBuffer, frameHours.length);
     return bufferSnapshot.bufferedCount >= minStart;
-  }, [loading, frameHours.length, bufferSnapshot.bufferedCount]);
+  }, [loading, frameHours.length, bufferSnapshot.bufferedCount, playbackPolicy.minStartBuffer]);
 
   const showBufferStatus = useMemo(() => {
     if (frameHours.length === 0) {
