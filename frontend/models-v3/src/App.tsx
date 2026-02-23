@@ -1634,8 +1634,13 @@ export default function App() {
     if (readyTileUrl !== tileUrl) {
       return;
     }
+    debugLog("tiles visual swap committed", {
+      tileUrl: readyTileUrl,
+      mode: renderMode,
+      visibleMode: "tiles",
+    });
     setVisibleRenderMode("tiles");
-  }, [renderMode, tileUrl]);
+  }, [renderMode, tileUrl, debugLog]);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {
