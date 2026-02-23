@@ -47,7 +47,8 @@ const HIDDEN_SWAP_BUFFER_OPACITY = 0.001;
 // Prefetch layers are only warmed while an active prefetch URL is being requested.
 const HIDDEN_PREFETCH_OPACITY = 0;
 const WARM_PREFETCH_OPACITY = 0.001;
-const PREFETCH_TILE_EVENT_BUDGET = 2;
+const PREFETCH_TILE_EVENT_BUDGET = 1;
+const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -490,9 +491,11 @@ export function MapCanvas({
       minEventCount: number,
       modeValue: PlaybackMode,
       onReady: () => void,
-      onTimeout?: () => void
+      onTimeout?: () => void,
+      timeoutMsOverride?: number
     ) => {
-      const timeoutMs = modeValue === "autoplay" ? AUTOPLAY_SWAP_TIMEOUT_MS : SCRUB_SWAP_TIMEOUT_MS;
+      const timeoutMs = timeoutMsOverride
+        ?? (modeValue === "autoplay" ? AUTOPLAY_SWAP_TIMEOUT_MS : SCRUB_SWAP_TIMEOUT_MS);
       let done = false;
       let timeoutId: number | null = null;
 
@@ -863,7 +866,8 @@ export function MapCanvas({
             token,
           });
           setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
-        }
+        },
+        PREFETCH_READY_TIMEOUT_MS
       );
 
       if (cleanup) {
