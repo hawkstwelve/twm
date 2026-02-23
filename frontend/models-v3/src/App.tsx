@@ -29,6 +29,8 @@ const FRAME_STATUS_BADGE_MS = 900;
 const READY_URL_TTL_MS = 30_000;
 const READY_URL_LIMIT = 160;
 const INFLIGHT_FRAME_TTL_MS = 12_000;
+const PRELOAD_START_RATIO = 0.7;
+const PRELOAD_STALL_MS = 8000;
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -302,6 +304,10 @@ export default function App() {
   const animationDebugRef = useRef(isAnimationDebugEnabled());
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
+  const preloadProgressRef = useRef({
+    lastBufferedCount: 0,
+    lastProgressAt: 0,
+  });
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -673,6 +679,10 @@ export default function App() {
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
     setIsPreloadingForPlay(false);
+    preloadProgressRef.current = {
+      lastBufferedCount: 0,
+      lastProgressAt: Date.now(),
+    };
     debugLog("dataset generation changed", {
       generation: datasetGenerationRef.current,
       model,
@@ -1113,13 +1123,44 @@ export default function App() {
       setIsPreloadingForPlay(false);
       return;
     }
-    if (bufferSnapshot.bufferedCount < frameHours.length) {
+
+    const bufferedCount = Math.max(0, Math.min(bufferSnapshot.bufferedCount, frameHours.length));
+    const progress = preloadProgressRef.current;
+    const now = Date.now();
+
+    if (progress.lastProgressAt <= 0) {
+      progress.lastProgressAt = now;
+    }
+    if (bufferedCount > progress.lastBufferedCount) {
+      progress.lastBufferedCount = bufferedCount;
+      progress.lastProgressAt = now;
+    }
+
+    const preloadStartThreshold = Math.min(
+      frameHours.length,
+      Math.max(playbackPolicy.minStartBuffer, Math.ceil(frameHours.length * PRELOAD_START_RATIO))
+    );
+    const stalledMs = now - progress.lastProgressAt;
+    const canStartByThreshold = bufferedCount >= preloadStartThreshold;
+    const canStartByStall = bufferedCount >= playbackPolicy.minStartBuffer && stalledMs >= PRELOAD_STALL_MS;
+
+    if (!canStartByThreshold && !canStartByStall) {
       return;
     }
+
     setIsPreloadingForPlay(false);
     autoplayPrimedRef.current = false;
+    if (canStartByStall && !canStartByThreshold) {
+      showTransientFrameStatus("Starting with partial buffer");
+    }
     setIsPlaying(true);
-  }, [isPreloadingForPlay, bufferSnapshot.bufferedCount, frameHours.length]);
+  }, [
+    isPreloadingForPlay,
+    bufferSnapshot.bufferedCount,
+    frameHours.length,
+    playbackPolicy.minStartBuffer,
+    showTransientFrameStatus,
+  ]);
 
   useEffect(() => {
     if (frameHours.length === 0 && isPlaying) {
@@ -1149,6 +1190,10 @@ export default function App() {
       return;
     }
     setIsPlaying(false);
+    preloadProgressRef.current = {
+      lastBufferedCount: Math.max(0, Math.min(bufferSnapshot.bufferedCount, frameHours.length)),
+      lastProgressAt: Date.now(),
+    };
     setIsPreloadingForPlay(true);
     showTransientFrameStatus("Loading frames");
   }, [loading, frameHours.length, bufferSnapshot.bufferedCount, showTransientFrameStatus]);
