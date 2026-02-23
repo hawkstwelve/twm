@@ -55,6 +55,19 @@ _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 _JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
 LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
+LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "86"))
+LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
+
+LOOP_TIER_CONFIG: dict[int, dict[str, int]] = {
+    0: {
+        "max_dim": LOOP_WEBP_MAX_DIM,
+        "quality": LOOP_WEBP_QUALITY,
+    },
+    1: {
+        "max_dim": LOOP_WEBP_TIER1_MAX_DIM,
+        "quality": LOOP_WEBP_TIER1_QUALITY,
+    },
+}
 
 CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
@@ -290,14 +303,16 @@ def _resolve_rgba_cog(model: str, run: str, var: str, fh: int) -> Path | None:
     return None
 
 
-def _loop_webp_path(model: str, run: str, var: str, fh: int) -> Path | None:
+def _loop_webp_path(model: str, run: str, var: str, fh: int, *, tier: int) -> Path | None:
     resolved = _resolve_run(model, run)
     if resolved is None:
         return None
-    return LOOP_CACHE_ROOT / model / resolved / var / f"fh{fh:03d}.loop.webp"
+    return LOOP_CACHE_ROOT / model / resolved / var / f"tier{tier}" / f"fh{fh:03d}.loop.webp"
 
 
-def _legacy_loop_webp_path(model: str, run: str, var: str, fh: int) -> Path | None:
+def _legacy_loop_webp_path(model: str, run: str, var: str, fh: int, *, tier: int) -> Path | None:
+    if tier != 0:
+        return None
     resolved = _resolve_run(model, run)
     if resolved is None:
         return None
@@ -307,9 +322,16 @@ def _legacy_loop_webp_path(model: str, run: str, var: str, fh: int) -> Path | No
     return None
 
 
-def _ensure_loop_webp(cog_path: Path, out_path: Path) -> bool:
+def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
     if out_path.is_file():
         return True
+
+    tier_cfg = LOOP_TIER_CONFIG.get(tier)
+    if tier_cfg is None:
+        return False
+
+    max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
+    quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(suffix=".webp", delete=False, dir=str(out_path.parent)) as tmp:
@@ -323,7 +345,7 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path) -> bool:
             if max_dim <= 0:
                 return False
 
-            scale = min(1.0, float(LOOP_WEBP_MAX_DIM) / float(max_dim))
+            scale = min(1.0, float(max_dim_cfg) / float(max_dim))
             out_h = max(1, int(round(src_h * scale)))
             out_w = max(1, int(round(src_w * scale)))
 
@@ -335,7 +357,7 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path) -> bool:
 
         rgba = np.moveaxis(data, 0, -1)
         image = Image.fromarray(rgba, mode="RGBA")
-        image.save(tmp_path, format="WEBP", quality=LOOP_WEBP_QUALITY, method=6)
+        image.save(tmp_path, format="WEBP", quality=quality_cfg, method=6)
         tmp_path.replace(out_path)
         return True
     except Exception:
@@ -492,6 +514,8 @@ def list_frames(request: Request, model: str, run: str, var: str):
                 "has_cog": True,
                 "run": resolved,
                 "loop_webp_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp",
+                "loop_webp_tier0_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=0",
+                "loop_webp_tier1_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=1",
                 "meta": {"meta": meta},
             }
         )
@@ -513,7 +537,13 @@ def list_frames(request: Request, model: str, run: str, var: str):
 
 
 @app.get("/api/v3/{model}/{run}/{var}/{fh:int}/loop.webp")
-def get_loop_webp(model: str, run: str, var: str, fh: int):
+def get_loop_webp(
+    model: str,
+    run: str,
+    var: str,
+    fh: int,
+    tier: int = Query(0, ge=0, le=1, description="Loop tier (0=default, 1=high-res)"),
+):
     resolved = _resolve_run(model, run)
     if resolved is None:
         return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
@@ -522,7 +552,7 @@ def get_loop_webp(model: str, run: str, var: str, fh: int):
     if cog_path is None:
         return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
 
-    legacy_path = _legacy_loop_webp_path(model, resolved, var, fh)
+    legacy_path = _legacy_loop_webp_path(model, resolved, var, fh, tier=tier)
     if legacy_path is not None:
         cache_control = CACHE_HIT if run != "latest" else CACHE_MISS
         return FileResponse(
@@ -531,11 +561,11 @@ def get_loop_webp(model: str, run: str, var: str, fh: int):
             headers={"Cache-Control": cache_control},
         )
 
-    out_path = _loop_webp_path(model, resolved, var, fh)
+    out_path = _loop_webp_path(model, resolved, var, fh, tier=tier)
     if out_path is None:
         return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
 
-    if not _ensure_loop_webp(cog_path, out_path):
+    if not _ensure_loop_webp(cog_path, out_path, tier=tier):
         return Response(status_code=500, headers={"Cache-Control": CACHE_MISS})
 
     cache_control = CACHE_HIT if run != "latest" else CACHE_MISS

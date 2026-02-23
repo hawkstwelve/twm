@@ -445,7 +445,7 @@ export default function App() {
     const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
     const map = new Map<number, string>();
     for (const [fh, row] of frameByHour.entries()) {
-      const loopUrl = row?.loop_webp_url;
+      const loopUrl = row?.loop_webp_url ?? row?.loop_webp_tier0_url;
       if (!loopUrl) {
         continue;
       }
@@ -457,12 +457,54 @@ export default function App() {
     return map;
   }, [frameByHour]);
 
+  const loopTier0UrlByHour = useMemo(() => {
+    const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
+    const map = new Map<number, string>();
+    for (const [fh, row] of frameByHour.entries()) {
+      const loopUrl = row?.loop_webp_tier0_url ?? row?.loop_webp_url;
+      if (!loopUrl) {
+        continue;
+      }
+      const absolute = /^https?:\/\//i.test(loopUrl)
+        ? loopUrl
+        : `${apiRoot}${loopUrl.startsWith("/") ? "" : "/"}${loopUrl}`;
+      map.set(fh, absolute);
+    }
+    return map;
+  }, [frameByHour]);
+
+  const loopTier1UrlByHour = useMemo(() => {
+    const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
+    const map = new Map<number, string>();
+    for (const [fh, row] of frameByHour.entries()) {
+      const loopUrl = row?.loop_webp_tier1_url;
+      if (!loopUrl) {
+        continue;
+      }
+      const absolute = /^https?:\/\//i.test(loopUrl)
+        ? loopUrl
+        : `${apiRoot}${loopUrl.startsWith("/") ? "" : "/"}${loopUrl}`;
+      map.set(fh, absolute);
+    }
+    return map;
+  }, [frameByHour]);
+
+  const resolveLoopUrlForHour = useCallback(
+    (fh: number, preferredMode: RenderModeState): string | null => {
+      if (preferredMode === "webp_tier1") {
+        return loopTier1UrlByHour.get(fh) ?? loopTier0UrlByHour.get(fh) ?? null;
+      }
+      return loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh) ?? null;
+    },
+    [loopTier0UrlByHour, loopTier1UrlByHour, loopUrlByHour]
+  );
+
   const canUseLoopPlayback = useMemo(() => {
     if (frameHours.length <= 1) {
       return false;
     }
-    return frameHours.every((fh) => Boolean(loopUrlByHour.get(fh)));
-  }, [frameHours, loopUrlByHour]);
+    return frameHours.every((fh) => Boolean(loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh)));
+  }, [frameHours, loopTier0UrlByHour, loopUrlByHour]);
 
   useEffect(() => {
     mapZoomRef.current = mapZoom;
@@ -522,7 +564,7 @@ export default function App() {
       return;
     }
 
-    const url = loopUrlByHour.get(forecastHour);
+    const url = resolveLoopUrlForHour(forecastHour, renderMode);
     if (!url) {
       setVisibleRenderMode("tiles");
       return;
@@ -537,7 +579,7 @@ export default function App() {
         setVisibleRenderMode(renderMode);
       }
     });
-  }, [renderMode, visibleRenderMode, canUseLoopPlayback, forecastHour, loopUrlByHour]);
+  }, [renderMode, visibleRenderMode, canUseLoopPlayback, forecastHour, resolveLoopUrlForHour]);
 
   const isLoopPlaybackLocked = renderMode !== "tiles" && canUseLoopPlayback && (isPlaying || isLoopPreloading);
   const isLoopDisplayActive = visibleRenderMode !== "tiles" && canUseLoopPlayback;
@@ -1021,7 +1063,7 @@ export default function App() {
     };
 
     frameHours.forEach((fh) => {
-      const url = loopUrlByHour.get(fh);
+      const url = resolveLoopUrlForHour(fh, renderMode);
       if (!url) {
         mark(fh, false);
         return;
@@ -1040,7 +1082,7 @@ export default function App() {
     isLoopPreloading,
     canUseLoopPlayback,
     frameHours,
-    loopUrlByHour,
+    resolveLoopUrlForHour,
     showTransientFrameStatus,
     renderMode,
   ]);
@@ -1689,7 +1731,7 @@ export default function App() {
     : isLoopPreloading
       ? `Loading loop frames ${preloadBufferedCount}/${preloadTotal}`
       : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
-  const activeLoopUrl = isLoopDisplayActive ? (loopUrlByHour.get(forecastHour) ?? null) : null;
+  const activeLoopUrl = isLoopDisplayActive ? resolveLoopUrlForHour(forecastHour, visibleRenderMode) : null;
 
   return (
     <div className="flex h-full flex-col">

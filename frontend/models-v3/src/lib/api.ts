@@ -47,6 +47,8 @@ export type FrameRow = {
   run?: string;
   tile_url_template?: string;
   loop_webp_url?: string;
+  loop_webp_tier0_url?: string;
+  loop_webp_tier1_url?: string;
   meta?: {
     meta?: LegendMeta | null;
   } | null;
