@@ -654,12 +654,7 @@ export default function App() {
         } else {
           const retryDelayMs = FRAME_RETRY_BASE_MS * 2 ** (nextRetry - 1);
           frameNextRetryAtRef.current.set(fh, now + retryDelayMs);
-          debugLog("inflight frame expired", {
-            fh,
-            ttlMs: INFLIGHT_FRAME_TTL_MS,
-            retries: nextRetry,
-            retryDelayMs,
-          });
+          void retryDelayMs;
         }
       }
     }
@@ -697,16 +692,6 @@ export default function App() {
       version,
     };
     setBufferSnapshot(snapshot);
-    debugLog("buffer snapshot", {
-      bufferedCount,
-      bufferedAheadCount,
-      terminalCount,
-      terminalAheadCount,
-      failedCount,
-      inFlightCount: inFlight.size,
-      queueDepth,
-      totalFrames,
-    });
   }, [frameHours, forecastHour, debugLog]);
 
   const contourGeoJsonUrl = useMemo(() => {
@@ -861,13 +846,6 @@ export default function App() {
       }
       inFlightStartedAtRef.current.delete(frameHour as number);
     }
-    const stats = readyLatencyStatsRef.current;
-    const avgReadyMs = stats.count > 0 ? Math.round(stats.totalMs / stats.count) : null;
-    debugLog("frame ready", {
-      fh: frameHour,
-      avgReadyMs,
-      samples: stats.count,
-    });
     updateBufferSnapshot();
   }, [tileUrlToHour, updateBufferSnapshot, debugLog]);
 
@@ -964,12 +942,6 @@ export default function App() {
       lastBufferedCount: 0,
       lastProgressAt: Date.now(),
     };
-    debugLog("dataset generation changed", {
-      generation: datasetGenerationRef.current,
-      model,
-      run: resolvedRunForRequests,
-      variable,
-    });
     const version = ++bufferVersionRef.current;
     setBufferSnapshot({
       totalFrames: frameHours.length,
@@ -988,9 +960,16 @@ export default function App() {
     resolvedRunForRequests,
     variable,
     frameHours.length,
-    debugLog,
     webpDefaultEnabled,
   ]);
+
+  useEffect(() => {
+    debugLog("render mode transition", {
+      mode: renderMode,
+      visibleMode: visibleRenderMode,
+      canUseLoopPlayback,
+    });
+  }, [renderMode, visibleRenderMode, canUseLoopPlayback, debugLog]);
 
   useEffect(() => {
     if (!isLoopPreloading) {

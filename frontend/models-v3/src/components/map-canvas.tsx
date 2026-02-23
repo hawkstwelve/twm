@@ -749,6 +749,9 @@ export function MapCanvas({
 
     const handleZoomEnd = () => {
       gestureActiveRef.current = false;
+      const zoom = map.getZoom();
+      const bucket = Math.max(0, Math.floor(zoom));
+      console.debug("[map] zoom", { zoom: Number(zoom.toFixed(2)), bucket });
       emitRoutingSignal();
     };
 
@@ -821,7 +824,6 @@ export function MapCanvas({
     sourceRequestTokenRef.current.set(inactiveSourceId, nextSwapRequestToken);
     const swapSourceEventBaseline = sourceEventCountRef.current.get(inactiveSourceId) ?? 0;
     const token = ++swapTokenRef.current;
-    console.debug("[map] swap start", { sourceId: inactiveSourceId, tileUrl, mode, token });
 
     const finishSwap = (skipSettleNotify = false) => {
       if (token !== swapTokenRef.current) {
@@ -855,7 +857,6 @@ export function MapCanvas({
         runMicroCrossfade(map, previousActive, inactiveBuffer, opacity, token);
       }
       onFrameLoadingChange?.(tileUrl, false);
-      console.debug("[map] swap end", { sourceId: sourceId(inactiveBuffer), tileUrl, mode, token });
       if (!skipSettleNotify) {
         settledCleanup = notifySettled(map, sourceId(inactiveBuffer), tileUrl);
       }
