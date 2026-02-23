@@ -163,7 +163,7 @@ function styleFor(
       prefetchSourceId(index + 1),
       {
         type: "raster",
-        tiles: [overlayUrl],
+        tiles: [TRANSPARENT_PIXEL_DATA_URL],
         tileSize: 512,
       },
     ])
@@ -172,6 +172,7 @@ function styleFor(
     id: prefetchLayerId(index + 1),
     type: "raster" as const,
     source: prefetchSourceId(index + 1),
+    layout: { visibility: "none" as const },
     paint: overlayPaint,
   }));
 
@@ -909,6 +910,7 @@ export function MapCanvas({
       if (!url) {
         prefetchUrlsRef.current[idx] = "";
         setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
+        setLayerVisibility(map, prefetchLayerId(idx + 1), false);
         return;
       }
 
@@ -917,7 +919,9 @@ export function MapCanvas({
       }
 
       prefetchUrlsRef.current[idx] = url;
-  setLayerOpacity(map, prefetchLayerId(idx + 1), WARM_PREFETCH_OPACITY);
+      // Show the layer so MapLibre actually requests the tiles (visibility:none skips them).
+      setLayerVisibility(map, prefetchLayerId(idx + 1), true);
+      setLayerOpacity(map, prefetchLayerId(idx + 1), WARM_PREFETCH_OPACITY);
       source.setTiles([url]);
       const prefetchSource = prefetchSourceId(idx + 1);
       sourceRequestedUrlRef.current.set(prefetchSource, url);
@@ -943,7 +947,10 @@ export function MapCanvas({
           // Important: App.tsx autoplay waits on URLs being marked ready.
           // Prefetch sources should contribute to that readiness cache.
           onTileReady?.(url);
+          // Tiles are now in the browser cache — hide the layer so MapLibre stops
+          // issuing new requests when the viewport changes.
           setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
+          setLayerVisibility(map, prefetchLayerId(idx + 1), false);
         },
         () => {
           if (token !== prefetchTokenRef.current) {
@@ -960,6 +967,7 @@ export function MapCanvas({
             token,
           });
           setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
+          setLayerVisibility(map, prefetchLayerId(idx + 1), false);
         },
         PREFETCH_READY_TIMEOUT_MS
       );
@@ -996,9 +1004,8 @@ export function MapCanvas({
     setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m" && !loopActive);
     setLayerVisibility(map, layerId("a"), true);
     setLayerVisibility(map, layerId("b"), true);
-    for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
-      setLayerVisibility(map, prefetchLayerId(idx), true);
-    }
+    // Note: prefetch layer visibility is managed solely by the prefetch-tiles effect.
+    // Do NOT force them visible here — that would cause tile requests on every zoom change.
     enforceLayerOrder(map);
   }, [isLoaded, loopImageUrl, loopActive, variable, enforceLayerOrder]);
 

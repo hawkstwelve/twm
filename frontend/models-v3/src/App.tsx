@@ -589,9 +589,12 @@ export default function App() {
     return isMobile ? WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES : WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES;
   }, []);
 
-  const loopCacheKey = useCallback((fh: number, mode: RenderModeState) => {
-    return `${mode}:${fh}`;
-  }, []);
+  const loopCacheKey = useCallback(
+    (fh: number, mode: RenderModeState) => {
+      return `${model}:${resolvedRunForRequests}:${variable}:${mode}:${fh}`;
+    },
+    [model, resolvedRunForRequests, variable]
+  );
 
   const upsertLoopDecodedCache = useCallback(
     (key: string, bitmap: ImageBitmap, bytes: number) => {
@@ -1701,8 +1704,13 @@ export default function App() {
       fetchRuns(DEFAULTS.model, { signal: controller.signal }),
       fetchVars(DEFAULTS.model, DEFAULTS.run, { signal: controller.signal }),
       fetchFrames(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable, { signal: controller.signal }),
+      // Pre-fetch the loop manifest in parallel so the WebP tier is known as soon
+      // as frame data arrives, eliminating a sequential 6th RTT on initial load.
+      fetchLoopManifest(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable, { signal: controller.signal }).catch(
+        () => null
+      ),
     ])
-      .then(([modelsData, regionPresetData, runsData, varsData, framesData]) => {
+      .then(([modelsData, regionPresetData, runsData, varsData, framesData, manifestData]) => {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
 
         // If the user changed a selector while requests were in-flight, bail out and
@@ -1751,6 +1759,11 @@ export default function App() {
         const frames = framesData.map((row) => Number(row.fh)).filter(Number.isFinite);
         setForecastHour((prev) => nearestFrame(frames, prev));
         setTargetForecastHour((prev) => nearestFrame(frames, prev));
+
+        // Apply the loop manifest fetched in parallel — avoids a sequential 6th RTT.
+        if (manifestData) {
+          setLoopManifest(manifestData);
+        }
 
         // Signal that all discovery state has been committed — waterfall effects will
         // see this flag and skip their own fetches.
@@ -1879,6 +1892,7 @@ export default function App() {
     setLoopManifest(null);
     setForecastHour(0);
     setTargetForecastHour(0);
+    setLoopDisplayHour(null);
   }, [model, run, variable]);
 
   useEffect(() => {
@@ -2231,6 +2245,15 @@ export default function App() {
       setIsScrubbing(false);
     }
   }, [isPlaying, isScrubbing]);
+
+  // When the user starts scrubbing, cancel any pending buffering-recovery auto-restart
+  // so it cannot preempt the in-progress scrub and re-lock the slider.
+  useEffect(() => {
+    if (isScrubbing) {
+      setIsLoopAutoplayBuffering(false);
+      setIsLoopPreloading(false);
+    }
+  }, [isScrubbing]);
 
   useEffect(() => {
     return () => {
