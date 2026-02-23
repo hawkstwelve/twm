@@ -4,11 +4,11 @@ export const TILES_BASE = "https://api.sodakweather.com";
 
 export const DEFAULTS = {
   model: "hrrr",
-  region: "pnw",
+  region: "conus",
   run: "latest",
   variable: "tmp2m",
-  center: [47.6, -122.3] as [number, number],
-  zoom: 6,
+  center: [39.83, -98.58] as [number, number],
+  zoom: 4,
   overlayOpacity: 0.9,
 };
 
