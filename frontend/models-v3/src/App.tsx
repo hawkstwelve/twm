@@ -28,6 +28,7 @@ const AUTOPLAY_SKIP_WINDOW = 3;
 const FRAME_STATUS_BADGE_MS = 900;
 const READY_URL_TTL_MS = 30_000;
 const READY_URL_LIMIT = 160;
+const INFLIGHT_FRAME_TTL_MS = 12_000;
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -415,6 +416,13 @@ export default function App() {
       if (!frameSet.has(fh) || ready.has(fh)) {
         inFlight.delete(fh);
         inFlightStartedAtRef.current.delete(fh);
+        continue;
+      }
+      const startedAt = inFlightStartedAtRef.current.get(fh);
+      if (Number.isFinite(startedAt) && Date.now() - (startedAt as number) > INFLIGHT_FRAME_TTL_MS) {
+        inFlight.delete(fh);
+        inFlightStartedAtRef.current.delete(fh);
+        debugLog("inflight frame expired", { fh, ttlMs: INFLIGHT_FRAME_TTL_MS });
       }
     }
 
@@ -642,7 +650,7 @@ export default function App() {
 
   useEffect(() => {
     requestGenerationRef.current += 1;
-  }, [model, run, variable, resolvedRunForRequests]);
+  }, [model, run, variable]);
 
   useEffect(() => {
     datasetGenerationRef.current += 1;
@@ -809,7 +817,7 @@ export default function App() {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setError(err instanceof Error ? err.message : "Failed to load models");
       } finally {
-        if (!controller.signal.aborted && generation === requestGenerationRef.current) {
+        if (!controller.signal.aborted) {
           setLoading(false);
         }
       }
