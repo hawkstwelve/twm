@@ -17,7 +17,7 @@ import {
   fetchRuns,
   fetchVars,
 } from "@/lib/api";
-import { DEFAULTS, getPlaybackBufferPolicy, isAnimationDebugEnabled, VARIABLE_LABELS } from "@/lib/config";
+import { API_BASE, DEFAULTS, getPlaybackBufferPolicy, isAnimationDebugEnabled, VARIABLE_LABELS } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
@@ -34,6 +34,9 @@ const PRELOAD_STALL_MS = 8000;
 const FRAME_MAX_RETRIES = 3;
 const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
+const LOOP_PRELOAD_MIN_READY = 2;
+
+type PlaybackRenderMode = "tiles" | "loop";
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -281,6 +284,10 @@ export default function App() {
   const [targetForecastHour, setTargetForecastHour] = useState(0);
   const [zoomBucket, setZoomBucket] = useState(Math.round(DEFAULTS.zoom));
   const [isPlaying, setIsPlaying] = useState(false);
+  const [playbackRenderMode, setPlaybackRenderMode] = useState<PlaybackRenderMode>("loop");
+  const [isLoopPreloading, setIsLoopPreloading] = useState(false);
+  const [loopProgress, setLoopProgress] = useState({ total: 0, ready: 0, failed: 0 });
+  const [loopBaseForecastHour, setLoopBaseForecastHour] = useState<number | null>(null);
   const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
@@ -324,6 +331,9 @@ export default function App() {
     lastBufferedCount: 0,
     lastProgressAt: 0,
   });
+  const loopPreloadTokenRef = useRef(0);
+  const loopReadyHoursRef = useRef<Set<number>>(new Set());
+  const loopFailedHoursRef = useRef<Set<number>>(new Set());
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -364,6 +374,34 @@ export default function App() {
     return buildRunOptions(runs, latestRunId);
   }, [runs, latestRunId]);
 
+  const loopUrlByHour = useMemo(() => {
+    const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
+    const map = new Map<number, string>();
+    for (const [fh, row] of frameByHour.entries()) {
+      const loopUrl = row?.loop_webp_url;
+      if (!loopUrl) {
+        continue;
+      }
+      const absolute = /^https?:\/\//i.test(loopUrl)
+        ? loopUrl
+        : `${apiRoot}${loopUrl.startsWith("/") ? "" : "/"}${loopUrl}`;
+      map.set(fh, absolute);
+    }
+    return map;
+  }, [frameByHour]);
+
+  const canUseLoopPlayback = useMemo(() => {
+    if (frameHours.length <= 1) {
+      return false;
+    }
+    return frameHours.every((fh) => Boolean(loopUrlByHour.get(fh)));
+  }, [frameHours, loopUrlByHour]);
+
+  const isLoopActive = playbackRenderMode === "loop" && (isPlaying || isLoopPreloading);
+  const mapForecastHour = isLoopActive && Number.isFinite(loopBaseForecastHour)
+    ? (loopBaseForecastHour as number)
+    : forecastHour;
+
   const tileUrlForHour = useCallback(
     (fh: number): string => {
       const fallbackFh = frameHours[0] ?? 0;
@@ -380,8 +418,8 @@ export default function App() {
   );
 
   const tileUrl = useMemo(() => {
-    return tileUrlForHour(forecastHour);
-  }, [tileUrlForHour, forecastHour]);
+    return tileUrlForHour(mapForecastHour);
+  }, [tileUrlForHour, mapForecastHour]);
 
   const tileUrlToHour = useMemo(() => {
     const map = new Map<string, number>();
@@ -542,10 +580,10 @@ export default function App() {
       model,
       run: resolvedRunForRequests,
       varKey: variable,
-      fh: forecastHour,
+      fh: mapForecastHour,
       key: "iso32f",
     });
-  }, [currentFrame, model, resolvedRunForRequests, variable, forecastHour]);
+  }, [currentFrame, model, resolvedRunForRequests, variable, mapForecastHour]);
 
   const legend = useMemo(() => {
     const normalizedMeta = extractLegendMeta(currentFrame) ?? extractLegendMeta(frameRows[0] ?? null);
@@ -553,7 +591,7 @@ export default function App() {
   }, [currentFrame, frameRows, opacity]);
 
   const prefetchHours = useMemo(() => {
-    if (frameHours.length === 0) {
+    if (isLoopActive || frameHours.length === 0) {
       return [] as number[];
     }
 
@@ -623,6 +661,7 @@ export default function App() {
     playbackPolicy.bufferTarget,
     isPreloadingForPlay,
     isScrubbing,
+    isLoopActive,
   ]);
 
   const prefetchTileUrls = useMemo(() => {
@@ -770,6 +809,13 @@ export default function App() {
     inFlightStartedAtRef.current.clear();
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
+    setPlaybackRenderMode("loop");
+    setIsLoopPreloading(false);
+    setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
+    setLoopBaseForecastHour(null);
+    loopPreloadTokenRef.current += 1;
+    loopReadyHoursRef.current.clear();
+    loopFailedHoursRef.current.clear();
     setIsPreloadingForPlay(false);
     preloadProgressRef.current = {
       lastBufferedCount: 0,
@@ -796,6 +842,103 @@ export default function App() {
       version,
     });
   }, [model, resolvedRunForRequests, variable, zoomBucket, frameHours.length, debugLog]);
+
+  useEffect(() => {
+    if (!isLoopPreloading) {
+      return;
+    }
+    if (!canUseLoopPlayback || frameHours.length === 0) {
+      setIsLoopPreloading(false);
+      setPlaybackRenderMode("tiles");
+      return;
+    }
+
+    const token = ++loopPreloadTokenRef.current;
+    const readySet = new Set<number>();
+    const failedSet = new Set<number>();
+    loopReadyHoursRef.current = readySet;
+    loopFailedHoursRef.current = failedSet;
+    setLoopProgress({ total: frameHours.length, ready: 0, failed: 0 });
+
+    const mark = (fh: number, ok: boolean) => {
+      if (token !== loopPreloadTokenRef.current) {
+        return;
+      }
+      if (ok) {
+        readySet.add(fh);
+      } else {
+        failedSet.add(fh);
+      }
+      setLoopProgress({
+        total: frameHours.length,
+        ready: readySet.size,
+        failed: failedSet.size,
+      });
+
+      if (readySet.size + failedSet.size < frameHours.length) {
+        return;
+      }
+
+      setIsLoopPreloading(false);
+      const minReady = Math.min(LOOP_PRELOAD_MIN_READY, frameHours.length);
+      if (readySet.size >= minReady) {
+        setIsPlaying(true);
+        return;
+      }
+      setPlaybackRenderMode("tiles");
+      setIsPlaying(false);
+      showTransientFrameStatus("Loop preload failed");
+    };
+
+    frameHours.forEach((fh) => {
+      const url = loopUrlByHour.get(fh);
+      if (!url) {
+        mark(fh, false);
+        return;
+      }
+      const img = new Image();
+      img.decoding = "async";
+      img.onload = () => mark(fh, true);
+      img.onerror = () => mark(fh, false);
+      img.src = url;
+    });
+
+    return () => {
+      loopPreloadTokenRef.current += 1;
+    };
+  }, [isLoopPreloading, canUseLoopPlayback, frameHours, loopUrlByHour, showTransientFrameStatus]);
+
+  useEffect(() => {
+    if (!isPlaying || playbackRenderMode !== "loop" || frameHours.length === 0) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      const ready = loopReadyHoursRef.current;
+      const currentIndex = frameHours.indexOf(forecastHour);
+      if (currentIndex < 0) {
+        return;
+      }
+
+      const nextIndex = currentIndex + 1;
+      if (nextIndex >= frameHours.length) {
+        setIsPlaying(false);
+        return;
+      }
+
+      for (let idx = nextIndex; idx < frameHours.length; idx += 1) {
+        const candidate = frameHours[idx];
+        if (ready.has(candidate)) {
+          setTargetForecastHour(candidate);
+          return;
+        }
+      }
+
+      setIsPlaying(false);
+    }, AUTOPLAY_TICK_MS);
+
+    return () => window.clearInterval(interval);
+  }, [isPlaying, playbackRenderMode, frameHours, forecastHour]);
 
   useEffect(() => {
     updateBufferSnapshot();
@@ -1138,7 +1281,7 @@ export default function App() {
   }, [model, run, variable, resolvedRunForRequests]);
 
   useEffect(() => {
-    if (!isPlaying || frameHours.length === 0) return;
+    if (!isPlaying || playbackRenderMode !== "tiles" || frameHours.length === 0) return;
 
     const interval = window.setInterval(() => {
       const currentIndex = frameHours.indexOf(forecastHour);
@@ -1217,6 +1360,7 @@ export default function App() {
     bufferSnapshot.bufferedAheadCount,
     playbackPolicy.minAheadWhilePlaying,
     debugLog,
+    playbackRenderMode,
   ]);
 
   useEffect(() => {
@@ -1291,12 +1435,25 @@ export default function App() {
   const handleSetIsPlaying = useCallback((value: boolean) => {
     if (!value) {
       setIsPlaying(false);
+      setIsLoopPreloading(false);
       setIsPreloadingForPlay(false);
       return;
     }
     if (loading || frameHours.length === 0) {
       return;
     }
+
+    if (canUseLoopPlayback) {
+      setPlaybackRenderMode("loop");
+      setLoopBaseForecastHour(forecastHour);
+      setIsPlaying(false);
+      setIsPreloadingForPlay(false);
+      setIsLoopPreloading(true);
+      showTransientFrameStatus("Loading loop frames");
+      return;
+    }
+
+    setPlaybackRenderMode("tiles");
     const remainingAheadFrames = Math.max(0, frameHours.length - forecastHour - 1);
     const minAheadReady = Math.min(playbackPolicy.minAheadWhilePlaying, remainingAheadFrames);
     const canStartImmediately =
@@ -1322,6 +1479,7 @@ export default function App() {
     bufferSnapshot.bufferedAheadCount,
     playbackPolicy.minAheadWhilePlaying,
     playbackPolicy.minStartBuffer,
+    canUseLoopPlayback,
     showTransientFrameStatus,
   ]);
 
@@ -1352,18 +1510,24 @@ export default function App() {
     setForecastHour(nextTarget);
   }, [targetForecastHour, forecastHour, frameHours]);
 
-  const controlsIsPlaying = isPlaying || isPreloadingForPlay;
-  const preloadBufferedCount = Math.max(
-    0,
-    Math.min(bufferSnapshot.terminalCount, bufferSnapshot.totalFrames)
-  );
-  const preloadPercent = bufferSnapshot.totalFrames > 0
-    ? Math.round((preloadBufferedCount / bufferSnapshot.totalFrames) * 100)
+  const controlsIsPlaying = isPlaying || isPreloadingForPlay || isLoopPreloading;
+  const preloadBufferedCount = isLoopPreloading
+    ? Math.max(0, Math.min(loopProgress.ready + loopProgress.failed, loopProgress.total))
+    : Math.max(0, Math.min(bufferSnapshot.terminalCount, bufferSnapshot.totalFrames));
+  const preloadTotal = isLoopPreloading ? loopProgress.total : bufferSnapshot.totalFrames;
+  const preloadPercent = preloadTotal > 0
+    ? Math.round((preloadBufferedCount / preloadTotal) * 100)
     : 0;
-  const showBufferStatus = isScrubLoading || (isPreloadingForPlay && bufferSnapshot.totalFrames > 0);
+  const showBufferStatus =
+    isScrubLoading
+    || (isPreloadingForPlay && bufferSnapshot.totalFrames > 0)
+    || (isLoopPreloading && loopProgress.total > 0);
   const bufferStatusText = isScrubLoading
     ? "Loading frame"
-    : `Loading frames ${preloadBufferedCount}/${bufferSnapshot.totalFrames}`;
+    : isLoopPreloading
+      ? `Loading loop frames ${preloadBufferedCount}/${preloadTotal}`
+      : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
+  const activeLoopUrl = isLoopActive ? (loopUrlByHour.get(forecastHour) ?? null) : null;
 
   return (
     <div className="flex h-full flex-col">
@@ -1390,7 +1554,7 @@ export default function App() {
           region={region}
           regionViews={regionViews}
           opacity={opacity}
-          mode={isPlaying ? "autoplay" : "scrub"}
+          mode={isLoopActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
           variable={variable}
           model={model}
           prefetchTileUrls={prefetchTileUrls}
@@ -1404,6 +1568,17 @@ export default function App() {
           onMapHoverEnd={onHoverEnd}
         />
 
+        {activeLoopUrl && (
+          <div className="absolute inset-0 z-30 flex items-center justify-center">
+            <img
+              src={activeLoopUrl}
+              alt="Loop frame"
+              className="h-full w-full object-contain"
+              draggable={false}
+            />
+          </div>
+        )}
+
         {showBufferStatus && (
           <div className="absolute left-1/2 top-4 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
             <div className="flex items-center justify-between">
@@ -1415,7 +1590,9 @@ export default function App() {
             </div>
             {!isScrubLoading ? (
               <div className="text-[10px] text-muted-foreground">
-                Ready {bufferSnapshot.bufferedCount} • Failed {bufferSnapshot.failedCount}
+                {isLoopPreloading
+                  ? `Ready ${loopProgress.ready} • Failed ${loopProgress.failed}`
+                  : `Ready ${bufferSnapshot.bufferedCount} • Failed ${bufferSnapshot.failedCount}`}
               </div>
             ) : null}
             {!isScrubLoading ? (
@@ -1429,9 +1606,11 @@ export default function App() {
           </div>
         )}
 
-        {(isPlaying || isPreloadingForPlay) && (
+        {(isPlaying || isPreloadingForPlay || isLoopPreloading) && (
           <div className="absolute left-4 top-20 z-50 rounded-md border border-border/40 bg-[hsl(var(--toolbar))]/90 px-2.5 py-1.5 text-[10px] text-foreground shadow-lg backdrop-blur-md">
-            aheadReady {bufferSnapshot.bufferedAheadCount} • aheadTerminal {bufferSnapshot.terminalAheadCount} • inflightTiles {bufferSnapshot.inFlightCount} • queueDepth {bufferSnapshot.queueDepth}
+            {isLoopPreloading || playbackRenderMode === "loop"
+              ? `loopReady ${loopProgress.ready} • loopFailed ${loopProgress.failed} • loopTotal ${loopProgress.total}`
+              : `aheadReady ${bufferSnapshot.bufferedAheadCount} • aheadTerminal ${bufferSnapshot.terminalAheadCount} • inflightTiles ${bufferSnapshot.inFlightCount} • queueDepth ${bufferSnapshot.queueDepth}`}
           </div>
         )}
 

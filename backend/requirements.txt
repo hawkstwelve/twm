@@ -5,3 +5,4 @@ rasterio
 rio-tiler
 herbie-data
 pyproj
+Pillow

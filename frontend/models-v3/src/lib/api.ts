@@ -46,6 +46,7 @@ export type FrameRow = {
   has_cog: boolean;
   run?: string;
   tile_url_template?: string;
+  loop_webp_url?: string;
   meta?: {
     meta?: LegendMeta | null;
   } | null;

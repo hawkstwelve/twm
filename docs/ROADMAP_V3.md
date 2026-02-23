@@ -38,6 +38,7 @@ These are explicitly out of scope. If a proposed change falls into this list, it
 - **No runtime derivation.** The tile server and sampling API never compute derived quantities (e.g., wind speed from u/v, heat index from temp/humidity). All derivation happens in the builder.
 - **No multi-band or multi-variable compositing at serve time.** The tile server serves exactly one pre-built RGBA artifact per request. Layer compositing is the frontend's job (MapLibre handles this natively).
 - **No server-side rendering of legends, labels, or annotations.** Legends are rendered client-side from sidecar JSON metadata.
+- **No AVIF loop artifacts.** If/when bounded loop playback artifacts are introduced, the encoded frame format is WebP only (`image/webp`).
 
 ---
 

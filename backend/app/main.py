@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import tempfile
 import threading
 import time
 from functools import lru_cache
@@ -17,8 +18,10 @@ import numpy as np
 import rasterio
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
+from PIL import Image
 from pyproj import Transformer
+from rasterio.enums import Resampling
 from rasterio.windows import Window
 
 from .config.regions import REGION_PRESETS
@@ -49,6 +52,11 @@ VAR_ORDER_BY_MODEL = {
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 _JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
+LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
+LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
+
+CACHE_HIT = "public, max-age=31536000, immutable"
+CACHE_MISS = "public, max-age=15"
 
 
 def _if_none_match_values(header_value: str) -> list[str]:
@@ -271,6 +279,64 @@ def _resolve_frame_var_dir(model: str, run: str, var: str, fh: int) -> Path | No
     return var_dir
 
 
+def _resolve_rgba_cog(model: str, run: str, var: str, fh: int) -> Path | None:
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return None
+    candidate = _published_var_dir(model, resolved, var) / f"fh{fh:03d}.rgba.cog.tif"
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def _loop_webp_path(model: str, run: str, var: str, fh: int) -> Path | None:
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return None
+    return _published_var_dir(model, resolved, var) / f"fh{fh:03d}.loop.webp"
+
+
+def _ensure_loop_webp(cog_path: Path, out_path: Path) -> bool:
+    if out_path.is_file():
+        return True
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(suffix=".webp", delete=False, dir=str(out_path.parent)) as tmp:
+        tmp_path = Path(tmp.name)
+
+    try:
+        with rasterio.open(cog_path) as ds:
+            src_h = int(ds.height)
+            src_w = int(ds.width)
+            max_dim = max(src_h, src_w)
+            if max_dim <= 0:
+                return False
+
+            scale = min(1.0, float(LOOP_WEBP_MAX_DIM) / float(max_dim))
+            out_h = max(1, int(round(src_h * scale)))
+            out_w = max(1, int(round(src_w * scale)))
+
+            data = ds.read(
+                indexes=(1, 2, 3, 4),
+                out_shape=(4, out_h, out_w),
+                resampling=Resampling.bilinear,
+            )
+
+        rgba = np.moveaxis(data, 0, -1)
+        image = Image.fromarray(rgba, mode="RGBA")
+        image.save(tmp_path, format="WEBP", quality=LOOP_WEBP_QUALITY, method=6)
+        tmp_path.replace(out_path)
+        return True
+    except Exception:
+        logger.exception("Failed generating loop WebP: %s -> %s", cog_path, out_path)
+        try:
+            if tmp_path.is_file():
+                tmp_path.unlink()
+        except Exception:
+            pass
+        return False
+
+
 @app.get("/api/v3/health")
 def health():
     return {"ok": True, "data_root": str(DATA_ROOT)}
@@ -414,6 +480,7 @@ def list_frames(request: Request, model: str, run: str, var: str):
                 "fh": fh,
                 "has_cog": True,
                 "run": resolved,
+                "loop_webp_url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp",
                 "meta": {"meta": meta},
             }
         )
@@ -431,6 +498,31 @@ def list_frames(request: Request, model: str, run: str, var: str):
             "Cache-Control": cache_control,
             "ETag": etag,
         },
+    )
+
+
+@app.get("/api/v3/{model}/{run}/{var}/{fh:int}/loop.webp")
+def get_loop_webp(model: str, run: str, var: str, fh: int):
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
+
+    cog_path = _resolve_rgba_cog(model, resolved, var, fh)
+    if cog_path is None:
+        return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
+
+    out_path = _loop_webp_path(model, resolved, var, fh)
+    if out_path is None:
+        return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
+
+    if not _ensure_loop_webp(cog_path, out_path):
+        return Response(status_code=500, headers={"Cache-Control": CACHE_MISS})
+
+    cache_control = CACHE_HIT if run != "latest" else CACHE_MISS
+    return FileResponse(
+        path=str(out_path),
+        media_type="image/webp",
+        headers={"Cache-Control": cache_control},
     )
 
 
