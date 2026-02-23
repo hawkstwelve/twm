@@ -838,15 +838,21 @@ export default function App() {
 
     const token = transitionTokenRef.current;
     const controller = new AbortController();
-    ensureLoopFrameDecoded(resolvedLoopForecastHour, renderMode, controller.signal).then((ready) => {
-      if (token !== transitionTokenRef.current) {
-        return;
-      }
-      if (ready) {
-        setVisibleRenderMode(renderMode);
-        setLoopDisplayHour(resolvedLoopForecastHour);
-      }
-    });
+    ensureLoopFrameDecoded(resolvedLoopForecastHour, renderMode, controller.signal)
+      .then((ready) => {
+        if (token !== transitionTokenRef.current) {
+          return;
+        }
+        if (ready) {
+          setVisibleRenderMode(renderMode);
+          setLoopDisplayHour(resolvedLoopForecastHour);
+        }
+      })
+      .catch((err) => {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+      });
 
     return () => {
       controller.abort();
@@ -2355,13 +2361,6 @@ export default function App() {
           <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
             <AlertCircle className="h-3.5 w-3.5" />
             High detail mode — zoom out for smooth loop
-          </div>
-        )}
-
-        {renderMode === "tiles" && !canUseLoopPlayback && (
-          <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
-            <AlertCircle className="h-3.5 w-3.5" />
-            Loop unavailable for this variable/run — showing tiles
           </div>
         )}
 
