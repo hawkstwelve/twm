@@ -352,37 +352,6 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
     if tier_cfg is None:
         return False
 
-
-def _sample_cache_key(model: str, run: str, var: str, fh: int, row: int, col: int) -> str:
-    return f"{model}:{run}:{var}:{fh}:{row}:{col}"
-
-
-def _sample_payload(
-    *,
-    model: str,
-    run: str,
-    var: str,
-    fh: int,
-    lat: float,
-    lon: float,
-    value: float | None,
-    units: str,
-    valid_time: str,
-    no_data: bool,
-) -> dict[str, Any]:
-    return {
-        "value": round(float(value), 1) if value is not None else None,
-        "units": units,
-        "model": model,
-        "run": run,
-        "var": var,
-        "fh": fh,
-        "valid_time": valid_time,
-        "lat": lat,
-        "lon": lon,
-        "noData": no_data,
-    }
-
     max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
 
@@ -421,6 +390,37 @@ def _sample_payload(
         except Exception:
             pass
         return False
+
+
+def _sample_cache_key(model: str, run: str, var: str, fh: int, row: int, col: int) -> str:
+    return f"{model}:{run}:{var}:{fh}:{row}:{col}"
+
+
+def _sample_payload(
+    *,
+    model: str,
+    run: str,
+    var: str,
+    fh: int,
+    lat: float,
+    lon: float,
+    value: float | None,
+    units: str,
+    valid_time: str,
+    no_data: bool,
+) -> dict[str, Any]:
+    return {
+        "value": round(float(value), 1) if value is not None else None,
+        "units": units,
+        "model": model,
+        "run": run,
+        "var": var,
+        "fh": fh,
+        "valid_time": valid_time,
+        "lat": lat,
+        "lon": lon,
+        "noData": no_data,
+    }
 
 
 @app.get("/api/v3/health")

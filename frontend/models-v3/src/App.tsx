@@ -716,10 +716,10 @@ export default function App() {
       const fetchP95 = percentile(loopDecodeFetchSamplesRef.current, 95);
       const decodeP95 = percentile(loopDecodeOnlySamplesRef.current, 95);
       debugLog("telemetry decode/cache", {
-        webp_ready_p50_ms: readyP50,
-        webp_ready_p95_ms: readyP95,
-        webp_fetch_p95_ms: fetchP95,
-        webp_decode_p95_ms: decodeP95,
+        percentile_basis: "rolling_window_256_samples",
+        webp_ready_ms: { p50: readyP50, p95: readyP95 },
+        webp_fetch_ms: { p95: fetchP95 },
+        webp_decode_ms: { p95: decodeP95 },
         decoded_cache_high_water_bytes: loopDecodedCacheHighWaterRef.current,
       });
     }, 15000);

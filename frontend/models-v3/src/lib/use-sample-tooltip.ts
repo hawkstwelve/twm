@@ -111,7 +111,11 @@ export function useSampleTooltip(ctx: SampleContext) {
       if (p95 === null) {
         return;
       }
-      console.debug("[sampling] latency", { p95_ms: p95, samples: latencySamplesRef.current.length });
+      console.debug("[sampling] latency", {
+        percentile_basis: "rolling_window_256_samples",
+        sample_request_latency_ms: { p95 },
+        samples: latencySamplesRef.current.length,
+      });
     }, 15000);
     return () => {
       window.clearInterval(interval);
