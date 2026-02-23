@@ -1030,7 +1030,7 @@ export function MapCanvas({
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !isLoaded || loopActive) {
+    if (!map || !isLoaded) {
       return;
     }
 
@@ -1057,7 +1057,7 @@ export function MapCanvas({
     return () => {
       map.off("idle", maybeNotify);
     };
-  }, [isLoaded, loopActive, tileUrl, onTileViewportReady]);
+  }, [isLoaded, tileUrl, onTileViewportReady]);
 
   useEffect(() => {
     const map = mapRef.current;

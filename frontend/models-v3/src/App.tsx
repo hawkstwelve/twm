@@ -400,6 +400,7 @@ export default function App() {
   const mapZoomRef = useRef(DEFAULTS.zoom);
   const renderModeDwellTimerRef = useRef<number | null>(null);
   const transitionTokenRef = useRef(0);
+  const lastTileViewportCommitUrlRef = useRef<string | null>(null);
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -936,8 +937,7 @@ export default function App() {
     loopReadyHoursRef.current.clear();
     loopFailedHoursRef.current.clear();
     setIsPreloadingForPlay(false);
-    setRenderMode(webpDefaultEnabled ? "webp_tier0" : "tiles");
-    setVisibleRenderMode(webpDefaultEnabled ? "webp_tier0" : "tiles");
+    lastTileViewportCommitUrlRef.current = null;
     preloadProgressRef.current = {
       lastBufferedCount: 0,
       lastProgressAt: Date.now(),
@@ -960,7 +960,6 @@ export default function App() {
     resolvedRunForRequests,
     variable,
     frameHours.length,
-    webpDefaultEnabled,
   ]);
 
   useEffect(() => {
@@ -1634,13 +1633,17 @@ export default function App() {
     if (readyTileUrl !== tileUrl) {
       return;
     }
+    if (visibleRenderMode === "tiles" && lastTileViewportCommitUrlRef.current === readyTileUrl) {
+      return;
+    }
+    lastTileViewportCommitUrlRef.current = readyTileUrl;
     debugLog("tiles visual swap committed", {
       tileUrl: readyTileUrl,
       mode: renderMode,
       visibleMode: "tiles",
     });
     setVisibleRenderMode("tiles");
-  }, [renderMode, tileUrl, debugLog]);
+  }, [renderMode, tileUrl, visibleRenderMode, debugLog]);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {
