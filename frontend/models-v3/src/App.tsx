@@ -666,8 +666,16 @@ export default function App() {
       run: resolvedRunForRequests,
       variable,
     });
-    updateBufferSnapshot();
-  }, [model, resolvedRunForRequests, variable, updateBufferSnapshot, debugLog]);
+    const version = ++bufferVersionRef.current;
+    setBufferSnapshot({
+      totalFrames: frameHours.length,
+      bufferedCount: 0,
+      bufferedAheadCount: 0,
+      inFlightCount: 0,
+      statusText: `Buffered 0/${frameHours.length}`,
+      version,
+    });
+  }, [model, resolvedRunForRequests, variable, frameHours.length, debugLog]);
 
   useEffect(() => {
     updateBufferSnapshot();
