@@ -228,6 +228,18 @@ Key precision rule:
 - `p95 <= 150ms` warm-cache
 - `p95 <= 400ms` cold-cache
 
+### Spatial semantics (explicit)
+
+Sampling semantics must be deterministic and documented:
+
+- Coordinate transform: `lat/lon (EPSG:4326) -> EPSG:3857` before raster indexing.
+- Cell selection: nearest grid cell via dataset index mapping (`row,col` from geotransform), no screen-pixel dependence.
+- Interpolation: point sample reads the selected cell value (no bilinear interpolation for numeric tooltip value).
+- NoData behavior:
+  - out-of-bounds requests return structured payload with `noData=true` and `value=null`;
+  - in-bounds NaN cell values return structured payload with `noData=true` and `value=null`.
+- Edge behavior: bounds checks use dataset dimensions and never throw for valid API input ranges.
+
 ## Gate 8 — URL Versioning, Alignment, and Telemetry
 
 ### Cache busting

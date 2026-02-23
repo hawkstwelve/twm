@@ -450,6 +450,7 @@ export default function App() {
   const loopDecodeReadySamplesRef = useRef<number[]>([]);
   const loopDecodeFetchSamplesRef = useRef<number[]>([]);
   const loopDecodeOnlySamplesRef = useRef<number[]>([]);
+  const tierFailoverCycleRef = useRef<{ key: string; emitted: boolean }>({ key: "", emitted: false });
   // Tracks current selector values so the async fast-path callback can guard against
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
@@ -705,6 +706,46 @@ export default function App() {
   useEffect(() => {
     mapZoomRef.current = mapZoom;
   }, [mapZoom]);
+
+  useEffect(() => {
+    if (!webpDefaultEnabled || renderMode !== "webp_tier1") {
+      tierFailoverCycleRef.current = { key: "", emitted: false };
+      return;
+    }
+
+    const cycleKey = `${model}:${resolvedRunForRequests}:${variable}:webp_tier1`;
+    if (tierFailoverCycleRef.current.key !== cycleKey) {
+      tierFailoverCycleRef.current = { key: cycleKey, emitted: false };
+    }
+
+    if (tierFailoverCycleRef.current.emitted) {
+      return;
+    }
+
+    const hasTier1 = Boolean(loopTier1UrlByHour.get(forecastHour));
+    const hasTier0 = Boolean(loopTier0UrlByHour.get(forecastHour) ?? loopUrlByHour.get(forecastHour));
+    if (!hasTier1 && hasTier0) {
+      tierFailoverCycleRef.current = { key: cycleKey, emitted: true };
+      debugLog("tier failover", {
+        from: "webp_tier1",
+        to: "webp_tier0",
+        reason: "tier1_unavailable",
+        fh: forecastHour,
+        cycle: cycleKey,
+      });
+    }
+  }, [
+    webpDefaultEnabled,
+    renderMode,
+    model,
+    resolvedRunForRequests,
+    variable,
+    forecastHour,
+    loopTier1UrlByHour,
+    loopTier0UrlByHour,
+    loopUrlByHour,
+    debugLog,
+  ]);
 
   useEffect(() => {
     if (!webpDefaultEnabled || !animationDebugRef.current) {

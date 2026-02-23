@@ -59,6 +59,8 @@ LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "
 LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
 SAMPLE_CACHE_TTL_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_CACHE_TTL_SECONDS", "2.0"))
 SAMPLE_INFLIGHT_WAIT_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_INFLIGHT_WAIT_SECONDS", "0.2"))
+SAMPLE_RATE_LIMIT_WINDOW_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_RATE_LIMIT_WINDOW_SECONDS", "1.0"))
+SAMPLE_RATE_LIMIT_MAX_REQUESTS = int(os.environ.get("TWF_V3_SAMPLE_RATE_LIMIT_MAX_REQUESTS", "240"))
 
 LOOP_TIER_CONFIG: dict[int, dict[str, int]] = {
     0: {
@@ -134,7 +136,12 @@ class _SampleInflight:
 
 _sample_cache: dict[str, tuple[float, dict[str, Any]]] = {}
 _sample_inflight: dict[str, _SampleInflight] = {}
+_sample_rate_window: dict[str, list[float]] = {}
 _sample_lock = threading.Lock()
+
+LOOP_MANIFEST_VERSION = 1
+LOOP_MANIFEST_PROJECTION = "EPSG:4326"
+LOOP_MANIFEST_BBOX = [-125.0, 24.0, -66.5, 50.0]
 
 
 def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
@@ -396,6 +403,28 @@ def _sample_cache_key(model: str, run: str, var: str, fh: int, row: int, col: in
     return f"{model}:{run}:{var}:{fh}:{row}:{col}"
 
 
+def _sample_rate_limit_allow(client_id: str) -> tuple[bool, float]:
+    if SAMPLE_RATE_LIMIT_MAX_REQUESTS <= 0:
+        return True, 0.0
+
+    now = time.monotonic()
+    cutoff = now - max(0.01, SAMPLE_RATE_LIMIT_WINDOW_SECONDS)
+    retry_after = max(1.0, SAMPLE_RATE_LIMIT_WINDOW_SECONDS)
+
+    with _sample_lock:
+        window = _sample_rate_window.get(client_id)
+        if window is None:
+            window = []
+            _sample_rate_window[client_id] = window
+        while window and window[0] < cutoff:
+            window.pop(0)
+        if len(window) >= SAMPLE_RATE_LIMIT_MAX_REQUESTS:
+            return False, retry_after
+        window.append(now)
+
+    return True, 0.0
+
+
 def _sample_payload(
     *,
     model: str,
@@ -591,6 +620,87 @@ def list_frames(request: Request, model: str, run: str, var: str):
     )
 
 
+@app.get("/api/v3/{model}/{run}/{var}/loop-manifest")
+def get_loop_manifest(request: Request, model: str, run: str, var: str):
+    resolved = _resolve_run(model, run)
+    if resolved is None:
+        return Response(status_code=404, content='{"error": "run not found"}', media_type="application/json")
+
+    manifest = _load_manifest(model, resolved)
+    if manifest is None:
+        return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
+
+    variables = manifest.get("variables")
+    if not isinstance(variables, dict):
+        return Response(status_code=404, content='{"error": "variable not found"}', media_type="application/json")
+    var_entry = variables.get(var)
+    if not isinstance(var_entry, dict):
+        return Response(status_code=404, content='{"error": "variable not found"}', media_type="application/json")
+
+    frame_entries = var_entry.get("frames")
+    if not isinstance(frame_entries, list):
+        frame_entries = []
+
+    version_token = _run_version_token(model, resolved)
+
+    tier_frames: dict[int, list[dict[str, Any]]] = {0: [], 1: []}
+    for item in frame_entries:
+        if not isinstance(item, dict):
+            continue
+        fh = item.get("fh")
+        if not isinstance(fh, int):
+            continue
+        tier_frames[0].append(
+            {
+                "fh": fh,
+                "url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=0&v={version_token}",
+            }
+        )
+        tier_frames[1].append(
+            {
+                "fh": fh,
+                "url": f"/api/v3/{model}/{resolved}/{var}/{fh}/loop.webp?tier=1&v={version_token}",
+            }
+        )
+
+    tier0_dim = LOOP_TIER_CONFIG.get(0, {}).get("max_dim", LOOP_WEBP_MAX_DIM)
+    tier1_dim = LOOP_TIER_CONFIG.get(1, {}).get("max_dim", LOOP_WEBP_TIER1_MAX_DIM)
+    payload = {
+        "manifest_version": LOOP_MANIFEST_VERSION,
+        "run": resolved,
+        "model": model,
+        "var": var,
+        "bbox": LOOP_MANIFEST_BBOX,
+        "projection": LOOP_MANIFEST_PROJECTION,
+        "loop_tiers": [
+            {
+                "tier": 0,
+                "max_dim": int(tier0_dim),
+                "frames": tier_frames[0],
+            },
+            {
+                "tier": 1,
+                "max_dim": int(tier1_dim),
+                "frames": tier_frames[1],
+            },
+        ],
+    }
+
+    cache_control = "public, max-age=60"
+    etag = _make_etag(payload)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+
+    return JSONResponse(
+        content=payload,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag,
+        },
+    )
+
+
 @app.get("/api/v3/{model}/{run}/{var}/{fh:int}/loop.webp")
 def get_loop_webp(
     model: str,
@@ -633,6 +743,7 @@ def get_loop_webp(
 
 @app.get("/api/v3/sample")
 def sample(
+    request: Request,
     model: str = Query(..., description="Model ID (e.g. hrrr)"),
     run: str = Query(..., description="Run ID (e.g. 20260217_20z or latest)"),
     var: str = Query(..., description="Variable ID (e.g. tmp2m)"),
@@ -640,6 +751,15 @@ def sample(
     lat: float = Query(..., ge=-90, le=90, description="Latitude (WGS84)"),
     lon: float = Query(..., ge=-180, le=180, description="Longitude (WGS84)"),
 ):
+    client_id = request.client.host if request.client and request.client.host else "unknown"
+    allowed, retry_after = _sample_rate_limit_allow(client_id)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate limit exceeded", "retryAfterSec": retry_after},
+            headers={"Retry-After": str(int(max(1, retry_after)))},
+        )
+
     val_cog = _resolve_val_cog(model, run, var, fh)
     if val_cog is None:
         return Response(status_code=404, content='{"error": "val.cog.tif not found"}', media_type="application/json")
