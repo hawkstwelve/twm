@@ -53,7 +53,6 @@ VAR_ORDER_BY_MODEL = {
 }
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
-_LOOP_FRAME_FILE_RE = re.compile(r"^fh(\d{3})\.loop\.webp$")
 _JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
 LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
@@ -162,6 +161,37 @@ def _loop_webp_url(model: str, run: str, var: str, fh: int, *, tier: int, versio
     tier_segment = f"tier{tier}"
     base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/{tier_segment}/fh{fh:03d}.loop.webp"
     return f"{base}?v={version_token}"
+
+
+def _legacy_loop_webp_url(model: str, run: str, var: str, fh: int, *, version_token: str) -> str:
+    base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/fh{fh:03d}.loop.webp"
+    return f"{base}?v={version_token}"
+
+
+def _resolve_existing_loop_urls(
+    model: str,
+    run: str,
+    var: str,
+    fh: int,
+    *,
+    version_token: str,
+) -> tuple[str | None, str | None]:
+    tier0_url: str | None = None
+    tier1_url: str | None = None
+
+    tier0_path = _loop_webp_path(model, run, var, fh, tier=0)
+    if tier0_path is not None and tier0_path.is_file():
+        tier0_url = _loop_webp_url(model, run, var, fh, tier=0, version_token=version_token)
+    else:
+        legacy_path = _legacy_loop_webp_path(model, run, var, fh, tier=0)
+        if legacy_path is not None and legacy_path.is_file():
+            tier0_url = _legacy_loop_webp_url(model, run, var, fh, version_token=version_token)
+
+    tier1_path = _loop_webp_path(model, run, var, fh, tier=1)
+    if tier1_path is not None and tier1_path.is_file():
+        tier1_url = _loop_webp_url(model, run, var, fh, tier=1, version_token=version_token)
+
+    return tier0_url, tier1_url
 
 
 def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
@@ -647,15 +677,23 @@ def list_frames(request: Request, model: str, run: str, var: str):
         if not isinstance(fh, int):
             continue
 
+        tier0_url, tier1_url = _resolve_existing_loop_urls(
+            model,
+            resolved,
+            var,
+            fh,
+            version_token=version_token,
+        )
+
         meta = _resolve_sidecar(model, resolved, var, fh)
         frames.append(
             {
                 "fh": fh,
                 "has_cog": True,
                 "run": resolved,
-                "loop_webp_url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
-                "loop_webp_tier0_url": _loop_webp_url(model, resolved, var, fh, tier=0, version_token=version_token),
-                "loop_webp_tier1_url": _loop_webp_url(model, resolved, var, fh, tier=1, version_token=version_token),
+                "loop_webp_url": tier0_url,
+                "loop_webp_tier0_url": tier0_url,
+                "loop_webp_tier1_url": tier1_url,
                 "meta": {"meta": meta},
             }
         )
@@ -686,29 +724,41 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
     if manifest is None:
         return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
 
+    variables = manifest.get("variables")
+    if not isinstance(variables, dict):
+        return []
+    var_entry = variables.get(var)
+    if not isinstance(var_entry, dict):
+        return []
+
+    frame_entries = var_entry.get("frames")
+    if not isinstance(frame_entries, list):
+        frame_entries = []
+
     version_token = _run_version_token(model, resolved)
 
     tier_frames: dict[int, list[dict[str, Any]]] = {0: [], 1: []}
-    for tier in (0, 1):
-        tier_dir = LOOP_CACHE_ROOT / model / resolved / var / f"tier{tier}"
-        if not tier_dir.is_dir():
+    for item in frame_entries:
+        if not isinstance(item, dict):
+            continue
+        fh = item.get("fh")
+        if not isinstance(fh, int):
             continue
 
-        discovered: list[int] = []
-        for file_path in tier_dir.glob("fh*.loop.webp"):
-            match = _LOOP_FRAME_FILE_RE.match(file_path.name)
-            if not match:
-                continue
-            fh = int(match.group(1))
-            discovered.append(fh)
+        tier0_url, tier1_url = _resolve_existing_loop_urls(
+            model,
+            resolved,
+            var,
+            fh,
+            version_token=version_token,
+        )
+        if tier0_url:
+            tier_frames[0].append({"fh": fh, "url": tier0_url})
+        if tier1_url:
+            tier_frames[1].append({"fh": fh, "url": tier1_url})
 
-        for fh in sorted(set(discovered)):
-            tier_frames[tier].append(
-                {
-                    "fh": fh,
-                    "url": _loop_webp_url(model, resolved, var, fh, tier=tier, version_token=version_token),
-                }
-            )
+    tier_frames[0].sort(key=lambda row: int(row["fh"]))
+    tier_frames[1].sort(key=lambda row: int(row["fh"]))
 
     tier0_dim = LOOP_TIER_CONFIG.get(0, {}).get("max_dim", LOOP_WEBP_MAX_DIM)
     tier1_dim = LOOP_TIER_CONFIG.get(1, {}).get("max_dim", LOOP_WEBP_TIER1_MAX_DIM)

@@ -489,14 +489,30 @@ export default function App() {
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
   const latestRunId = runs[0] ?? frameRows[0]?.run ?? null;
   const resolvedRunForRequests = run === "latest" ? (latestRunId ?? "latest") : run;
+  const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
 
   const runOptions = useMemo<Option[]>(() => {
     return buildRunOptions(runs, latestRunId);
   }, [runs, latestRunId]);
 
-  const loopTier0UrlByHour = useMemo(() => {
-    const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
+  const loopFrameTier0FallbackByHour = useMemo(() => {
     const map = new Map<number, string>();
+    for (const row of frameRows) {
+      const fh = Number(row?.fh);
+      const loopUrl = row?.loop_webp_tier0_url ?? row?.loop_webp_url;
+      if (!Number.isFinite(fh) || !loopUrl) {
+        continue;
+      }
+      const absolute = /^https?:\/\//i.test(loopUrl)
+        ? loopUrl
+        : `${apiRoot}${loopUrl.startsWith("/") ? "" : "/"}${loopUrl}`;
+      map.set(fh, absolute);
+    }
+    return map;
+  }, [apiRoot, frameRows]);
+
+  const loopTier0UrlByHour = useMemo(() => {
+    const map = new Map<number, string>(loopFrameTier0FallbackByHour);
     const tier0 = loopManifest?.loop_tiers.find((entry) => Number(entry?.tier) === 0);
     const frames = Array.isArray(tier0?.frames) ? tier0.frames : [];
     for (const frame of frames) {
@@ -511,11 +527,21 @@ export default function App() {
       map.set(fh, absolute);
     }
     return map;
-  }, [loopManifest]);
+  }, [apiRoot, loopFrameTier0FallbackByHour, loopManifest]);
 
   const loopTier1UrlByHour = useMemo(() => {
-    const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
     const map = new Map<number, string>();
+    for (const row of frameRows) {
+      const fh = Number(row?.fh);
+      const loopUrl = row?.loop_webp_tier1_url;
+      if (!Number.isFinite(fh) || !loopUrl) {
+        continue;
+      }
+      const absolute = /^https?:\/\//i.test(loopUrl)
+        ? loopUrl
+        : `${apiRoot}${loopUrl.startsWith("/") ? "" : "/"}${loopUrl}`;
+      map.set(fh, absolute);
+    }
     const tier1 = loopManifest?.loop_tiers.find((entry) => Number(entry?.tier) === 1);
     const frames = Array.isArray(tier1?.frames) ? tier1.frames : [];
     for (const frame of frames) {
@@ -530,7 +556,7 @@ export default function App() {
       map.set(fh, absolute);
     }
     return map;
-  }, [loopManifest]);
+  }, [apiRoot, frameRows, loopManifest]);
 
   const loopUrlByHour = useMemo(() => new Map(loopTier0UrlByHour), [loopTier0UrlByHour]);
 
