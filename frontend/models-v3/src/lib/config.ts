@@ -32,6 +32,12 @@ export const VARIABLE_LABELS: Record<string, string> = {
   qpf6h: "6-hr Precip",
 };
 
+export const VARIABLE_INITIAL_FORECAST_HOUR: Partial<Record<string, number>> = {
+  precip_total: 1,
+  snowfall_total: 1,
+  precip_ptype: 1,
+};
+
 export type PlaybackBufferPolicy = {
   bufferTarget: number;
   minStartBuffer: number;

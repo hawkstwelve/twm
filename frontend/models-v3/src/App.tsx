@@ -27,6 +27,7 @@ import {
   getPlaybackBufferPolicy,
   isAnimationDebugEnabled,
   isWebpDefaultRenderEnabled,
+  VARIABLE_INITIAL_FORECAST_HOUR,
   VARIABLE_LABELS,
   WEBP_RENDER_MODE_THRESHOLDS,
 } from "@/lib/config";
@@ -244,6 +245,27 @@ function nearestFrame(frames: number[], current: number): number {
     const valueDelta = Math.abs(value - current);
     return valueDelta < nearestDelta ? value : nearest;
   }, frames[0]);
+}
+
+function preferredInitialFrame(frames: number[], variableId: string): number {
+  if (frames.length === 0) {
+    return 0;
+  }
+  const configured = VARIABLE_INITIAL_FORECAST_HOUR[variableId];
+  if (!Number.isFinite(configured)) {
+    return frames[0];
+  }
+  return nearestFrame(frames, Number(configured));
+}
+
+function resolveForecastHour(frames: number[], current: number, variableId: string): number {
+  if (frames.length === 0) {
+    return 0;
+  }
+  if (Number.isFinite(current)) {
+    return nearestFrame(frames, current);
+  }
+  return preferredInitialFrame(frames, variableId);
 }
 
 function getEffectiveZoom(zoom: number): number {
@@ -2072,8 +2094,8 @@ export default function App() {
         const { rows: manifestRows } = resolveManifestFrames(manifestData, nextVar);
         setFrameRows((prevRows) => mergeManifestRowsWithPrevious(manifestRows, prevRows));
         const frames = manifestRows.map((row) => Number(row.fh)).filter(Number.isFinite);
-        setForecastHour((prev) => nearestFrame(frames, prev));
-        setTargetForecastHour((prev) => nearestFrame(frames, prev));
+        setForecastHour((prev) => resolveForecastHour(frames, prev, nextVar));
+        setTargetForecastHour((prev) => resolveForecastHour(frames, prev, nextVar));
         setLoopManifest(null);
 
         setLoading(false);
@@ -2274,8 +2296,8 @@ export default function App() {
         if (hasFrameList) {
           setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-          setForecastHour((prev) => nearestFrame(frames, prev));
-          setTargetForecastHour((prev) => nearestFrame(frames, prev));
+          setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+          setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
           hydratedFromManifest = true;
         }
       }
@@ -2294,8 +2316,8 @@ export default function App() {
           );
         }
         const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-        setForecastHour((prev) => nearestFrame(frames, prev));
-        setTargetForecastHour((prev) => nearestFrame(frames, prev));
+        setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+        setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
       } catch (err) {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         if (!hydratedFromManifest) {
