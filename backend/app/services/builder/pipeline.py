@@ -322,11 +322,19 @@ def check_pixel_sanity(
             if valid_pixels.size > 0:
                 unique_count = len(np.unique(valid_pixels))
                 if unique_count < 2:
-                    logger.error(
-                        "Band %d is constant (value=%d) — likely colormap bug (%s)",
-                        band_idx, valid_pixels[0], rgba_path,
-                    )
-                    ok = False
+                    if allow_dry_frame:
+                        logger.warning(
+                            "Dry frame allowed: band %d is constant (value=%d) (%s)",
+                            band_idx,
+                            valid_pixels[0],
+                            rgba_path,
+                        )
+                    else:
+                        logger.error(
+                            "Band %d is constant (value=%d) — likely colormap bug (%s)",
+                            band_idx, valid_pixels[0], rgba_path,
+                        )
+                        ok = False
 
     # --- Value COG checks ---
     with rasterio.open(val_path) as src:
