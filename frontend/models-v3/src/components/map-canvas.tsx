@@ -55,6 +55,7 @@ const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
+const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -239,6 +240,21 @@ function styleFor(
       },
       ...prefetchLayers,
       {
+        id: COUNTRY_BOUNDARY_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "boundary",
+        filter: [
+          "all",
+          ["==", "admin_level", 2],
+        ],
+        paint: {
+          "line-color": "#000000",
+          "line-opacity": 0.85,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.95, 7, 1.3, 10, 1.7],
+        },
+      },
+      {
         id: STATE_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
@@ -246,12 +262,11 @@ function styleFor(
         filter: [
           "all",
           ["==", "admin_level", 4],
-          ["==", "maritime", 0],
         ],
         paint: {
           "line-color": "#000000",
           "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.75, 7, 1.2, 10, 1.6],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
         },
       },
       {
@@ -409,6 +424,9 @@ export function MapCanvas({
     }
     if (map.getLayer(LOOP_LAYER_ID)) {
       map.moveLayer(LOOP_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(COUNTRY_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(COUNTRY_BOUNDARY_LAYER_ID, "twf-labels");
     }
     if (map.getLayer(STATE_BOUNDARY_LAYER_ID)) {
       map.moveLayer(STATE_BOUNDARY_LAYER_ID, "twf-labels");
