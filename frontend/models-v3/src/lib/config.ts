@@ -1,6 +1,6 @@
-export const API_BASE = "https://api.sodakweather.com/api/v3";
+export const API_BASE = "https://api.theweathermodels.com/api/v3";
 
-export const TILES_BASE = "https://api.sodakweather.com";
+export const TILES_BASE = "https://api.theweathermodels.com";
 
 export const WEBP_RENDER_MODE_THRESHOLDS = {
   tier0Max: 5.8,
