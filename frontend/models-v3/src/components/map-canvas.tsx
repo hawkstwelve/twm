@@ -410,6 +410,9 @@ export function MapCanvas({
     if (map.getLayer(LOOP_LAYER_ID)) {
       map.moveLayer(LOOP_LAYER_ID, "twf-labels");
     }
+    if (map.getLayer(STATE_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(STATE_BOUNDARY_LAYER_ID, "twf-labels");
+    }
     map.moveLayer("twf-labels");
   }, []);
 
