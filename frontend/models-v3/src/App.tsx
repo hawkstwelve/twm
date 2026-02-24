@@ -73,6 +73,20 @@ type Option = {
   label: string;
 };
 
+type VariableEntry = {
+  id: string;
+  displayName?: string;
+};
+
+const VARIABLE_PRIORITY_ORDER = [
+  "radar_ptype",
+  "tmp2m",
+  "tmp850",
+  "precip_total",
+  "snowfall_total",
+  "wspd10m",
+];
+
 function percentile(values: number[], pct: number): number | null {
   if (!values.length) {
     return null;
@@ -104,8 +118,8 @@ function makeVariableLabel(id: string, preferredLabel?: string | null): string {
   return VARIABLE_LABELS[id] ?? id;
 }
 
-function normalizeVarRows(rows: VarRow[]): Array<{ id: string; displayName?: string }> {
-  const normalized: Array<{ id: string; displayName?: string }> = [];
+function normalizeVarRows(rows: VarRow[]): VariableEntry[] {
+  const normalized: VariableEntry[] = [];
   for (const row of rows) {
     if (typeof row === "string") {
       const id = row.trim();
@@ -123,11 +137,11 @@ function normalizeVarRows(rows: VarRow[]): Array<{ id: string; displayName?: str
 
 function normalizeManifestVarRows(
   variables: RunManifestResponse["variables"] | null | undefined
-): Array<{ id: string; displayName?: string }> {
+): VariableEntry[] {
   if (!variables) {
     return [];
   }
-  const normalized: Array<{ id: string; displayName?: string }> = [];
+  const normalized: VariableEntry[] = [];
   for (const [id, entry] of Object.entries(variables)) {
     const normalizedId = String(id ?? "").trim();
     if (!normalizedId) {
@@ -137,6 +151,25 @@ function normalizeManifestVarRows(
     normalized.push({ id: normalizedId, displayName: displayName?.trim() || undefined });
   }
   return normalized;
+}
+
+function prioritizeVariableEntries(entries: VariableEntry[]): VariableEntry[] {
+  const priorityRank = new Map<string, number>(VARIABLE_PRIORITY_ORDER.map((id, index) => [id, index]));
+  return entries
+    .map((entry, sourceIndex) => ({
+      entry,
+      sourceIndex,
+      rank: priorityRank.get(entry.id) ?? Number.MAX_SAFE_INTEGER,
+    }))
+    .sort((a, b) => a.rank - b.rank || a.sourceIndex - b.sourceIndex)
+    .map(({ entry }) => entry);
+}
+
+function makeVariableOptions(entries: VariableEntry[]): Option[] {
+  return prioritizeVariableEntries(entries).map((entry) => ({
+    value: entry.id,
+    label: makeVariableLabel(entry.id, entry.displayName),
+  }));
 }
 
 function resolveManifestFrames(
@@ -165,6 +198,35 @@ function resolveManifestFrames(
   }
   rows.sort((a, b) => Number(a.fh) - Number(b.fh));
   return { rows, hasFrameList: true };
+}
+
+function mergeManifestRowsWithPrevious(manifestRows: FrameRow[], previousRows: FrameRow[]): FrameRow[] {
+  if (manifestRows.length === 0 || previousRows.length === 0) {
+    return manifestRows;
+  }
+
+  const previousByHour = new Map<number, FrameRow>();
+  for (const row of previousRows) {
+    const fh = Number(row.fh);
+    if (Number.isFinite(fh)) {
+      previousByHour.set(fh, row);
+    }
+  }
+
+  return manifestRows.map((row) => {
+    const previous = previousByHour.get(Number(row.fh));
+    if (!previous) {
+      return row;
+    }
+    return {
+      ...row,
+      meta: row.meta ?? previous.meta,
+      tile_url_template: row.tile_url_template ?? previous.tile_url_template,
+      loop_webp_url: row.loop_webp_url ?? previous.loop_webp_url,
+      loop_webp_tier0_url: row.loop_webp_tier0_url ?? previous.loop_webp_tier0_url,
+      loop_webp_tier1_url: row.loop_webp_tier1_url ?? previous.loop_webp_tier1_url,
+    };
+  });
 }
 
 function extractLegendMeta(row: FrameRow | null | undefined): LegendMeta | null {
@@ -2001,17 +2063,14 @@ export default function App() {
         if (normalizedVars.length === 0) {
           throw new Error("Manifest contained no variables");
         }
-        const variableOptions = normalizedVars.map((entry) => ({
-          value: entry.id,
-          label: makeVariableLabel(entry.id, entry.displayName),
-        }));
+        const variableOptions = makeVariableOptions(normalizedVars);
         const variableIds = variableOptions.map((opt) => opt.value);
         const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
         setVariables(variableOptions);
         setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
 
         const { rows: manifestRows } = resolveManifestFrames(manifestData, nextVar);
-        setFrameRows(manifestRows);
+        setFrameRows((prevRows) => mergeManifestRowsWithPrevious(manifestRows, prevRows));
         const frames = manifestRows.map((row) => Number(row.fh)).filter(Number.isFinite);
         setForecastHour((prev) => nearestFrame(frames, prev));
         setTargetForecastHour((prev) => nearestFrame(frames, prev));
@@ -2130,10 +2189,7 @@ export default function App() {
         const manifestVars = normalizeManifestVarRows(manifestData?.variables);
         if (manifestData && manifestVars.length > 0) {
           setRunManifest(manifestData);
-          const variableOptions = manifestVars.map((entry) => ({
-            value: entry.id,
-            label: makeVariableLabel(entry.id, entry.displayName),
-          }));
+          const variableOptions = makeVariableOptions(manifestVars);
           const variableIds = variableOptions.map((opt) => opt.value);
           const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
           setVariables(variableOptions);
@@ -2147,10 +2203,7 @@ export default function App() {
         }
         setRunManifest(null);
         const normalizedVars = normalizeVarRows(varData);
-        const variableOptions = normalizedVars.map((entry) => ({
-          value: entry.id,
-          label: makeVariableLabel(entry.id, entry.displayName),
-        }));
+        const variableOptions = makeVariableOptions(normalizedVars);
         const variableIds = variableOptions.map((opt) => opt.value);
         const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
         setVariables(variableOptions);
@@ -2211,6 +2264,7 @@ export default function App() {
 
     async function loadFrames() {
       setError(null);
+      let hydratedFromManifest = false;
       const manifestMatchesSelection =
         Boolean(runManifest) &&
         runManifest?.model === model &&
@@ -2218,11 +2272,11 @@ export default function App() {
       if (manifestMatchesSelection) {
         const { rows, hasFrameList } = resolveManifestFrames(runManifest, variable);
         if (hasFrameList) {
-          setFrameRows(rows);
+          setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
           setForecastHour((prev) => nearestFrame(frames, prev));
           setTargetForecastHour((prev) => nearestFrame(frames, prev));
-          return;
+          hydratedFromManifest = true;
         }
       }
 
@@ -2244,8 +2298,10 @@ export default function App() {
         setTargetForecastHour((prev) => nearestFrame(frames, prev));
       } catch (err) {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load frames");
-        setFrameRows([]);
+        if (!hydratedFromManifest) {
+          setError(err instanceof Error ? err.message : "Failed to load frames");
+          setFrameRows([]);
+        }
       }
     }
 
@@ -2291,10 +2347,7 @@ export default function App() {
             setRunManifest(manifestData);
             const normalizedVars = normalizeManifestVarRows(manifestData.variables);
             if (normalizedVars.length > 0) {
-              const variableOptions = normalizedVars.map((entry) => ({
-                value: entry.id,
-                label: makeVariableLabel(entry.id, entry.displayName),
-              }));
+              const variableOptions = makeVariableOptions(normalizedVars);
               const variableIds = variableOptions.map((opt) => opt.value);
               const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
               setVariables(variableOptions);
@@ -2302,7 +2355,7 @@ export default function App() {
             }
             const { rows, hasFrameList } = resolveManifestFrames(manifestData, variable);
             if (hasFrameList) {
-              setFrameRows(rows);
+              setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
               const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
               setForecastHour((prev) => nearestFrame(frames, prev));
               setTargetForecastHour((prev) => nearestFrame(frames, prev));

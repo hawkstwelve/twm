@@ -13,7 +13,7 @@ export const DEFAULTS = {
   model: "hrrr",
   region: "conus",
   run: "latest",
-  variable: "tmp2m",
+  variable: "radar_ptype",
   center: [39.83, -98.58] as [number, number],
   zoom: 4,
   overlayOpacity: 0.9,
