@@ -22,6 +22,8 @@ const CARTO_LIGHT_LABEL_TILES = [
   "https://d.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
 ];
 
+const CARTO_VECTOR_TILES_URL = "https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/tiles.json";
+
 type RegionView = {
   center: [number, number];
   zoom: number;
@@ -51,6 +53,8 @@ const PREFETCH_TILE_EVENT_BUDGET = 1;
 const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
+const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
+const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -201,6 +205,10 @@ function styleFor(
         tiles: CARTO_LIGHT_LABEL_TILES,
         tileSize: 256,
       },
+      [STATE_BOUNDARY_SOURCE_ID]: {
+        type: "vector",
+        url: CARTO_VECTOR_TILES_URL,
+      },
       [CONTOUR_SOURCE_ID]: {
         type: "geojson",
         data: contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION,
@@ -230,6 +238,22 @@ function styleFor(
         paint: overlayPaint,
       },
       ...prefetchLayers,
+      {
+        id: STATE_BOUNDARY_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "boundary",
+        filter: [
+          "all",
+          ["==", "admin_level", 4],
+          ["==", "maritime", 0],
+        ],
+        paint: {
+          "line-color": "#000000",
+          "line-opacity": 0.9,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.75, 7, 1.2, 10, 1.6],
+        },
+      },
       {
         id: CONTOUR_LAYER_ID,
         type: "line",
