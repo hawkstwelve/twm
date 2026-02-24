@@ -413,6 +413,15 @@ VAR_SPECS = {
         "legend_title": "Temperature (°F)",
         "display_smoothing_sigma": 0.8,
     },
+    "dp2m": {
+        "type": "continuous",
+        "units": "F",
+        "range": TMP2M_F_RANGE,
+        "anchors": TMP2M_F_COLOR_ANCHORS,
+        "display_name": "2m Dew Point",
+        "legend_title": "Dew Point (°F)",
+        "display_smoothing_sigma": 0.8,
+    },
     "tmp850": {
         "type": "continuous",
         "units": "C",

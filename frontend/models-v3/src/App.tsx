@@ -83,6 +83,7 @@ const VARIABLE_PRIORITY_ORDER = [
   "radar_ptype",
   "tmp2m",
   "tmp850",
+  "dp2m",
   "precip_total",
   "snowfall_total",
   "wspd10m",

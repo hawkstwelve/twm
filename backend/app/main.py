@@ -45,6 +45,7 @@ VAR_ORDER_BY_MODEL = {
     "hrrr": [
         "tmp2m",
         "tmp850",
+        "dp2m",
         "precip_total",
         "snowfall_total",
         "wspd10m",

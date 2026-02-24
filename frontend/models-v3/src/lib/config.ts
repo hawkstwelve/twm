@@ -19,11 +19,12 @@ export const DEFAULTS = {
   overlayOpacity: 0.9,
 };
 
-export const ALLOWED_VARIABLES = new Set(["tmp2m", "tmp850", "precip_total", "snowfall_total", "wspd10m", "radar_ptype", "precip_ptype", "qpf6h"]);
+export const ALLOWED_VARIABLES = new Set(["tmp2m", "tmp850", "dp2m", "precip_total", "snowfall_total", "wspd10m", "radar_ptype", "precip_ptype", "qpf6h"]);
 
 export const VARIABLE_LABELS: Record<string, string> = {
   tmp2m: "Surface Temperature",
   tmp850: "850mb Temperature",
+  dp2m: "2m Dew Point",
   precip_total: "Total Precipitation",
   snowfall_total: "Total Snowfall (10:1)",
   wspd10m: "Wind Speed",

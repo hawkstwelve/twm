@@ -15,6 +15,8 @@ class HRRRPlugin(BaseModelPlugin):
         normalized = var_id.strip().lower()
         if normalized in {"t2m", "tmp2m", "2t"}:
             return "tmp2m"
+        if normalized in {"dp2m", "d2m", "2d", "dpt2m", "dewpoint2m", "dewpoint"}:
+            return "dp2m"
         if normalized in {"precip_total", "total_precip", "apcp", "qpf", "total_qpf"}:
             return "precip_total"
         if normalized in {"snowfall_total", "asnow", "snow10", "snow_10to1", "total_snow", "totalsnow"}:
@@ -76,6 +78,23 @@ HRRR_VARS: dict[str, VarSpec] = {
             },
         ),
         primary=True,
+    ),
+    "dp2m": VarSpec(
+        id="dp2m",
+        name="2m Dew Point",
+        selectors=VarSelectors(
+            search=[":DPT:2 m above ground:"],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "2",
+            },
+            hints={
+                "upstream_var": "d2m",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="F",
     ),
     "tmp850": VarSpec(
         id="tmp850",
