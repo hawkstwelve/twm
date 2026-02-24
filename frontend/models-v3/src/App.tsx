@@ -2609,14 +2609,6 @@ export default function App() {
           </div>
         )}
 
-        {(isPlaying || isPreloadingForPlay || isLoopPreloading) && (
-          <div className="absolute left-4 top-20 z-50 rounded-md border border-border/40 bg-[hsl(var(--toolbar))]/90 px-2.5 py-1.5 text-[10px] text-foreground shadow-lg backdrop-blur-md">
-            {isLoopPreloading || renderMode !== "tiles"
-              ? `loopReady ${loopProgress.ready} • loopFailed ${loopProgress.failed} • loopTotal ${loopProgress.total}`
-              : `aheadReady ${bufferSnapshot.bufferedAheadCount} • aheadTerminal ${bufferSnapshot.terminalAheadCount} • inflightTiles ${bufferSnapshot.inFlightCount} • queueDepth ${bufferSnapshot.queueDepth}`}
-          </div>
-        )}
-
         {tooltip && (
           <div
             className="pointer-events-none absolute z-50 rounded-md border border-border/60 bg-[hsl(var(--toolbar))]/95 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-xl backdrop-blur-md"
