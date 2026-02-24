@@ -54,26 +54,6 @@ const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 
 type RenderModeState = "webp_tier0" | "webp_tier1" | "tiles";
-type RenderTransport = "webp" | "tiles";
-
-type RenderRouteDebugEvent = {
-  type: "intent" | "commit";
-  from: RenderTransport;
-  to: RenderTransport;
-  zoom: number;
-  effectiveZoom: number;
-  gestureActive: boolean;
-  canUseLoopPlayback: boolean;
-  renderMode: RenderModeState;
-  visibleRenderMode: RenderModeState;
-  thresholds: typeof WEBP_RENDER_MODE_THRESHOLDS;
-  at: string;
-};
-
-type RenderRouteDebugStore = {
-  history: RenderRouteDebugEvent[];
-  last: RenderRouteDebugEvent | null;
-};
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -233,10 +213,6 @@ function nextRenderModeByHysteresis(current: RenderModeState, effectiveZoom: num
     return effectiveZoom <= tier0Max - hysteresis ? "webp_tier0" : "webp_tier1";
   }
   return "tiles";
-}
-
-function modeToTransport(mode: RenderModeState): RenderTransport {
-  return mode === "tiles" ? "tiles" : "webp";
 }
 
 async function preloadLoopFrame(
@@ -470,6 +446,7 @@ export default function App() {
   const [loopBaseForecastHour, setLoopBaseForecastHour] = useState<number | null>(null);
   const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
+  const [scrubRequestedHour, setScrubRequestedHour] = useState<number | null>(null);
   const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === "undefined" ? true : !document.hidden
@@ -543,8 +520,6 @@ export default function App() {
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
   const frameSetRef = useRef<Set<number>>(new Set());
-  const previousIntentTransportRef = useRef<RenderTransport>(modeToTransport(webpDefaultEnabled ? "webp_tier0" : "tiles"));
-  const previousCommittedTransportRef = useRef<RenderTransport>(modeToTransport(webpDefaultEnabled ? "webp_tier0" : "tiles"));
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -1181,7 +1156,10 @@ export default function App() {
       return activeInFlight;
     }
 
-    const currentIndex = frameHours.indexOf(forecastHour);
+    const requestedPivotHour = isScrubbing && Number.isFinite(scrubRequestedHour)
+      ? nearestFrame(frameHours, scrubRequestedHour as number)
+      : forecastHour;
+    const currentIndex = frameHours.indexOf(requestedPivotHour);
     const pivot = currentIndex >= 0 ? currentIndex : 0;
     const candidates: number[] = [...activeInFlight];
     const seen = new Set<number>(activeInFlight);
@@ -1235,6 +1213,7 @@ export default function App() {
     playbackPolicy.bufferTarget,
     isPreloadingForPlay,
     isScrubbing,
+    scrubRequestedHour,
     isLoopDisplayActive,
   ]);
 
@@ -1343,6 +1322,96 @@ export default function App() {
     return Boolean(mapLoadingTileUrl && mapLoadingTileUrl === tileUrl && settledTileUrl !== tileUrl);
   }, [isPlaying, mapLoadingTileUrl, tileUrl, settledTileUrl]);
 
+  const findNearestReadyTileScrubHour = useCallback(
+    (requestedHour: number): number | null => {
+      if (frameHours.length === 0) {
+        return null;
+      }
+      const snappedHour = nearestFrame(frameHours, requestedHour);
+      if (isTileReady(tileUrlForHour(snappedHour))) {
+        return snappedHour;
+      }
+
+      const requestedIndex = frameHours.indexOf(snappedHour);
+      if (requestedIndex < 0) {
+        return null;
+      }
+
+      const movingForward = snappedHour >= forecastHour;
+      const checkIndex = (index: number): number | null => {
+        if (index < 0 || index >= frameHours.length) {
+          return null;
+        }
+        const candidateHour = frameHours[index];
+        if (!isTileReady(tileUrlForHour(candidateHour))) {
+          return null;
+        }
+        return candidateHour;
+      };
+
+      for (let step = 1; step <= AUTOPLAY_SKIP_WINDOW; step += 1) {
+        const primaryIndex = movingForward ? requestedIndex + step : requestedIndex - step;
+        const primaryCandidate = checkIndex(primaryIndex);
+        if (Number.isFinite(primaryCandidate)) {
+          return primaryCandidate as number;
+        }
+
+        const secondaryIndex = movingForward ? requestedIndex - step : requestedIndex + step;
+        const secondaryCandidate = checkIndex(secondaryIndex);
+        if (Number.isFinite(secondaryCandidate)) {
+          return secondaryCandidate as number;
+        }
+      }
+
+      const currentCandidate = checkIndex(frameHours.indexOf(forecastHour));
+      if (Number.isFinite(currentCandidate)) {
+        return currentCandidate as number;
+      }
+
+      return null;
+    },
+    [frameHours, forecastHour, isTileReady, tileUrlForHour]
+  );
+
+  const findNearestDecodedLoopScrubHour = useCallback(
+    (requestedHour: number, mode: RenderModeState): number | null => {
+      if (mode === "tiles" || loopFrameHours.length === 0) {
+        return null;
+      }
+      const snappedHour = nearestFrame(loopFrameHours, requestedHour);
+      if (hasDecodedLoopFrame(snappedHour, mode)) {
+        return snappedHour;
+      }
+
+      const pivotIndex = loopFrameHours.indexOf(snappedHour);
+      if (pivotIndex < 0) {
+        return null;
+      }
+
+      const movingForward = snappedHour >= forecastHour;
+      for (let step = 1; step < loopFrameHours.length; step += 1) {
+        const primaryIndex = movingForward ? pivotIndex + step : pivotIndex - step;
+        if (primaryIndex >= 0 && primaryIndex < loopFrameHours.length) {
+          const primaryHour = loopFrameHours[primaryIndex];
+          if (hasDecodedLoopFrame(primaryHour, mode)) {
+            return primaryHour;
+          }
+        }
+
+        const secondaryIndex = movingForward ? pivotIndex - step : pivotIndex + step;
+        if (secondaryIndex >= 0 && secondaryIndex < loopFrameHours.length) {
+          const secondaryHour = loopFrameHours[secondaryIndex];
+          if (hasDecodedLoopFrame(secondaryHour, mode)) {
+            return secondaryHour;
+          }
+        }
+      }
+
+      return null;
+    },
+    [loopFrameHours, hasDecodedLoopFrame, forecastHour]
+  );
+
   const handleFrameSettled = useCallback((loadedTileUrl: string) => {
     markTileReady(loadedTileUrl);
     markFrameReady(loadedTileUrl);
@@ -1427,6 +1496,7 @@ export default function App() {
       lastBufferedCount: 0,
       lastProgressAt: Date.now(),
     };
+    setScrubRequestedHour(null);
     const version = ++bufferVersionRef.current;
     setBufferSnapshot({
       totalFrames: frameHours.length,
@@ -1449,68 +1519,6 @@ export default function App() {
     resolvedRunForRequests,
     variable,
   ]);
-
-  useEffect(() => {
-    debugLog("render mode transition", {
-      mode: renderMode,
-      visibleMode: visibleRenderMode,
-      canUseLoopPlayback,
-    });
-  }, [renderMode, visibleRenderMode, canUseLoopPlayback, debugLog]);
-
-  useEffect(() => {
-    const currentIntent = modeToTransport(renderMode);
-    const currentCommitted = modeToTransport(visibleRenderMode);
-    const effectiveZoom = getEffectiveZoom(mapZoom);
-
-    const pushRenderRouteDebug = (event: RenderRouteDebugEvent) => {
-      console.info("[render-route]", event);
-      const debugWindow = window as Window & {
-        __twfRenderRouteDebug?: RenderRouteDebugStore;
-      };
-      const store = debugWindow.__twfRenderRouteDebug ?? { history: [], last: null };
-      store.history.push(event);
-      if (store.history.length > 120) {
-        store.history.splice(0, store.history.length - 120);
-      }
-      store.last = event;
-      debugWindow.__twfRenderRouteDebug = store;
-    };
-
-    if (currentIntent !== previousIntentTransportRef.current) {
-      pushRenderRouteDebug({
-        type: "intent",
-        from: previousIntentTransportRef.current,
-        to: currentIntent,
-        zoom: Number(mapZoom.toFixed(2)),
-        effectiveZoom: Number(effectiveZoom.toFixed(2)),
-        gestureActive: zoomGestureActive,
-        canUseLoopPlayback,
-        renderMode,
-        visibleRenderMode,
-        thresholds: WEBP_RENDER_MODE_THRESHOLDS,
-        at: new Date().toISOString(),
-      });
-      previousIntentTransportRef.current = currentIntent;
-    }
-
-    if (currentCommitted !== previousCommittedTransportRef.current) {
-      pushRenderRouteDebug({
-        type: "commit",
-        from: previousCommittedTransportRef.current,
-        to: currentCommitted,
-        zoom: Number(mapZoom.toFixed(2)),
-        effectiveZoom: Number(effectiveZoom.toFixed(2)),
-        gestureActive: zoomGestureActive,
-        canUseLoopPlayback,
-        renderMode,
-        visibleRenderMode,
-        thresholds: WEBP_RENDER_MODE_THRESHOLDS,
-        at: new Date().toISOString(),
-      });
-      previousCommittedTransportRef.current = currentCommitted;
-    }
-  }, [renderMode, visibleRenderMode, mapZoom, zoomGestureActive, canUseLoopPlayback]);
 
   useEffect(() => {
     if (!isLoopPreloading) {
@@ -1839,10 +1847,12 @@ export default function App() {
   const requestForecastHour = useCallback(
     (requestedHour: number) => {
       if (!isScrubbing) {
+        setScrubRequestedHour(null);
         setTargetForecastHour(requestedHour);
         return;
       }
 
+      setScrubRequestedHour(requestedHour);
       pendingScrubHourRef.current = requestedHour;
       if (scrubRafRef.current !== null) {
         return;
@@ -1855,14 +1865,26 @@ export default function App() {
           return;
         }
         const requested = latestRequestedHour as number;
-        const nextHour = isLoopDisplayActive && loopFrameHours.length > 0
-          ? nearestFrame(loopFrameHours, requested)
-          : requested;
-        setTargetForecastHour(nextHour);
-
         if (!isLoopDisplayActive) {
+          if (frameHours.length === 0) {
+            return;
+          }
+          const snappedTileHour = nearestFrame(frameHours, requested);
+          const readyTileHour = findNearestReadyTileScrubHour(snappedTileHour);
+          setTargetForecastHour(Number.isFinite(readyTileHour) ? (readyTileHour as number) : snappedTileHour);
           return;
         }
+
+        const nextHour = loopFrameHours.length > 0
+          ? nearestFrame(loopFrameHours, requested)
+          : requested;
+        const readyLoopHour = findNearestDecodedLoopScrubHour(nextHour, visibleRenderMode);
+        if (Number.isFinite(readyLoopHour)) {
+          const resolvedReadyHour = readyLoopHour as number;
+          setTargetForecastHour(resolvedReadyHour);
+          setLoopDisplayHour(resolvedReadyHour);
+        }
+
         loopDisplayDecodeTokenRef.current += 1;
         const decodeToken = loopDisplayDecodeTokenRef.current;
         // No signal: decode completes and caches regardless of subsequent scrub
@@ -1877,13 +1899,23 @@ export default function App() {
               return;
             }
             setLoopDisplayHour(nextHour);
+            setTargetForecastHour(nextHour);
           })
           .catch(() => {
             // best-effort decode path for scrub; keep previous visible frame on failure.
           });
       });
     },
-    [isScrubbing, isLoopDisplayActive, loopFrameHours, ensureLoopFrameDecoded, visibleRenderMode]
+    [
+      isScrubbing,
+      isLoopDisplayActive,
+      loopFrameHours,
+      frameHours,
+      ensureLoopFrameDecoded,
+      visibleRenderMode,
+      findNearestReadyTileScrubHour,
+      findNearestDecodedLoopScrubHour,
+    ]
   );
 
   useEffect(() => {
@@ -2566,7 +2598,9 @@ export default function App() {
     if (isScrubbing) {
       setIsLoopAutoplayBuffering(false);
       setIsLoopPreloading(false);
+      return;
     }
+    setScrubRequestedHour(null);
   }, [isScrubbing]);
 
   useEffect(() => {
