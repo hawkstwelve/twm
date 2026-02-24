@@ -11,7 +11,9 @@ import {
   type LegendMeta,
   type LoopManifestResponse,
   type RegionPreset,
+  type RunManifestResponse,
   type VarRow,
+  fetchManifest,
   fetchFrames,
   fetchLoopManifest,
   fetchModels,
@@ -117,6 +119,52 @@ function normalizeVarRows(rows: VarRow[]): Array<{ id: string; displayName?: str
     normalized.push({ id, displayName: displayName?.trim() || undefined });
   }
   return normalized;
+}
+
+function normalizeManifestVarRows(
+  variables: RunManifestResponse["variables"] | null | undefined
+): Array<{ id: string; displayName?: string }> {
+  if (!variables) {
+    return [];
+  }
+  const normalized: Array<{ id: string; displayName?: string }> = [];
+  for (const [id, entry] of Object.entries(variables)) {
+    const normalizedId = String(id ?? "").trim();
+    if (!normalizedId) {
+      continue;
+    }
+    const displayName = entry?.display_name ?? entry?.name ?? entry?.label;
+    normalized.push({ id: normalizedId, displayName: displayName?.trim() || undefined });
+  }
+  return normalized;
+}
+
+function resolveManifestFrames(
+  manifest: RunManifestResponse | null | undefined,
+  varKey: string
+): { rows: FrameRow[]; hasFrameList: boolean } {
+  if (!manifest || !varKey) {
+    return { rows: [], hasFrameList: false };
+  }
+  const varEntry = manifest.variables?.[varKey];
+  if (!varEntry || !Array.isArray(varEntry.frames)) {
+    return { rows: [], hasFrameList: false };
+  }
+
+  const rows: FrameRow[] = [];
+  for (const frame of varEntry.frames) {
+    const fh = Number(frame?.fh);
+    if (!Number.isFinite(fh)) {
+      continue;
+    }
+    rows.push({
+      fh,
+      has_cog: true,
+      run: manifest.run,
+    });
+  }
+  rows.sort((a, b) => Number(a.fh) - Number(b.fh));
+  return { rows, hasFrameList: true };
 }
 
 function extractLegendMeta(row: FrameRow | null | undefined): LegendMeta | null {
@@ -375,6 +423,7 @@ export default function App() {
   const [runs, setRuns] = useState<string[]>([]);
   const [variables, setVariables] = useState<Option[]>([]);
   const [frameRows, setFrameRows] = useState<FrameRow[]>([]);
+  const [runManifest, setRunManifest] = useState<RunManifestResponse | null>(null);
   const [loopManifest, setLoopManifest] = useState<LoopManifestResponse | null>(null);
   const [regionPresets, setRegionPresets] = useState<Record<string, RegionPreset>>({});
 
@@ -462,9 +511,7 @@ export default function App() {
   // stale-closure issues (updated every render, not inside an effect).
   const activeSelectorRef = useRef({ model, region, variable, run });
   activeSelectorRef.current = { model, region, variable, run };
-  // Set to true when fast-path successfully bootstraps all state. Waterfall effects
-  // check this and bail out early to avoid duplicate fetches.
-  const bootstrappedRef = useRef(false);
+  const runsLoadedForModelRef = useRef<string>("");
   // Pre-built Set of valid forecast hours, kept in sync with frameHours.
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
@@ -1783,13 +1830,9 @@ export default function App() {
       });
   }, [isLoopDisplayActive, resolvedLoopForecastHour, visibleRenderMode, ensureLoopFrameDecoded]);
 
-  // ── Fast-path: fire all discovery fetches in parallel on mount ─────────────────────────────
-  // On a 50 ms RTT connection the standard sequential waterfall (models → regions →
-  // runs + vars → frames) costs 200-400 ms before MapLibre can start loading tiles.
-  // Here we fire all five fetches simultaneously. If they all succeed and the user has
-  // not yet touched any selector, we apply the results in one batched update and skip
-  // the waterfall entirely. If any fetch fails we bail out silently and let the
-  // sequential waterfall effects (which run in parallel on mount) finish normally.
+  // ── Fast-path: fire discovery fetches in parallel on mount ──────────────────────────────────
+  // The runtime payload now comes from run manifest so vars/frames are derived from one
+  // response instead of separate sequential vars + frames requests.
   useEffect(() => {
     const controller = new AbortController();
     const generation = requestGenerationRef.current;
@@ -1798,15 +1841,9 @@ export default function App() {
       fetchModels({ signal: controller.signal }),
       fetchRegionPresets({ signal: controller.signal }),
       fetchRuns(DEFAULTS.model, { signal: controller.signal }),
-      fetchVars(DEFAULTS.model, DEFAULTS.run, { signal: controller.signal }),
-      fetchFrames(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable, { signal: controller.signal }),
-      // Pre-fetch the loop manifest in parallel so the WebP tier is known as soon
-      // as frame data arrives, eliminating a sequential 6th RTT on initial load.
-      fetchLoopManifest(DEFAULTS.model, DEFAULTS.run, DEFAULTS.variable, { signal: controller.signal }).catch(
-        () => null
-      ),
+      fetchManifest(DEFAULTS.model, DEFAULTS.run, { signal: controller.signal }),
     ])
-      .then(([modelsData, regionPresetData, runsData, varsData, framesData, manifestData]) => {
+      .then(([modelsData, regionPresetData, runsData, manifestData]) => {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
 
         // If the user changed a selector while requests were in-flight, bail out and
@@ -1841,29 +1878,28 @@ export default function App() {
 
         setRuns(runsData);
         setRun(DEFAULTS.run);
+        setRunManifest(manifestData);
 
-        const normalizedVars = normalizeVarRows(varsData);
+        const normalizedVars = normalizeManifestVarRows(manifestData.variables);
+        if (normalizedVars.length === 0) {
+          throw new Error("Manifest contained no variables");
+        }
         const variableOptions = normalizedVars.map((entry) => ({
           value: entry.id,
           label: makeVariableLabel(entry.id, entry.displayName),
         }));
         const variableIds = variableOptions.map((opt) => opt.value);
+        const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
         setVariables(variableOptions);
-        setVariable((prev) => (variableIds.includes(prev) ? prev : pickPreferred(variableIds, DEFAULTS.variable)));
+        setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
 
-        setFrameRows(framesData);
-        const frames = framesData.map((row) => Number(row.fh)).filter(Number.isFinite);
+        const { rows: manifestRows } = resolveManifestFrames(manifestData, nextVar);
+        setFrameRows(manifestRows);
+        const frames = manifestRows.map((row) => Number(row.fh)).filter(Number.isFinite);
         setForecastHour((prev) => nearestFrame(frames, prev));
         setTargetForecastHour((prev) => nearestFrame(frames, prev));
+        setLoopManifest(null);
 
-        // Apply the loop manifest fetched in parallel — avoids a sequential 6th RTT.
-        if (manifestData) {
-          setLoopManifest(manifestData);
-        }
-
-        // Signal that all discovery state has been committed — waterfall effects will
-        // see this flag and skip their own fetches.
-        bootstrappedRef.current = true;
         setLoading(false);
       })
       .catch((err) => {
@@ -1879,7 +1915,6 @@ export default function App() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
     const controller = new AbortController();
     const generation = requestGenerationRef.current;
 
@@ -1911,7 +1946,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
     if (!model) return;
     const controller = new AbortController();
     const generation = requestGenerationRef.current;
@@ -1942,7 +1976,6 @@ export default function App() {
   }, [model]);
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
     if (!model) return;
     const controller = new AbortController();
     const generation = requestGenerationRef.current;
@@ -1950,30 +1983,65 @@ export default function App() {
     async function loadRunsAndVars() {
       setError(null);
       try {
-        const runData = await fetchRuns(model, { signal: controller.signal });
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
+        const shouldFetchRuns = runsLoadedForModelRef.current !== model;
+        const runDataPromise = shouldFetchRuns
+          ? fetchRuns(model, { signal: controller.signal })
+          : Promise.resolve(runs);
+        const [runData, requestedManifest] = await Promise.all([
+          runDataPromise,
+          fetchManifest(model, run, { signal: controller.signal }).catch(() => null),
+        ]);
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
+          return;
+        }
 
         const nextRun = run !== "latest" && runData.includes(run) ? run : "latest";
+        let manifestData = requestedManifest;
+        if (!manifestData && nextRun !== run) {
+          manifestData = await fetchManifest(model, nextRun, { signal: controller.signal }).catch(() => null);
+          if (controller.signal.aborted || generation !== requestGenerationRef.current) {
+            return;
+          }
+        }
+
+        if (shouldFetchRuns) {
+          runsLoadedForModelRef.current = model;
+          setRuns(runData);
+        }
+        setRun(nextRun);
+
+        const manifestVars = normalizeManifestVarRows(manifestData?.variables);
+        if (manifestData && manifestVars.length > 0) {
+          setRunManifest(manifestData);
+          const variableOptions = manifestVars.map((entry) => ({
+            value: entry.id,
+            label: makeVariableLabel(entry.id, entry.displayName),
+          }));
+          const variableIds = variableOptions.map((opt) => opt.value);
+          const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
+          setVariables(variableOptions);
+          setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
+          return;
+        }
+
         const varData = await fetchVars(model, nextRun, { signal: controller.signal });
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-
-        setRuns(runData);
-
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
+          return;
+        }
+        setRunManifest(null);
         const normalizedVars = normalizeVarRows(varData);
         const variableOptions = normalizedVars.map((entry) => ({
           value: entry.id,
           label: makeVariableLabel(entry.id, entry.displayName),
         }));
-        setVariables(variableOptions);
-
-        setRun(nextRun);
-
         const variableIds = variableOptions.map((opt) => opt.value);
         const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
+        setVariables(variableOptions);
         setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
       } catch (err) {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load runs/variables");
+        setRunManifest(null);
+        setError(err instanceof Error ? err.message : "Failed to load run manifest");
       }
     }
 
@@ -2026,6 +2094,21 @@ export default function App() {
 
     async function loadFrames() {
       setError(null);
+      const manifestMatchesSelection =
+        Boolean(runManifest) &&
+        runManifest?.model === model &&
+        (run === "latest" || runManifest?.run === run || runManifest?.run === resolvedRunForRequests);
+      if (manifestMatchesSelection) {
+        const { rows, hasFrameList } = resolveManifestFrames(runManifest, variable);
+        if (hasFrameList) {
+          setFrameRows(rows);
+          const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
+          setForecastHour((prev) => nearestFrame(frames, prev));
+          setTargetForecastHour((prev) => nearestFrame(frames, prev));
+          return;
+        }
+      }
+
       try {
         const rows = await fetchFrames(model, resolvedRunForRequests, variable, { signal: controller.signal });
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
@@ -2053,7 +2136,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [model, run, variable, resolvedRunForRequests]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2065,6 +2148,46 @@ export default function App() {
       }
       tickController?.abort();
       tickController = new AbortController();
+      const manifestMatchesSelection =
+        Boolean(runManifest) &&
+        runManifest?.model === model &&
+        (run === "latest" || runManifest?.run === run || runManifest?.run === resolvedRunForRequests);
+
+      if (manifestMatchesSelection) {
+        fetchManifest(model, run, { signal: tickController.signal })
+          .then((manifestData) => {
+            if (cancelled || tickController?.signal.aborted) {
+              return;
+            }
+            setRunManifest(manifestData);
+            const normalizedVars = normalizeManifestVarRows(manifestData.variables);
+            if (normalizedVars.length > 0) {
+              const variableOptions = normalizedVars.map((entry) => ({
+                value: entry.id,
+                label: makeVariableLabel(entry.id, entry.displayName),
+              }));
+              const variableIds = variableOptions.map((opt) => opt.value);
+              const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
+              setVariables(variableOptions);
+              setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
+            }
+            const { rows, hasFrameList } = resolveManifestFrames(manifestData, variable);
+            if (hasFrameList) {
+              setFrameRows(rows);
+              const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
+              setForecastHour((prev) => nearestFrame(frames, prev));
+              setTargetForecastHour((prev) => nearestFrame(frames, prev));
+            }
+          })
+          .catch((err) => {
+            if (err instanceof DOMException && err.name === "AbortError") {
+              return;
+            }
+            // Background refresh should not interrupt active UI.
+          });
+        return;
+      }
+
       // Use `run` ("latest" when in live mode) rather than the resolved run ID so
       // the request hits the short-TTL ETag path and bypasses any stale immutable
       // browser-cache entries for the resolved run URL.
@@ -2091,7 +2214,7 @@ export default function App() {
       tickController?.abort();
       window.clearInterval(interval);
     };
-  }, [model, run, variable, resolvedRunForRequests]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest]);
 
   useEffect(() => {
     if (!isPlaying || renderMode !== "tiles" || frameHours.length === 0) return;

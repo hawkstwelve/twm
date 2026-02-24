@@ -75,6 +75,27 @@ export type LoopManifestResponse = {
   loop_tiers: LoopManifestTier[];
 };
 
+export type RunManifestFrame = {
+  fh: number;
+  valid_time?: string;
+};
+
+export type RunManifestVariable = {
+  display_name?: string;
+  name?: string;
+  label?: string;
+  frames?: RunManifestFrame[];
+};
+
+export type RunManifestResponse = {
+  contract_version?: string;
+  model: string;
+  run: string;
+  region?: string;
+  last_updated?: string;
+  variables: Record<string, RunManifestVariable>;
+};
+
 export type VarRow =
   | string
   | {
@@ -94,6 +115,42 @@ async function fetchJson<T>(url: string, options?: FetchOptions): Promise<T> {
     throw new Error(`Request failed: ${response.status} ${response.statusText}`);
   }
   return response.json() as Promise<T>;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isRunManifestResponse(value: unknown): value is RunManifestResponse {
+  if (!isObject(value)) {
+    return false;
+  }
+  if (typeof value.model !== "string" || typeof value.run !== "string") {
+    return false;
+  }
+  if (!isObject(value.variables)) {
+    return false;
+  }
+
+  for (const varEntry of Object.values(value.variables)) {
+    if (!isObject(varEntry)) {
+      return false;
+    }
+    if ("frames" in varEntry && !Array.isArray(varEntry.frames)) {
+      return false;
+    }
+    if (Array.isArray(varEntry.frames)) {
+      for (const frame of varEntry.frames) {
+        if (!isObject(frame)) {
+          return false;
+        }
+        if (!Number.isFinite(Number(frame.fh))) {
+          return false;
+        }
+      }
+    }
+  }
+  return true;
 }
 
 const REGIONS_CACHE_KEY = "twf_v3_regions_cache";
@@ -170,6 +227,22 @@ export async function fetchVars(model: string, run: string, options?: FetchOptio
     `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`,
     options
   );
+}
+
+export async function fetchManifest(
+  model: string,
+  run: string,
+  options?: FetchOptions
+): Promise<RunManifestResponse> {
+  const runKey = run || "latest";
+  const payload = await fetchJson<unknown>(
+    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/manifest`,
+    options
+  );
+  if (!isRunManifestResponse(payload)) {
+    throw new Error("Invalid manifest response shape");
+  }
+  return payload;
 }
 
 export async function fetchFrames(
