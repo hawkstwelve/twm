@@ -845,6 +845,14 @@ export function MapCanvas({
     if (!map || !isLoaded) {
       return;
     }
+
+    // When loop image mode is active, skip raster tile swap work entirely.
+    // Running tile swaps in the background during loop scrubbing can emit
+    // transient loading state and occasionally surface tile-layer flashes.
+    if (loopActive) {
+      onFrameLoadingChange?.(tileUrl, false);
+      return;
+    }
     let settledCleanup: (() => void) | undefined;
 
     if (tileUrl === activeTileUrlRef.current) {
@@ -957,6 +965,7 @@ export function MapCanvas({
   }, [
     tileUrl,
     isLoaded,
+    loopActive,
     mode,
     opacity,
     crossfade,
@@ -1081,8 +1090,13 @@ export function MapCanvas({
 
     setLayerVisibility(map, LOOP_LAYER_ID, Boolean(loopActive && loopImageUrl));
     setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m" && !loopActive);
-    setLayerVisibility(map, layerId("a"), true);
-    setLayerVisibility(map, layerId("b"), true);
+    if (loopActive) {
+      setLayerVisibility(map, layerId("a"), false);
+      setLayerVisibility(map, layerId("b"), false);
+    } else {
+      setLayerVisibility(map, layerId("a"), true);
+      setLayerVisibility(map, layerId("b"), true);
+    }
     // Note: prefetch layer visibility is managed solely by the prefetch-tiles effect.
     // Do NOT force them visible here — that would cause tile requests on every zoom change.
     enforceLayerOrder(map);

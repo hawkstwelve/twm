@@ -1316,11 +1316,11 @@ export default function App() {
   }, [tileUrl, isTileReady]);
 
   const isScrubLoading = useMemo(() => {
-    if (isPlaying) {
+    if (isPlaying || isScrubbing) {
       return false;
     }
     return Boolean(mapLoadingTileUrl && mapLoadingTileUrl === tileUrl && settledTileUrl !== tileUrl);
-  }, [isPlaying, mapLoadingTileUrl, tileUrl, settledTileUrl]);
+  }, [isPlaying, isScrubbing, mapLoadingTileUrl, tileUrl, settledTileUrl]);
 
   const findNearestReadyTileScrubHour = useCallback(
     (requestedHour: number): number | null => {
@@ -1871,7 +1871,9 @@ export default function App() {
           }
           const snappedTileHour = nearestFrame(frameHours, requested);
           const readyTileHour = findNearestReadyTileScrubHour(snappedTileHour);
-          setTargetForecastHour(Number.isFinite(readyTileHour) ? (readyTileHour as number) : snappedTileHour);
+          if (Number.isFinite(readyTileHour)) {
+            setTargetForecastHour(readyTileHour as number);
+          }
           return;
         }
 
