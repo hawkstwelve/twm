@@ -101,6 +101,16 @@ function isMapErrorDebugEnabled(): boolean {
   return value === "1" || value === "true" || value === "yes" || value === "on";
 }
 
+function readMapDebugFlag(key: string): boolean {
+  if (typeof window === "undefined") {
+    return false;
+  }
+  const fromQuery = new URLSearchParams(window.location.search).get(key);
+  const fromStorage = window.localStorage.getItem(key);
+  const value = String(fromQuery ?? fromStorage ?? "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 function getResamplingMode(variable?: string): "nearest" | "linear" {
   // Discrete/categorical variables use nearest to preserve exact values.
   // Continuous variables (tmp2m, wspd10m, etc.) use linear for smooth display.
@@ -339,9 +349,18 @@ export function MapCanvas({
   const tileViewportReadyTokenRef = useRef(0);
   const mapErrorDebugEnabledRef = useRef(false);
   const mapErrorBucketsRef = useRef<Map<string, { count: number; lastLogAt: number }>>(new Map());
+  const modeRef = useRef(mode);
+  const disableLoopImageRef = useRef(false);
+  const disablePrefetchRef = useRef(false);
+
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
 
   useEffect(() => {
     mapErrorDebugEnabledRef.current = isMapErrorDebugEnabled();
+    disableLoopImageRef.current = readMapDebugFlag("twf_disable_loop_image");
+    disablePrefetchRef.current = readMapDebugFlag("twf_disable_prefetch");
   }, []);
 
   const logMapDebug = useCallback((label: string, payload: Record<string, unknown>) => {
@@ -692,7 +711,7 @@ export function MapCanvas({
           requestToken,
           sourceEventCount,
           isSourceLoaded: source ? map.isSourceLoaded(source) : null,
-          mode,
+          mode: modeRef.current,
           activeTileUrl: activeTileUrlRef.current,
           errorStack,
         });
@@ -732,7 +751,7 @@ export function MapCanvas({
       mapRef.current = null;
       setIsLoaded(false);
     };
-  }, [cancelCrossfade, enforceLayerOrder, mode]);
+  }, [cancelCrossfade, enforceLayerOrder]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -969,6 +988,14 @@ export function MapCanvas({
       return;
     }
 
+    if (disablePrefetchRef.current) {
+      for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
+        setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
+        setLayerVisibility(map, prefetchLayerId(idx), false);
+      }
+      return;
+    }
+
     const token = ++prefetchTokenRef.current;
     const urls = Array.from({ length: PREFETCH_BUFFER_COUNT }, (_, idx) => prefetchTileUrls[idx] ?? "");
     const cleanups: Array<() => void> = [];
@@ -1063,6 +1090,15 @@ export function MapCanvas({
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isLoaded) {
+      return;
+    }
+
+    if (disableLoopImageRef.current) {
+      setLayerVisibility(map, LOOP_LAYER_ID, false);
+      setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m");
+      setLayerVisibility(map, layerId("a"), true);
+      setLayerVisibility(map, layerId("b"), true);
+      enforceLayerOrder(map);
       return;
     }
 
