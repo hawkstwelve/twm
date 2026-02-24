@@ -54,6 +54,7 @@ const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
+const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
 const LOOP_SOURCE_ID = "twf-loop-image";
@@ -240,6 +241,22 @@ function styleFor(
       },
       ...prefetchLayers,
       {
+        id: COASTLINE_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "water",
+        filter: [
+          "all",
+          ["==", "$type", "Polygon"],
+          ["in", "class", "ocean", "sea"],
+        ],
+        paint: {
+          "line-color": "#000000",
+          "line-opacity": 0.8,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.9, 7, 1.2, 10, 1.6],
+        },
+      },
+      {
         id: COUNTRY_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
@@ -247,6 +264,7 @@ function styleFor(
         filter: [
           "all",
           ["==", "admin_level", 2],
+          ["==", "maritime", 0],
         ],
         paint: {
           "line-color": "#000000",
@@ -262,6 +280,7 @@ function styleFor(
         filter: [
           "all",
           ["==", "admin_level", 4],
+          ["==", "maritime", 0],
         ],
         paint: {
           "line-color": "#000000",
@@ -424,6 +443,9 @@ export function MapCanvas({
     }
     if (map.getLayer(LOOP_LAYER_ID)) {
       map.moveLayer(LOOP_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(COASTLINE_LAYER_ID)) {
+      map.moveLayer(COASTLINE_LAYER_ID, "twf-labels");
     }
     if (map.getLayer(COUNTRY_BOUNDARY_LAYER_ID)) {
       map.moveLayer(COUNTRY_BOUNDARY_LAYER_ID, "twf-labels");
