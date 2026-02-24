@@ -427,6 +427,10 @@ export default function App() {
   const inFlightStartedAtRef = useRef<Map<number, number>>(new Map());
   const readyLatencyStatsRef = useRef({ totalMs: 0, count: 0 });
   const bufferVersionRef = useRef(0);
+  // Tracks a pending RAF for coalescing bufferSnapshot updates (see markFrameReady).
+  const bufferSnapshotRafRef = useRef<number | null>(null);
+  // Stores the last committed snapshot stats so unchanged updates are skipped entirely.
+  const lastSnapshotStatsRef = useRef({ bufferedCount: -1, failedCount: -1, inFlightCount: -1, queueDepth: -1 });
   const datasetGenerationRef = useRef(0);
   const requestGenerationRef = useRef(0);
   const scrubRafRef = useRef<number | null>(null);
@@ -1021,6 +1025,21 @@ export default function App() {
     const failedCount = failed.size;
     const terminalCount = Math.min(totalFrames, bufferedCount + failedCount);
     const queueDepth = Math.max(0, totalFrames - terminalCount - inFlight.size);
+
+    // Skip the React state update when the counts that drive UI and prefetchHours
+    // are identical to the last committed snapshot. Tile events from prefetch sources
+    // can fire 20-40×/sec during animation even when nothing meaningful has changed.
+    const prev = lastSnapshotStatsRef.current;
+    if (
+      prev.bufferedCount === bufferedCount &&
+      prev.failedCount === failedCount &&
+      prev.inFlightCount === inFlight.size &&
+      prev.queueDepth === queueDepth
+    ) {
+      return;
+    }
+    lastSnapshotStatsRef.current = { bufferedCount, failedCount, inFlightCount: inFlight.size, queueDepth };
+
     const version = ++bufferVersionRef.current;
     const snapshot = {
       totalFrames,
@@ -1154,16 +1173,33 @@ export default function App() {
     const ready = readyTileUrlsRef.current;
     ready.set(readyUrl, now);
 
-    for (const [url, ts] of ready) {
-      if (now - ts > READY_URL_TTL_MS) {
-        ready.delete(url);
-      }
-    }
-
+    // Only pay the eviction cost when the map is actually over budget.
+    // The previous code iterated all 160 entries + spread them into an array on
+    // every tile event regardless of map size.
     if (ready.size > READY_URL_LIMIT) {
-      const entries = [...ready.entries()].sort((a, b) => a[1] - b[1]);
-      for (const [url] of entries.slice(0, ready.size - READY_URL_LIMIT)) {
-        ready.delete(url);
+      // First pass: evict TTL-expired entries.
+      for (const [url, ts] of ready) {
+        if (now - ts > READY_URL_TTL_MS) {
+          ready.delete(url);
+        }
+      }
+      // If still over limit, find and remove the single oldest entry per iteration.
+      // Excess is typically 1-2 entries, so a linear-scan minimum is cheaper than
+      // spreading the whole map into a temporary array and sorting it.
+      while (ready.size > READY_URL_LIMIT) {
+        let oldestUrl: string | null = null;
+        let oldestTs = Number.POSITIVE_INFINITY;
+        for (const [url, ts] of ready) {
+          if (ts < oldestTs) {
+            oldestTs = ts;
+            oldestUrl = url;
+          }
+        }
+        if (oldestUrl !== null) {
+          ready.delete(oldestUrl);
+        } else {
+          break;
+        }
       }
     }
   }, []);
@@ -1189,7 +1225,15 @@ export default function App() {
       }
       inFlightStartedAtRef.current.delete(frameHour as number);
     }
-    updateBufferSnapshot();
+    // Coalesce snapshot updates to at most once per animation frame. Tile events
+    // from 8 prefetch sources flood this path during animation — scheduling via
+    // RAF prevents each tile from triggering a full React re-render cascade.
+    if (bufferSnapshotRafRef.current === null) {
+      bufferSnapshotRafRef.current = window.requestAnimationFrame(() => {
+        bufferSnapshotRafRef.current = null;
+        updateBufferSnapshot();
+      });
+    }
   }, [tileUrlToHour, updateBufferSnapshot, debugLog]);
 
   const isTileReady = useCallback((url: string): boolean => {
@@ -1272,6 +1316,13 @@ export default function App() {
     inFlightStartedAtRef.current.clear();
     readyLatencyStatsRef.current = { totalMs: 0, count: 0 };
     autoplayPrimedRef.current = false;
+    // Cancel any pending coalesced snapshot RAF and reset the equality baseline so
+    // the first update after reset is never incorrectly skipped.
+    if (bufferSnapshotRafRef.current !== null) {
+      window.cancelAnimationFrame(bufferSnapshotRafRef.current);
+      bufferSnapshotRafRef.current = null;
+    }
+    lastSnapshotStatsRef.current = { bufferedCount: -1, failedCount: -1, inFlightCount: -1, queueDepth: -1 };
     setIsLoopPreloading(false);
     setIsLoopAutoplayBuffering(false);
     setLoopProgress({ total: loopFrameHours.length, ready: 0, failed: 0 });
@@ -1339,6 +1390,22 @@ export default function App() {
     loopFailedHoursRef.current = failedSet;
     setLoopProgress({ total: loopFrameHours.length, ready: 0, failed: 0 });
 
+    // RAF-coalesced progress updates: with PRELOAD_CONCURRENCY=4, multiple decodes
+    // can complete within the same 16ms frame. Batching them into a single setState
+    // call eliminates N intermediate re-renders while frames are loading.
+    let progressRafId: number | null = null;
+    const flushProgress = () => {
+      if (token !== loopPreloadTokenRef.current) return;
+      setLoopProgress({ total: loopFrameHours.length, ready: readySet.size, failed: failedSet.size });
+    };
+    const scheduleProgress = () => {
+      if (progressRafId !== null) return;
+      progressRafId = window.requestAnimationFrame(() => {
+        progressRafId = null;
+        flushProgress();
+      });
+    };
+
     const mark = (fh: number, ok: boolean) => {
       if (token !== loopPreloadTokenRef.current) {
         return;
@@ -1348,16 +1415,19 @@ export default function App() {
       } else {
         failedSet.add(fh);
       }
-      setLoopProgress({
-        total: loopFrameHours.length,
-        ready: readySet.size,
-        failed: failedSet.size,
-      });
 
       if (readySet.size + failedSet.size < loopFrameHours.length) {
+        // Not done yet — schedule a batched progress update.
+        scheduleProgress();
         return;
       }
 
+      // All frames accounted for — flush progress synchronously then transition.
+      if (progressRafId !== null) {
+        window.cancelAnimationFrame(progressRafId);
+        progressRafId = null;
+      }
+      flushProgress();
       setIsLoopPreloading(false);
       const minReady = Math.min(LOOP_PRELOAD_MIN_READY, loopFrameHours.length);
       if (readySet.size >= minReady) {
@@ -1404,6 +1474,10 @@ export default function App() {
 
     return () => {
       loopPreloadTokenRef.current += 1;
+      if (progressRafId !== null) {
+        window.cancelAnimationFrame(progressRafId);
+        progressRafId = null;
+      }
     };
   }, [
     isLoopPreloading,
@@ -2273,6 +2347,9 @@ export default function App() {
       clearFrameStatusTimer();
       if (scrubRafRef.current !== null) {
         window.cancelAnimationFrame(scrubRafRef.current);
+      }
+      if (bufferSnapshotRafRef.current !== null) {
+        window.cancelAnimationFrame(bufferSnapshotRafRef.current);
       }
       loopDisplayDecodeAbortRef.current?.abort();
       for (const cached of loopDecodedCacheRef.current.values()) {
