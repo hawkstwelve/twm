@@ -493,8 +493,8 @@ export default function App() {
   const [region, setRegion] = useState(DEFAULTS.region);
   const [run, setRun] = useState(DEFAULTS.run);
   const [variable, setVariable] = useState(DEFAULTS.variable);
-  const [forecastHour, setForecastHour] = useState(0);
-  const [targetForecastHour, setTargetForecastHour] = useState(0);
+  const [forecastHour, setForecastHour] = useState(Number.POSITIVE_INFINITY);
+  const [targetForecastHour, setTargetForecastHour] = useState(Number.POSITIVE_INFINITY);
   const [, setZoomBucket] = useState(Math.round(DEFAULTS.zoom));
   const [mapZoom, setMapZoom] = useState(DEFAULTS.zoom);
   const [zoomGestureActive, setZoomGestureActive] = useState(false);
@@ -2224,8 +2224,8 @@ export default function App() {
   useEffect(() => {
     setFrameRows([]);
     setLoopManifest(null);
-    setForecastHour(0);
-    setTargetForecastHour(0);
+    setForecastHour(Number.POSITIVE_INFINITY);
+    setTargetForecastHour(Number.POSITIVE_INFINITY);
     setLoopDisplayHour(null);
   }, [model, run, variable]);
 
