@@ -870,6 +870,8 @@ export function MapCanvas({
 
     if (tileUrl === activeTileUrlRef.current) {
       const source = sourceId(activeBufferRef.current);
+      setLayerVisibility(map, layerId(activeBufferRef.current), true);
+      setLayerVisibility(map, layerId(otherBuffer(activeBufferRef.current)), false);
       onFrameLoadingChange?.(tileUrl, false);
       const readyCleanup = waitForSourceReady(
         map,
@@ -893,6 +895,7 @@ export function MapCanvas({
     }
 
     const inactiveBuffer = otherBuffer(activeBufferRef.current);
+    setLayerVisibility(map, layerId(inactiveBuffer), true);
     const inactiveSource = map.getSource(sourceId(inactiveBuffer)) as
       | maplibregl.RasterTileSource
       | undefined;
@@ -924,6 +927,8 @@ export function MapCanvas({
       const previousActive = activeBufferRef.current;
       activeBufferRef.current = inactiveBuffer;
       activeTileUrlRef.current = tileUrl;
+      setLayerVisibility(map, layerId(previousActive), true);
+      setLayerVisibility(map, layerId(inactiveBuffer), true);
 
       if (mode === "scrub") {
         cancelCrossfade();
@@ -951,6 +956,18 @@ export function MapCanvas({
       if (!skipSettleNotify) {
         settledCleanup = notifySettled(map, sourceId(inactiveBuffer), tileUrl);
       }
+
+      // After promotion, keep only the active buffer visible so MapLibre stops
+      // maintaining/reloading stale tiles on the inactive source.
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          if (token !== swapTokenRef.current) {
+            return;
+          }
+          setLayerVisibility(map, layerId(previousActive), false);
+          setLayerVisibility(map, layerId(inactiveBuffer), true);
+        });
+      });
     };
 
     const readyCleanup = waitForSourceReady(map, inactiveSourceId, tileUrl, nextSwapRequestToken, swapSourceEventBaseline, mode, finishSwap, () => {
@@ -1139,9 +1156,13 @@ export function MapCanvas({
     if (loopActive) {
       setLayerOpacity(map, layerId(activeBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
       setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+      setLayerVisibility(map, layerId(activeBuffer), false);
+      setLayerVisibility(map, layerId(inactiveBuffer), false);
     } else {
+      setLayerVisibility(map, layerId(activeBuffer), true);
       setLayerOpacity(map, layerId(activeBuffer), opacity);
       setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+      setLayerVisibility(map, layerId(inactiveBuffer), false);
     }
     setLayerOpacity(map, LOOP_LAYER_ID, opacity);
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
