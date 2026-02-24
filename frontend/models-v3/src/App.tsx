@@ -465,11 +465,20 @@ export default function App() {
   // Set to true when fast-path successfully bootstraps all state. Waterfall effects
   // check this and bail out early to avoid duplicate fetches.
   const bootstrappedRef = useRef(false);
+  // Pre-built Set of valid forecast hours, kept in sync with frameHours.
+  // updateBufferSnapshot reads from this ref instead of constructing a new Set
+  // on every tile event (which fired 20-40×/sec during animation).
+  const frameSetRef = useRef<Set<number>>(new Set());
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
     return Array.from(new Set(hours)).sort((a, b) => a - b);
   }, [frameRows]);
+
+  // Keep frameSetRef in sync so updateBufferSnapshot never allocates a one-off Set.
+  useEffect(() => {
+    frameSetRef.current = new Set(frameHours);
+  }, [frameHours]);
 
   const frameByHour = useMemo(() => {
     return new Map(frameRows.map((row) => [Number(row.fh), row]));
@@ -962,7 +971,7 @@ export default function App() {
       return;
     }
 
-    const frameSet = new Set(frameHours);
+    const frameSet = frameSetRef.current;
     for (const fh of ready) {
       if (!frameSet.has(fh)) {
         ready.delete(fh);
