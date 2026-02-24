@@ -8,6 +8,7 @@ It reads 4-band RGBA COGs and returns PNG tiles. That's it.
 from __future__ import annotations
 
 import base64
+import io
 import json
 import logging
 import os
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
+from PIL import Image
 from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
 
@@ -32,10 +34,21 @@ _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
 
-# 1x1 transparent PNG used for expected-empty raster tile responses.
-TRANSPARENT_PNG_1X1 = base64.b64decode(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII="
-)
+def _build_transparent_png_tile(tilesize: int = 512) -> bytes:
+    safe_size = max(1, int(tilesize))
+    try:
+        image = Image.new("RGBA", (safe_size, safe_size), (0, 0, 0, 0))
+        buf = io.BytesIO()
+        image.save(buf, format="PNG", optimize=True)
+        return buf.getvalue()
+    except Exception:
+        logger.exception("Failed to build transparent tile PNG; falling back to 1x1")
+        return base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII="
+        )
+
+
+TRANSPARENT_PNG_TILE = _build_transparent_png_tile(512)
 
 app = FastAPI(title="TWF V3 Tile Server", version="1.0.0")
 
@@ -105,7 +118,7 @@ def _render_png_compat(tile) -> bytes:
 
 def _transparent_png_response(*, cache_control: str) -> Response:
     return Response(
-        content=TRANSPARENT_PNG_1X1,
+        content=TRANSPARENT_PNG_TILE,
         media_type="image/png",
         headers={"Cache-Control": cache_control},
     )

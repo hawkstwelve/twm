@@ -163,7 +163,7 @@ function styleFor(
       prefetchSourceId(index + 1),
       {
         type: "raster",
-        tiles: [TRANSPARENT_PIXEL_DATA_URL],
+        tiles: [overlayUrl],
         tileSize: 512,
       },
     ])
