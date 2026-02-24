@@ -120,6 +120,10 @@ def _prepare_display_data_for_colorize(
     warped_data: np.ndarray,
     var_spec: dict[str, Any],
 ) -> np.ndarray:
+    kind = str(var_spec.get("type") or "").strip().lower()
+    if kind in {"discrete", "indexed", "categorical"}:
+        return warped_data
+
     sigma_raw = var_spec.get("display_smoothing_sigma")
     if sigma_raw is None:
         return warped_data

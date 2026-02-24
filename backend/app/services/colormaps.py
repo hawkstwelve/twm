@@ -357,7 +357,6 @@ VAR_SPECS = {
         "ptype_order": list(RADAR_PTYPE_ORDER),
         "ptype_breaks": RADAR_PTYPE_BREAKS,
         "ptype_levels": RADAR_PTYPE_LEVELS_BY_TYPE,
-        "display_smoothing_sigma": 0.8,
     },
     "precip_total": {
         "type": "continuous",

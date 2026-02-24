@@ -36,6 +36,7 @@ from app.services.builder.pipeline import (
     CONTRACT_VERSION,
     _format_units,
     _parse_run_id,
+    _prepare_display_data_for_colorize,
     _run_id_from_date,
     build_sidecar_json,
     check_pixel_sanity,
@@ -356,6 +357,33 @@ def test_phase2_value_grid_semantics():
     print("  Phase 2 value-grid semantics (wspd mph + radar index): PASS")
 
 
+def test_radar_ptype_display_prep_preserves_indexed_classes():
+    """Ensure indexed/categorical radar_ptype grids are not display-smoothed."""
+    rain_offset = int(RADAR_PTYPE_BREAKS["rain"]["offset"])
+    rain_count = int(RADAR_PTYPE_BREAKS["rain"]["count"])
+    snow_offset = int(RADAR_PTYPE_BREAKS["snow"]["offset"])
+    snow_count = int(RADAR_PTYPE_BREAKS["snow"]["count"])
+
+    rain_idx = rain_offset + (rain_count // 2)
+    snow_idx = snow_offset + (snow_count // 2)
+
+    radar_idx = np.full((32, 32), float(rain_idx), dtype=np.float32)
+    radar_idx[:, 16:] = float(snow_idx)
+
+    var_spec = {
+        "type": "indexed",
+        "display_smoothing_sigma": 0.8,
+    }
+    display_data = _prepare_display_data_for_colorize(radar_idx, var_spec)
+
+    np.testing.assert_array_equal(display_data, radar_idx)
+
+    rgba_original, _ = float_to_rgba(radar_idx, "radar_ptype")
+    rgba_display, _ = float_to_rgba(display_data, "radar_ptype")
+    np.testing.assert_array_equal(rgba_display, rgba_original)
+    print("  Radar ptype display prep preserves indexed classes: PASS")
+
+
 if __name__ == "__main__":
     print("=== Pipeline Integration Tests ===\n")
 
@@ -366,5 +394,6 @@ if __name__ == "__main__":
     test_sidecar_json()
     test_validate_cog_rejects_bad_band_count()
     test_phase2_value_grid_semantics()
+    test_radar_ptype_display_prep_preserves_indexed_classes()
 
     print("\nAll pipeline tests passed.")
