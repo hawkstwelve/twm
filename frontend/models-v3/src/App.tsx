@@ -447,6 +447,9 @@ export default function App() {
   const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
+  const [isPageVisible, setIsPageVisible] = useState(() =>
+    typeof document === "undefined" ? true : !document.hidden
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [settledTileUrl, setSettledTileUrl] = useState<string | null>(null);
@@ -2139,13 +2142,25 @@ export default function App() {
   }, [model, run, variable, resolvedRunForRequests, runManifest]);
 
   useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!model || !variable || run !== "latest" || !isPageVisible) {
+      return;
+    }
+
     let cancelled = false;
     let tickController: AbortController | null = null;
 
     const interval = window.setInterval(() => {
-      if (document.hidden || !model || !variable) {
-        return;
-      }
       tickController?.abort();
       tickController = new AbortController();
       const manifestMatchesSelection =
@@ -2214,7 +2229,7 @@ export default function App() {
       tickController?.abort();
       window.clearInterval(interval);
     };
-  }, [model, run, variable, resolvedRunForRequests, runManifest]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest, isPageVisible]);
 
   useEffect(() => {
     if (!isPlaying || renderMode !== "tiles" || frameHours.length === 0) return;
