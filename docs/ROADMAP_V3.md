@@ -48,7 +48,7 @@ These are explicitly out of scope. If a proposed change falls into this list, it
 
 ```
 /opt/twf_models          (github.com/hawkstwelve/twf_models)
-├── frontend (sodakweather.com/models-v2, webp method, "Legacy tiles" checkbox)
+├── frontend (theweathermodels.com/models-v2, webp method, "Legacy tiles" checkbox)
 ├── backend (webp offline image pipeline)
 └── data/v2/             (COGs for TiTiler + webp images)
 
@@ -82,7 +82,7 @@ github.com/hawkstwelve/twf_models_v3
 │   ├── scripts/              (CLI tools, validation, debug)
 │   └── tests/
 ├── frontend/
-│   └── models-v3/           (sodakweather.com/models-v3)
+│   └── models-v3/           (theweathermodels.com/models-v3)
 │       └── src/
 │           ├── components/   (map-canvas, toolbar, legend, forecast-controls)
 │           └── lib/          (config, api, tiles — adds /sample client)
@@ -207,8 +207,8 @@ python -m backend.app.services.builder.pipeline --model hrrr --region pnw --var 
 
 ```typescript
 const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-export const API_BASE = isLocal ? "http://127.0.0.1:8200/api/v3" : "https://api.sodakweather.com/api/v3";
-export const TILES_BASE = isLocal ? "http://127.0.0.1:8201" : "https://api.sodakweather.com";
+export const API_BASE = isLocal ? "http://127.0.0.1:8200/api/v3" : "https://api.theweathermodels.com/api/v3";
+export const TILES_BASE = isLocal ? "http://127.0.0.1:8201" : "https://api.theweathermodels.com";
 ```
 
 **Cleanup on local machine:**
@@ -314,7 +314,7 @@ Response:
 
 **Implementation:** FastAPI endpoint, uses `rasterio` point query on `fh{NNN}.val.cog.tif`. ~50 lines.
 
-### D. Frontend (sodakweather.com/models-v3)
+### D. Frontend (theweathermodels.com/models-v3)
 
 **Carried forward from current frontend (already implemented):**
 - Double-buffer overlay swap (buffer A/B) with micro-crossfade
@@ -805,7 +805,7 @@ Estimates use deflate-compressed COG sizes from the grid dimensions table. Per-f
 1. Delete `/opt/twf_archive/` (the safety-net copies moved during Phase 0 consolidation)
 2. Remove any stale V2 nginx config blocks
 3. Remove old systemd service files from `/etc/systemd/system/twf-*-v2-*`
-4. Confirm `sodakweather.com/models-v3` is the canonical URL (optionally alias to `/models`)
+4. Confirm `theweathermodels.com/models-v3` is the canonical URL (optionally alias to `/models`)
 5. Verify no cron jobs, logrotate configs, or monitoring references point to old paths
 
 **Checkpoint:** Zero V2 artifacts on disk, in systemd, or in nginx config. `twf_models_v3` is the only codebase anywhere.

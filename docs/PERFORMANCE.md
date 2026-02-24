@@ -136,7 +136,7 @@ parallelizes the discovery fetches that already happen on every page load.
 
 ### H3 — CDN Layer for Tile Serving (Pre-Launch Gate)
 
-**Area:** Infrastructure — Cloudflare in front of `api.sodakweather.com`  
+**Area:** Infrastructure — Cloudflare in front of `api.theweathermodels.com`  
 **Impact:** Tile URLs are already served with `public, max-age=31536000, immutable` — they are
 designed for edge caching. Without a CDN, every tile request hits the VPS regardless of how many
 users have already loaded the same tile. Under concurrent load (multiple forum users animating
@@ -154,7 +154,7 @@ view) are served from edge with zero origin hits after the first user warms them
 
 **Implementation plan (from ROADMAP Phase 4):**
 
-1. Point the `api.sodakweather.com` DNS to Cloudflare (orange-cloud proxy).
+1. Point the `api.theweathermodels.com` DNS to Cloudflare (orange-cloud proxy).
 2. Set a Cloudflare Cache Rule: URLs matching `/tiles/v3/*` → Cache Everything, Edge TTL = Respect
    Origin (the `immutable` header will be honoured — tiles are cached for one year at edge).
 3. Verify with `curl -I` that `cf-cache-status: HIT` appears on the second request for a tile.
@@ -250,7 +250,7 @@ unloaded frames.
 ### M4 — Frontend: `<link rel="preconnect">` for External Domains
 
 **Area:** `frontend/models-v3/index.html`  
-**Impact:** On cold load, the browser must perform DNS + TCP + TLS for `api.sodakweather.com` and
+**Impact:** On cold load, the browser must perform DNS + TCP + TLS for `api.theweathermodels.com` and
 `*.basemaps.cartocdn.com` before the first tile or API call can complete. Preconnect eliminates
 this from the critical path — typically saves 100–300ms on first paint.
 
@@ -260,7 +260,7 @@ this from the critical path — typically saves 100–300ms on first paint.
 
 ```html
 <!-- In <head>, before the Vite script tags -->
-<link rel="preconnect" href="https://api.sodakweather.com" />
+<link rel="preconnect" href="https://api.theweathermodels.com" />
 <link rel="preconnect" href="https://a.basemaps.cartocdn.com" crossorigin />
 <link rel="dns-prefetch" href="https://b.basemaps.cartocdn.com" />
 <link rel="dns-prefetch" href="https://c.basemaps.cartocdn.com" />
@@ -559,11 +559,11 @@ const isLocal =
 
 export const API_BASE = isLocal
   ? "http://127.0.0.1:8200/api/v3"
-  : "https://api.sodakweather.com/api/v3";
+  : "https://api.theweathermodels.com/api/v3";
 
 export const TILES_BASE = isLocal
   ? "http://127.0.0.1:8201"
-  : "https://api.sodakweather.com";
+  : "https://api.theweathermodels.com";
 ```
 
 ---

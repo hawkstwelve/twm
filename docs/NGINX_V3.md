@@ -1,10 +1,10 @@
 # Nginx routing (V3)
 
 ## Domains
-- `api.sodakweather.com`: V3 edge
-- `legacy-api.sodakweather.com`: legacy stack (kept separate)
+- `api.theweathermodels.com`: V3 edge
+- `legacy-api.theweathermodels.com`: legacy stack (kept separate)
 
-## V3 routes on api.sodakweather.com
+## V3 routes on api.theweathermodels.com
 - `/models-v3/` → static frontend build output
   - filesystem: `/opt/twf_v3/frontend/models-v3/dist/`
 - `/api/v3/` → V3 API upstream
