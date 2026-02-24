@@ -247,6 +247,19 @@ function nearestFrame(frames: number[], current: number): number {
   }, frames[0]);
 }
 
+function selectableFramesForVariable(frames: number[], variableId: string): number[] {
+  if (frames.length === 0) {
+    return frames;
+  }
+  const configured = VARIABLE_INITIAL_FORECAST_HOUR[variableId];
+  if (!Number.isFinite(configured)) {
+    return frames;
+  }
+  const minimumFh = Number(configured);
+  const filtered = frames.filter((fh) => fh >= minimumFh);
+  return filtered.length > 0 ? filtered : frames;
+}
+
 function preferredInitialFrame(frames: number[], variableId: string): number {
   if (frames.length === 0) {
     return 0;
@@ -259,13 +272,14 @@ function preferredInitialFrame(frames: number[], variableId: string): number {
 }
 
 function resolveForecastHour(frames: number[], current: number, variableId: string): number {
-  if (frames.length === 0) {
+  const selectableFrames = selectableFramesForVariable(frames, variableId);
+  if (selectableFrames.length === 0) {
     return 0;
   }
   if (Number.isFinite(current)) {
-    return nearestFrame(frames, current);
+    return nearestFrame(selectableFrames, current);
   }
-  return preferredInitialFrame(frames, variableId);
+  return preferredInitialFrame(selectableFrames, variableId);
 }
 
 function getEffectiveZoom(zoom: number): number {
@@ -609,6 +623,11 @@ export default function App() {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
     return Array.from(new Set(hours)).sort((a, b) => a - b);
   }, [frameRows]);
+
+  const selectableFrameHours = useMemo(
+    () => selectableFramesForVariable(frameHours, variable),
+    [frameHours, variable]
+  );
 
   // Keep frameSetRef in sync so updateBufferSnapshot never allocates a one-off Set.
   useEffect(() => {
@@ -2379,8 +2398,8 @@ export default function App() {
             if (hasFrameList) {
               setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
               const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-              setForecastHour((prev) => nearestFrame(frames, prev));
-              setTargetForecastHour((prev) => nearestFrame(frames, prev));
+              setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+              setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
             }
           })
           .catch((err) => {
@@ -2402,8 +2421,8 @@ export default function App() {
           }
           setFrameRows(rows);
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-          setForecastHour((prev) => nearestFrame(frames, prev));
-          setTargetForecastHour((prev) => nearestFrame(frames, prev));
+          setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+          setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
         })
         .catch((err) => {
           if (err instanceof DOMException && err.name === "AbortError") {
@@ -2699,16 +2718,16 @@ export default function App() {
   }, [clearFrameStatusTimer]);
 
   useEffect(() => {
-    if (frameHours.length === 0) {
+    if (selectableFrameHours.length === 0) {
       return;
     }
 
-    const nextTarget = nearestFrame(frameHours, targetForecastHour);
+    const nextTarget = nearestFrame(selectableFrameHours, targetForecastHour);
     if (nextTarget === forecastHour) {
       return;
     }
     setForecastHour(nextTarget);
-  }, [targetForecastHour, forecastHour, frameHours]);
+  }, [targetForecastHour, forecastHour, selectableFrameHours]);
 
   const controlsIsPlaying = isPlaying || isPreloadingForPlay || isLoopPreloading;
   const preloadBufferedCount = isLoopPreloading
@@ -2828,14 +2847,14 @@ export default function App() {
 
         <BottomForecastControls
           forecastHour={forecastHour}
-          availableFrames={frameHours}
+          availableFrames={selectableFrameHours}
           onForecastHourChange={requestForecastHour}
           onScrubStateChange={setIsScrubbing}
           isPlaying={controlsIsPlaying}
           setIsPlaying={handleSetIsPlaying}
           runDateTimeISO={runDateTimeISO}
           disabled={loading}
-          playDisabled={loading || frameHours.length === 0}
+          playDisabled={loading || selectableFrameHours.length === 0}
           transientStatus={frameStatusMessage}
         />
       </div>

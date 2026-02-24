@@ -33,6 +33,7 @@ export const VARIABLE_LABELS: Record<string, string> = {
 };
 
 export const VARIABLE_INITIAL_FORECAST_HOUR: Partial<Record<string, number>> = {
+  radar_ptype: 1,
   precip_total: 1,
   snowfall_total: 1,
   precip_ptype: 1,
