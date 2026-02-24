@@ -4,10 +4,6 @@ import type { GeoJSON } from "geojson";
 
 import { DEFAULTS } from "@/lib/config";
 
-const BASEMAP_ATTRIBUTION =
-  '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors ' +
-  '&copy; <a href="https://carto.com/attributions">CARTO</a>';
-
 const CARTO_LIGHT_BASE_TILES = [
   "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
   "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
@@ -189,7 +185,6 @@ function styleFor(
         type: "raster",
         tiles: CARTO_LIGHT_BASE_TILES,
         tileSize: 256,
-        attribution: BASEMAP_ATTRIBUTION,
       },
       [sourceId("a")]: {
         type: "raster",

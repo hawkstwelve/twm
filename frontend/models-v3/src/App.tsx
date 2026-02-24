@@ -54,6 +54,26 @@ const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 
 type RenderModeState = "webp_tier0" | "webp_tier1" | "tiles";
+type RenderTransport = "webp" | "tiles";
+
+type RenderRouteDebugEvent = {
+  type: "intent" | "commit";
+  from: RenderTransport;
+  to: RenderTransport;
+  zoom: number;
+  effectiveZoom: number;
+  gestureActive: boolean;
+  canUseLoopPlayback: boolean;
+  renderMode: RenderModeState;
+  visibleRenderMode: RenderModeState;
+  thresholds: typeof WEBP_RENDER_MODE_THRESHOLDS;
+  at: string;
+};
+
+type RenderRouteDebugStore = {
+  history: RenderRouteDebugEvent[];
+  last: RenderRouteDebugEvent | null;
+};
 
 type BufferSnapshot = {
   totalFrames: number;
@@ -213,6 +233,10 @@ function nextRenderModeByHysteresis(current: RenderModeState, effectiveZoom: num
     return effectiveZoom <= tier0Max - hysteresis ? "webp_tier0" : "webp_tier1";
   }
   return "tiles";
+}
+
+function modeToTransport(mode: RenderModeState): RenderTransport {
+  return mode === "tiles" ? "tiles" : "webp";
 }
 
 async function preloadLoopFrame(
@@ -519,6 +543,8 @@ export default function App() {
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
   const frameSetRef = useRef<Set<number>>(new Set());
+  const previousIntentTransportRef = useRef<RenderTransport>(modeToTransport(webpDefaultEnabled ? "webp_tier0" : "tiles"));
+  const previousCommittedTransportRef = useRef<RenderTransport>(modeToTransport(webpDefaultEnabled ? "webp_tier0" : "tiles"));
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -1431,6 +1457,60 @@ export default function App() {
       canUseLoopPlayback,
     });
   }, [renderMode, visibleRenderMode, canUseLoopPlayback, debugLog]);
+
+  useEffect(() => {
+    const currentIntent = modeToTransport(renderMode);
+    const currentCommitted = modeToTransport(visibleRenderMode);
+    const effectiveZoom = getEffectiveZoom(mapZoom);
+
+    const pushRenderRouteDebug = (event: RenderRouteDebugEvent) => {
+      console.info("[render-route]", event);
+      const debugWindow = window as Window & {
+        __twfRenderRouteDebug?: RenderRouteDebugStore;
+      };
+      const store = debugWindow.__twfRenderRouteDebug ?? { history: [], last: null };
+      store.history.push(event);
+      if (store.history.length > 120) {
+        store.history.splice(0, store.history.length - 120);
+      }
+      store.last = event;
+      debugWindow.__twfRenderRouteDebug = store;
+    };
+
+    if (currentIntent !== previousIntentTransportRef.current) {
+      pushRenderRouteDebug({
+        type: "intent",
+        from: previousIntentTransportRef.current,
+        to: currentIntent,
+        zoom: Number(mapZoom.toFixed(2)),
+        effectiveZoom: Number(effectiveZoom.toFixed(2)),
+        gestureActive: zoomGestureActive,
+        canUseLoopPlayback,
+        renderMode,
+        visibleRenderMode,
+        thresholds: WEBP_RENDER_MODE_THRESHOLDS,
+        at: new Date().toISOString(),
+      });
+      previousIntentTransportRef.current = currentIntent;
+    }
+
+    if (currentCommitted !== previousCommittedTransportRef.current) {
+      pushRenderRouteDebug({
+        type: "commit",
+        from: previousCommittedTransportRef.current,
+        to: currentCommitted,
+        zoom: Number(mapZoom.toFixed(2)),
+        effectiveZoom: Number(effectiveZoom.toFixed(2)),
+        gestureActive: zoomGestureActive,
+        canUseLoopPlayback,
+        renderMode,
+        visibleRenderMode,
+        thresholds: WEBP_RENDER_MODE_THRESHOLDS,
+        at: new Date().toISOString(),
+      });
+      previousCommittedTransportRef.current = currentCommitted;
+    }
+  }, [renderMode, visibleRenderMode, mapZoom, zoomGestureActive, canUseLoopPlayback]);
 
   useEffect(() => {
     if (!isLoopPreloading) {
@@ -2533,9 +2613,7 @@ export default function App() {
     || (isLoopPreloading && loopProgress.total > 0);
   const bufferStatusText = isScrubLoading
     ? "Loading frame"
-    : isLoopPreloading
-      ? `Loading loop frames ${preloadBufferedCount}/${preloadTotal}`
-      : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
+    : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
   const activeLoopHour = loopDisplayHour ?? forecastHour;
   const activeLoopUrl = isLoopDisplayActive ? resolveLoopUrlForHour(activeLoopHour, visibleRenderMode) : null;
 
@@ -2591,13 +2669,6 @@ export default function App() {
               </span>
               {!isScrubLoading ? <span className="font-mono tabular-nums">{preloadPercent}%</span> : null}
             </div>
-            {!isScrubLoading ? (
-              <div className="text-[10px] text-muted-foreground">
-                {isLoopPreloading
-                  ? `Ready ${loopProgress.ready} • Failed ${loopProgress.failed}`
-                  : `Ready ${bufferSnapshot.bufferedCount} • Failed ${bufferSnapshot.failedCount}`}
-              </div>
-            ) : null}
             {!isScrubLoading ? (
               <div className="h-1.5 overflow-hidden rounded-full bg-muted/70">
                 <div
