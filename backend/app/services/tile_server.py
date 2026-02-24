@@ -7,6 +7,7 @@ It reads 4-band RGBA COGs and returns PNG tiles. That's it.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -30,6 +31,11 @@ _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 # Cache headers per the caching strategy in ROADMAP_V3
 CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
+
+# 1x1 transparent PNG used for expected-empty raster tile responses.
+TRANSPARENT_PNG_1X1 = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII="
+)
 
 app = FastAPI(title="TWF V3 Tile Server", version="1.0.0")
 
@@ -95,6 +101,28 @@ def _render_png_compat(tile) -> bytes:
     except TypeError:
         logger.warning("tile.render(add_mask=...) unsupported; falling back")
         return tile.render(img_format="PNG")
+
+
+def _transparent_png_response(*, cache_control: str) -> Response:
+    return Response(
+        content=TRANSPARENT_PNG_1X1,
+        media_type="image/png",
+        headers={"Cache-Control": cache_control},
+    )
+
+
+def _tile_is_fully_masked(tile) -> bool:
+    """Return True when tile mask indicates no visible pixels (all zeros)."""
+    mask = getattr(tile, "mask", None)
+    if mask is None:
+        return False
+    try:
+        size = getattr(mask, "size", None)
+        if size is not None and int(size) == 0:
+            return True
+        return not bool(mask.any())
+    except Exception:
+        return False
 
 
 def _latest_run_from_pointer(model: str) -> str | None:
@@ -197,6 +225,9 @@ def get_tile(
                 z=z,
             )
 
+        if _tile_is_fully_masked(tile):
+            return _transparent_png_response(cache_control=CACHE_HIT)
+
         content = _render_png_compat(tile)
         return Response(
             content=content,
@@ -205,11 +236,8 @@ def get_tile(
         )
 
     except TileOutsideBounds:
-        # Tile coordinates outside the COG extent — return empty 204
-        return Response(
-            status_code=204,
-            headers={"Cache-Control": CACHE_MISS},
-        )
+        # Tile coordinates outside extent are expected-empty tiles.
+        return _transparent_png_response(cache_control=CACHE_MISS)
     except Exception as exc:
         logger.exception(
             "Tile read failed: %s/%s/%s/%s/fh%03d/%d/%d/%d",
