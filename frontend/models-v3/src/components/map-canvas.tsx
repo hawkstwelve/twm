@@ -91,26 +91,6 @@ function prefetchLayerId(index: number): string {
   return `twf-prefetch-${index}`;
 }
 
-function isMapErrorDebugEnabled(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const fromQuery = new URLSearchParams(window.location.search).get("twf_debug_map_errors");
-  const fromStorage = window.localStorage.getItem("twf_debug_map_errors");
-  const value = String(fromQuery ?? fromStorage ?? "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
-}
-
-function readMapDebugFlag(key: string): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  const fromQuery = new URLSearchParams(window.location.search).get(key);
-  const fromStorage = window.localStorage.getItem(key);
-  const value = String(fromQuery ?? fromStorage ?? "").trim().toLowerCase();
-  return value === "1" || value === "true" || value === "yes" || value === "on";
-}
-
 function getResamplingMode(variable?: string): "nearest" | "linear" {
   // Discrete/categorical variables use nearest to preserve exact values.
   // Continuous variables (tmp2m, wspd10m, etc.) use linear for smooth display.
@@ -347,28 +327,6 @@ export function MapCanvas({
   const fadeTokenRef = useRef(0);
   const fadeRafRef = useRef<number | null>(null);
   const tileViewportReadyTokenRef = useRef(0);
-  const mapErrorDebugEnabledRef = useRef(false);
-  const mapErrorBucketsRef = useRef<Map<string, { count: number; lastLogAt: number }>>(new Map());
-  const modeRef = useRef(mode);
-  const disableLoopImageRef = useRef(false);
-  const disablePrefetchRef = useRef(false);
-
-  useEffect(() => {
-    modeRef.current = mode;
-  }, [mode]);
-
-  useEffect(() => {
-    mapErrorDebugEnabledRef.current = isMapErrorDebugEnabled();
-    disableLoopImageRef.current = readMapDebugFlag("twf_disable_loop_image");
-    disablePrefetchRef.current = readMapDebugFlag("twf_disable_prefetch");
-  }, []);
-
-  const logMapDebug = useCallback((label: string, payload: Record<string, unknown>) => {
-    if (!mapErrorDebugEnabledRef.current) {
-      return;
-    }
-    console.warn(`[map-debug] ${label}`, payload);
-  }, []);
 
   const view = useMemo(() => {
     return regionViews?.[region] ?? {
@@ -681,46 +639,6 @@ export function MapCanvas({
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
 
-    const onMapError = (event: any) => {
-      if (!mapErrorDebugEnabledRef.current) {
-        return;
-      }
-      const source = typeof event?.sourceId === "string"
-        ? event.sourceId
-        : (typeof event?.source?.id === "string" ? event.source.id : null);
-      const requestedUrl = source ? (sourceRequestedUrlRef.current.get(source) ?? null) : null;
-      const requestToken = source ? (sourceRequestTokenRef.current.get(source) ?? null) : null;
-      const sourceEventCount = source ? (sourceEventCountRef.current.get(source) ?? null) : null;
-      const errorObj = event?.error;
-      const message = typeof errorObj?.message === "string"
-        ? errorObj.message
-        : String(errorObj ?? event?.message ?? "unknown");
-      const key = `${message}|${source ?? "none"}|${requestedUrl ?? "none"}`;
-      const now = Date.now();
-      const bucket = mapErrorBucketsRef.current.get(key) ?? { count: 0, lastLogAt: 0 };
-      bucket.count += 1;
-      const shouldLog = bucket.count <= 3 || now - bucket.lastLogAt > 2000 || bucket.count % 25 === 0;
-      if (shouldLog) {
-        bucket.lastLogAt = now;
-        const errorStack = typeof errorObj?.stack === "string" ? errorObj.stack.split("\n").slice(0, 4).join("\n") : null;
-        console.warn("[map-debug] maplibre error", {
-          message,
-          count: bucket.count,
-          sourceId: source,
-          requestedUrl,
-          requestToken,
-          sourceEventCount,
-          isSourceLoaded: source ? map.isSourceLoaded(source) : null,
-          mode: modeRef.current,
-          activeTileUrl: activeTileUrlRef.current,
-          errorStack,
-        });
-      }
-      mapErrorBucketsRef.current.set(key, bucket);
-    };
-
-    map.on("error", onMapError);
-
     map.on("load", () => {
       setIsLoaded(true);
 
@@ -746,7 +664,6 @@ export function MapCanvas({
 
     return () => {
       cancelCrossfade();
-      map.off("error", onMapError);
       map.remove();
       mapRef.current = null;
       setIsLoaded(false);
@@ -903,19 +820,12 @@ export function MapCanvas({
       return;
     }
 
-    onFrameLoadingChange?.(tileUrl, true);
     const inactiveSourceId = sourceId(inactiveBuffer);
     onFrameLoadingChange?.(tileUrl, true);
     inactiveSource.setTiles([tileUrl]);
     sourceRequestedUrlRef.current.set(inactiveSourceId, tileUrl);
     const nextSwapRequestToken = (sourceRequestTokenRef.current.get(inactiveSourceId) ?? 0) + 1;
     sourceRequestTokenRef.current.set(inactiveSourceId, nextSwapRequestToken);
-    logMapDebug("setTiles swap", {
-      sourceId: inactiveSourceId,
-      tileUrl,
-      requestToken: nextSwapRequestToken,
-      mode,
-    });
     const swapSourceEventBaseline = sourceEventCountRef.current.get(inactiveSourceId) ?? 0;
     const token = ++swapTokenRef.current;
 
@@ -996,20 +906,11 @@ export function MapCanvas({
     onTileReady,
     onFrameSettled,
     onFrameLoadingChange,
-    logMapDebug,
   ]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isLoaded) {
-      return;
-    }
-
-    if (disablePrefetchRef.current) {
-      for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
-        setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
-        setLayerVisibility(map, prefetchLayerId(idx), false);
-      }
       return;
     }
 
@@ -1043,12 +944,6 @@ export function MapCanvas({
       sourceRequestedUrlRef.current.set(prefetchSource, url);
       const nextPrefetchRequestToken = (sourceRequestTokenRef.current.get(prefetchSource) ?? 0) + 1;
       sourceRequestTokenRef.current.set(prefetchSource, nextPrefetchRequestToken);
-      logMapDebug("setTiles prefetch", {
-        sourceId: prefetchSource,
-        tileUrl: url,
-        requestToken: nextPrefetchRequestToken,
-        index: idx + 1,
-      });
       const prefetchEventBaseline = sourceEventCountRef.current.get(prefetchSource) ?? 0;
       const prefetchEventBudgetThreshold = prefetchEventBaseline + PREFETCH_TILE_EVENT_BUDGET - 1;
 
@@ -1102,20 +997,11 @@ export function MapCanvas({
     return () => {
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [prefetchTileUrls, isLoaded, waitForSourceReady, onTileReady, logMapDebug]);
+  }, [prefetchTileUrls, isLoaded, waitForSourceReady, onTileReady]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isLoaded) {
-      return;
-    }
-
-    if (disableLoopImageRef.current) {
-      setLayerVisibility(map, LOOP_LAYER_ID, false);
-      setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m");
-      setLayerVisibility(map, layerId("a"), true);
-      setLayerVisibility(map, layerId("b"), true);
-      enforceLayerOrder(map);
       return;
     }
 
