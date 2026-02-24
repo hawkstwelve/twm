@@ -865,9 +865,12 @@ export default function App() {
       return;
     }
 
+    // No signal passed to ensureLoopFrameDecoded: the decode always runs to
+    // completion so its result is stored in the LRU cache for immediate reuse
+    // by playback or scrub paths. The token gates whether we actually commit
+    // the visible mode change — preventing stale results from being applied.
     const token = transitionTokenRef.current;
-    const controller = new AbortController();
-    ensureLoopFrameDecoded(resolvedLoopForecastHour, renderMode, controller.signal)
+    ensureLoopFrameDecoded(resolvedLoopForecastHour, renderMode)
       .then((ready) => {
         if (token !== transitionTokenRef.current) {
           return;
@@ -877,15 +880,9 @@ export default function App() {
           setLoopDisplayHour(resolvedLoopForecastHour);
         }
       })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          return;
-        }
+      .catch(() => {
+        // Decode failed; remain in current visible mode.
       });
-
-    return () => {
-      controller.abort();
-    };
   }, [
     renderMode,
     visibleRenderMode,
@@ -1308,11 +1305,13 @@ export default function App() {
       version,
     });
   }, [
+    // Only the three selector values that uniquely identify a dataset change.
+    // frameHours.length and loopFrameHours.length are derived state — including
+    // them caused a second reset firing when frames were cleared then re-populated,
+    // which wiped newly-decoded bitmaps and reset the whole buffer mid-load.
     model,
     resolvedRunForRequests,
     variable,
-    frameHours.length,
-    loopFrameHours.length,
   ]);
 
   useEffect(() => {
@@ -1374,16 +1373,34 @@ export default function App() {
       showTransientFrameStatus("Loop preload failed");
     };
 
-    loopFrameHours.forEach((fh) => {
-      if (!resolveLoopUrlForHour(fh, renderMode)) {
-        mark(fh, false);
-        return;
+    // Process frames in playback order with bounded concurrency to stay within
+    // the browser's HTTP/2 stream budget (~6 per host) and keep early frames
+    // ready before later ones.
+    const PRELOAD_CONCURRENCY = 4;
+    let inFlight = 0;
+    let nextIndex = 0;
+
+    const processNext = () => {
+      while (inFlight < PRELOAD_CONCURRENCY && nextIndex < loopFrameHours.length) {
+        const fh = loopFrameHours[nextIndex];
+        nextIndex += 1;
+        if (!resolveLoopUrlForHour(fh, renderMode)) {
+          mark(fh, false);
+          continue;
+        }
+        inFlight += 1;
+        // No signal: decode always runs to completion for LRU cache warming;
+        // the token inside mark() gates whether the result is actually applied.
+        ensureLoopFrameDecoded(fh, renderMode)
+          .then((ready) => mark(fh, ready))
+          .catch(() => mark(fh, false))
+          .finally(() => {
+            inFlight -= 1;
+            processNext();
+          });
       }
-      const controller = new AbortController();
-      ensureLoopFrameDecoded(fh, renderMode, controller.signal)
-        .then((ready) => mark(fh, ready))
-        .catch(() => mark(fh, false));
-    });
+    };
+    processNext();
 
     return () => {
       loopPreloadTokenRef.current += 1;
@@ -1635,10 +1652,10 @@ export default function App() {
         }
         loopDisplayDecodeTokenRef.current += 1;
         const decodeToken = loopDisplayDecodeTokenRef.current;
-        loopDisplayDecodeAbortRef.current?.abort();
-        const controller = new AbortController();
-        loopDisplayDecodeAbortRef.current = controller;
-        ensureLoopFrameDecoded(nextHour, visibleRenderMode, controller.signal)
+        // No signal: decode completes and caches regardless of subsequent scrub
+        // positions. The token check below ensures only the last scrub target
+        // actually updates the display — earlier frames stay warm in the LRU cache.
+        ensureLoopFrameDecoded(nextHour, visibleRenderMode)
           .then((ready) => {
             if (!ready) {
               return;
@@ -1664,11 +1681,11 @@ export default function App() {
 
     loopDisplayDecodeTokenRef.current += 1;
     const decodeToken = loopDisplayDecodeTokenRef.current;
-    loopDisplayDecodeAbortRef.current?.abort();
-    const controller = new AbortController();
-    loopDisplayDecodeAbortRef.current = controller;
 
-    ensureLoopFrameDecoded(resolvedLoopForecastHour, visibleRenderMode, controller.signal)
+    // No signal: the decode always completes and its result is stored in the LRU
+    // cache. The token guards the commit; scrubbing to a new frame only invalidates
+    // the commit, not the inflight fetch — keeping every touched frame warm.
+    ensureLoopFrameDecoded(resolvedLoopForecastHour, visibleRenderMode)
       .then((ready) => {
         if (!ready) {
           return;
@@ -1681,10 +1698,6 @@ export default function App() {
       .catch(() => {
         // keep previous display hour when decode fails.
       });
-
-    return () => {
-      controller.abort();
-    };
   }, [isLoopDisplayActive, resolvedLoopForecastHour, visibleRenderMode, ensureLoopFrameDecoded]);
 
   // ── Fast-path: fire all discovery fetches in parallel on mount ─────────────────────────────
