@@ -79,6 +79,12 @@ CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
 
 
+def _frames_cache_control(run: str) -> str:
+    if run == "latest":
+        return "public, max-age=60"
+    return "public, max-age=31536000, immutable"
+
+
 def _if_none_match_values(header_value: str) -> list[str]:
     return [v.strip() for v in header_value.split(",") if v.strip()]
 
@@ -699,7 +705,7 @@ def list_frames(request: Request, model: str, run: str, var: str):
         )
 
     frames.sort(key=lambda row: row["fh"])
-    cache_control = "public, max-age=60"
+    cache_control = _frames_cache_control(run)
     etag = _make_etag(frames)
     r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
     if r304 is not None:
