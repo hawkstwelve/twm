@@ -400,10 +400,14 @@ function styleFor(
           ["==", "$type", "Polygon"],
           ["==", "class", "lake"],
         ],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.35, 7, 0.48, 10, 0.62],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.75, 7, 1.0, 10, 1.25],
+          "line-opacity": 0.9,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
         },
       },
       {
