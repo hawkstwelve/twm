@@ -28,3 +28,13 @@ export TWF_V3_LOOP_PREGENERATE_ENABLED=1
 export TWF_V3_LOOP_CACHE_ROOT=/opt/twf_v3/data/v3/loop_cache
 export TWF_V3_LOOP_PREGENERATE_WORKERS=4
 ```
+
+## Build canonical boundary tileset
+
+Build the single-source boundaries/hydro vector tileset used by the V3 map:
+
+```bash
+./scripts/build_boundaries_tileset.sh
+```
+
+See [docs/BOUNDARY_TILESET.md](docs/BOUNDARY_TILESET.md) for schema, zoom strategy, and deployment wiring.

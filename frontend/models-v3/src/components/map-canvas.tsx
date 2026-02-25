@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 
-import { DEFAULTS } from "@/lib/config";
+import { DEFAULTS, TILES_BASE } from "@/lib/config";
 
 const CARTO_LIGHT_BASE_TILES = [
   "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
@@ -32,7 +32,7 @@ const CARTO_DARK_LABEL_TILES = [
   "https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
 ];
 
-const CARTO_VECTOR_TILES_URL = "https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/tiles.json";
+const BOUNDARIES_VECTOR_TILES_URL = `${TILES_BASE}/tiles/v3/boundaries/v1/tilejson.json`;
 
 type RegionView = {
   center: [number, number];
@@ -74,7 +74,6 @@ const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
-const COUNTY_SOURCE_ID = "twf-counties";
 const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
@@ -90,8 +89,6 @@ const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
 
 const TRANSPARENT_PIXEL_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII=";
-
-const US_COUNTIES_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/plotly/datasets@master/geojson-counties-fips.json";
 
 const LOOP_CONUS_COORDINATES: [[number, number], [number, number], [number, number], [number, number]] = [
   [-125.0, 50.0],
@@ -299,11 +296,7 @@ function styleFor(
       },
       [STATE_BOUNDARY_SOURCE_ID]: {
         type: "vector",
-        url: CARTO_VECTOR_TILES_URL,
-      },
-      [COUNTY_SOURCE_ID]: {
-        type: "geojson",
-        data: US_COUNTIES_GEOJSON_URL,
+        url: BOUNDARIES_VECTOR_TILES_URL,
       },
       [CONTOUR_SOURCE_ID]: {
         type: "geojson",
@@ -339,12 +332,8 @@ function styleFor(
         id: COASTLINE_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
-        filter: [
-          "all",
-          ["==", "$type", "Polygon"],
-          ["in", "class", "ocean", "sea"],
-        ],
+        "source-layer": "hydro",
+        filter: ["==", "kind", "coastline"],
         paint: {
           "line-color": boundaryLineColor,
           "line-opacity": 0.9,
@@ -355,12 +344,8 @@ function styleFor(
         id: COUNTRY_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundary",
-        filter: [
-          "all",
-          ["==", "admin_level", 2],
-          ["==", "maritime", 0],
-        ],
+        "source-layer": "boundaries",
+        filter: ["==", "kind", "country"],
         paint: {
           "line-color": boundaryLineColor,
           "line-opacity": 0.85,
@@ -371,12 +356,8 @@ function styleFor(
         id: STATE_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundary",
-        filter: [
-          "all",
-          ["==", "admin_level", 4],
-          ["==", "maritime", 0],
-        ],
+        "source-layer": "boundaries",
+        filter: ["==", "kind", "state"],
         paint: {
           "line-color": boundaryLineColor,
           "line-opacity": 0.9,
@@ -386,8 +367,11 @@ function styleFor(
       {
         id: COUNTY_BOUNDARY_LAYER_ID,
         type: "line",
-        source: COUNTY_SOURCE_ID,
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "boundaries",
         minzoom: 5,
+        maxzoom: 10,
+        filter: ["==", "kind", "county"],
         layout: {
           "line-join": "round",
           "line-cap": "round",
@@ -402,12 +386,8 @@ function styleFor(
         id: LAKE_MASK_LAYER_ID,
         type: "fill",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
-        filter: [
-          "all",
-          ["==", "$type", "Polygon"],
-          ["==", "class", "lake"],
-        ],
+        "source-layer": "hydro",
+        filter: ["==", "kind", "great_lake_polygon"],
         paint: {
           "fill-color": lakeFillColor,
           "fill-opacity": 1,
@@ -417,22 +397,17 @@ function styleFor(
         id: LAKE_SHORELINE_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
-        minzoom: 4,
-        filter: [
-          "all",
-          ["==", "$type", "Polygon"],
-          ["==", "class", "lake"],
-          ["!=", "intermittent", 1],
-        ],
+        "source-layer": "hydro",
+        minzoom: 3,
+        filter: ["==", "kind", "great_lake_shoreline"],
         layout: {
           "line-join": "round",
           "line-cap": "round",
         },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.2, 5, 0.75, 7, 0.9, 10, 0.9],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.6, 5, 1.05, 7, 1.4, 10, 1.8],
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 3, 0.45, 4, 0.62, 5, 0.75, 7, 0.9, 10, 0.9],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 4, 0.75, 5, 1.05, 7, 1.4, 10, 1.8],
         },
       },
       {

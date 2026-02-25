@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import traceback
 from pathlib import Path
 
@@ -26,6 +27,14 @@ logger = logging.getLogger(__name__)
 
 DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
 PUBLISHED_ROOT = DATA_ROOT / "published"
+BOUNDARIES_MBTILES = Path(
+    os.environ.get(
+        "TWF_V3_BOUNDARIES_MBTILES",
+        str(DATA_ROOT / "boundaries" / "v1" / "twf_boundaries.mbtiles"),
+    )
+)
+BOUNDARIES_TILESET_ID = os.environ.get("TWF_V3_BOUNDARIES_TILESET_ID", "twf-boundaries-v1")
+BOUNDARIES_TILESET_NAME = os.environ.get("TWF_V3_BOUNDARIES_TILESET_NAME", "TWF Boundaries v1")
 
 # Regex to match run IDs like 20260217_20z
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
@@ -33,6 +42,115 @@ _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 # Cache headers per the caching strategy in ROADMAP_V3
 CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
+
+
+def _mbtiles_get_metadata(path: Path) -> dict[str, str]:
+    if not path.is_file():
+        return {}
+    try:
+        conn = sqlite3.connect(str(path))
+        cur = conn.cursor()
+        cur.execute("SELECT name, value FROM metadata")
+        rows = cur.fetchall()
+        conn.close()
+        return {str(name): str(value) for name, value in rows}
+    except Exception:
+        logger.exception("Failed reading MBTiles metadata: %s", path)
+        return {}
+
+
+def _mbtiles_lookup_tile(path: Path, *, z: int, x: int, y: int) -> bytes | None:
+    if not path.is_file():
+        return None
+
+    if z < 0 or x < 0 or y < 0:
+        return None
+
+    max_coord = (1 << z) - 1
+    if x > max_coord or y > max_coord:
+        return None
+
+    tms_y = max_coord - y
+
+    try:
+        conn = sqlite3.connect(str(path))
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT tile_data
+            FROM tiles
+            WHERE zoom_level = ? AND tile_column = ? AND tile_row = ?
+            """,
+            (z, x, tms_y),
+        )
+        row = cur.fetchone()
+        conn.close()
+        if row is None:
+            return None
+        return row[0]
+    except Exception:
+        logger.exception("Failed reading MBTiles tile z/x/y=%s/%s/%s from %s", z, x, y, path)
+        return None
+
+
+def _mbtiles_min_max_zoom(metadata: dict[str, str]) -> tuple[int, int]:
+    try:
+        minzoom = int(metadata.get("minzoom", "0"))
+    except Exception:
+        minzoom = 0
+    try:
+        maxzoom = int(metadata.get("maxzoom", "10"))
+    except Exception:
+        maxzoom = 10
+    return minzoom, maxzoom
+
+
+def _tilejson_for_boundaries() -> dict:
+    metadata = _mbtiles_get_metadata(BOUNDARIES_MBTILES)
+    minzoom, maxzoom = _mbtiles_min_max_zoom(metadata)
+    bounds_raw = metadata.get("bounds", "-180,-85.0511,180,85.0511")
+    center_raw = metadata.get("center", "-98.58,39.83,4")
+
+    try:
+        bounds = [float(v) for v in bounds_raw.split(",")[:4]]
+        if len(bounds) != 4:
+            raise ValueError("invalid bounds length")
+    except Exception:
+        bounds = [-180.0, -85.0511, 180.0, 85.0511]
+
+    try:
+        center_vals = [float(v) for v in center_raw.split(",")[:3]]
+        if len(center_vals) != 3:
+            raise ValueError("invalid center length")
+    except Exception:
+        center_vals = [-98.58, 39.83, 4.0]
+
+    tilejson = {
+        "tilejson": "2.2.0",
+        "name": metadata.get("name", BOUNDARIES_TILESET_NAME),
+        "id": metadata.get("id", BOUNDARIES_TILESET_ID),
+        "scheme": "xyz",
+        "format": "pbf",
+        "minzoom": minzoom,
+        "maxzoom": maxzoom,
+        "bounds": bounds,
+        "center": center_vals,
+        "tiles": ["/tiles/v3/boundaries/v1/{z}/{x}/{y}.mvt"],
+    }
+
+    if "vector_layers" in metadata:
+        try:
+            tilejson["vector_layers"] = json.loads(metadata["vector_layers"])
+        except Exception:
+            logger.warning("Invalid vector_layers metadata in %s", BOUNDARIES_MBTILES)
+
+    if "attribution" in metadata:
+        tilejson["attribution"] = metadata["attribution"]
+
+    if "description" in metadata:
+        tilejson["description"] = metadata["description"]
+
+    return tilejson
 
 def _build_transparent_png_tile(tilesize: int = 512) -> bytes:
     safe_size = max(1, int(tilesize))
@@ -210,7 +328,47 @@ def _resolve_cog_path(model: str, run: str, var: str, fh: int) -> Path | None:
 
 @app.get("/tiles/v3/health")
 def health():
-    return {"ok": True, "data_root": str(DATA_ROOT)}
+    return {
+        "ok": True,
+        "data_root": str(DATA_ROOT),
+        "boundaries_mbtiles": str(BOUNDARIES_MBTILES),
+        "boundaries_mbtiles_exists": BOUNDARIES_MBTILES.is_file(),
+    }
+
+
+@app.get("/tiles/v3/boundaries/v1/tilejson.json")
+def boundaries_tilejson():
+    if not BOUNDARIES_MBTILES.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "error": "boundaries tileset not found",
+                "path": str(BOUNDARIES_MBTILES),
+            },
+        )
+
+    return Response(
+        content=json.dumps(_tilejson_for_boundaries()),
+        media_type="application/json",
+        headers={"Cache-Control": CACHE_MISS},
+    )
+
+
+@app.get("/tiles/v3/boundaries/v1/{z:int}/{x:int}/{y:int}.mvt")
+def boundaries_tile(z: int, x: int, y: int):
+    tile = _mbtiles_lookup_tile(BOUNDARIES_MBTILES, z=z, x=x, y=y)
+    if tile is None:
+        return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
+
+    headers = {"Cache-Control": CACHE_HIT}
+    if len(tile) >= 2 and tile[0] == 0x1F and tile[1] == 0x8B:
+        headers["Content-Encoding"] = "gzip"
+
+    return Response(
+        content=tile,
+        media_type="application/vnd.mapbox-vector-tile",
+        headers=headers,
+    )
 
 
 @app.get("/tiles/v3/{model}/{run}/{var}/{fh:int}/{z:int}/{x:int}/{y:int}.png")

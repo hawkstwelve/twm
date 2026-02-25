@@ -11,6 +11,9 @@
   - upstream: `http://127.0.0.1:8200`
 - `/tiles/v3/` → V3 tile server upstream
   - upstream: `http://127.0.0.1:8201`
+  - includes vector boundary endpoints:
+    - `/tiles/v3/boundaries/v1/tilejson.json`
+    - `/tiles/v3/boundaries/v1/{z}/{x}/{y}.mvt`
 
 ## Retired V2 routes
 V2 paths return `410 Gone`:
