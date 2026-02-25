@@ -43,7 +43,7 @@ mapshaper "$SOURCE_DIR/coastline.geojson" -snap interval=0.00005 -clean -each 'k
 mapshaper "$BUILD_DIR/states_polygons.geojson" -snap interval=0.00005 -clean -innerlines -each 'kind="state";admin_level=4' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/state_lines.geojson"
 mapshaper "$BUILD_DIR/counties_polygons.geojson" -snap interval=0.00003 -clean -innerlines -each 'kind="county";admin_level=6' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/county_lines_raw.geojson"
 # Remove null geometries before tippecanoe to avoid null-geometry warnings and dropped features.
-mapshaper "$BUILD_DIR/county_lines_raw.geojson" -filter 'this.geometry' -o format=geojson "$BUILD_DIR/county_lines_raw_nonnull.geojson"
+mapshaper "$BUILD_DIR/county_lines_raw.geojson" -filter 'this.geometry != null && this.geometry.type != null' -o format=geojson "$BUILD_DIR/county_lines_raw_nonnull.geojson"
 
 mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -clean -simplify weighted 8% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_low.geojson"
 mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -clean -simplify weighted 22% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_high.geojson"
