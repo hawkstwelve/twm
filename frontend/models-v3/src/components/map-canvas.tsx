@@ -74,6 +74,7 @@ const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
+const COUNTY_SOURCE_ID = "twf-counties";
 const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
@@ -89,6 +90,8 @@ const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
 
 const TRANSPARENT_PIXEL_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII=";
+
+const US_COUNTIES_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/plotly/datasets@master/geojson-counties-fips.json";
 
 const LOOP_CONUS_COORDINATES: [[number, number], [number, number], [number, number], [number, number]] = [
   [-125.0, 50.0],
@@ -298,6 +301,10 @@ function styleFor(
         type: "vector",
         url: CARTO_VECTOR_TILES_URL,
       },
+      [COUNTY_SOURCE_ID]: {
+        type: "geojson",
+        data: US_COUNTIES_GEOJSON_URL,
+      },
       [CONTOUR_SOURCE_ID]: {
         type: "geojson",
         data: contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION,
@@ -379,14 +386,12 @@ function styleFor(
       {
         id: COUNTY_BOUNDARY_LAYER_ID,
         type: "line",
-        source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundary",
+        source: COUNTY_SOURCE_ID,
         minzoom: 5,
-        filter: [
-          "all",
-          ["==", "admin_level", 6],
-          ["==", "maritime", 0],
-        ],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
         paint: {
           "line-color": boundaryLineColor,
           "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.82, 6, 0.8, 7, 0.78, 8, 0.76, 10, 0.74],
