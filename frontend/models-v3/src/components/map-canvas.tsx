@@ -77,23 +77,11 @@ const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
 const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
-const GREAT_LAKES_COASTLINE_LAYER_ID = "twf-great-lakes-coastline";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
   type: "FeatureCollection",
   features: [],
-};
-
-const GREAT_LAKES_FILTER_POLYGON: GeoJSON.Polygon = {
-  type: "Polygon",
-  coordinates: [[
-    [-93.5, 49.8],
-    [-74.0, 49.8],
-    [-74.0, 40.2],
-    [-93.5, 40.2],
-    [-93.5, 49.8],
-  ]],
 };
 
 const TRANSPARENT_PIXEL_DATA_URL =
@@ -357,7 +345,6 @@ function styleFor(
           "all",
           ["==", "admin_level", 2],
           ["==", "maritime", 0],
-          ["!", ["within", GREAT_LAKES_FILTER_POLYGON]],
         ],
         paint: {
           "line-color": boundaryLineColor,
@@ -374,24 +361,6 @@ function styleFor(
           "all",
           ["==", "admin_level", 4],
           ["==", "maritime", 0],
-          ["!", ["within", GREAT_LAKES_FILTER_POLYGON]],
-        ],
-        paint: {
-          "line-color": boundaryLineColor,
-          "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
-        },
-      },
-      {
-        id: GREAT_LAKES_COASTLINE_LAYER_ID,
-        type: "line",
-        source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
-        filter: [
-          "all",
-          ["==", "$type", "Polygon"],
-          ["==", "class", "lake"],
-          ["within", GREAT_LAKES_FILTER_POLYGON],
         ],
         paint: {
           "line-color": boundaryLineColor,
@@ -580,9 +549,6 @@ export function MapCanvas({
     }
     if (map.getLayer(COASTLINE_LAYER_ID)) {
       map.moveLayer(COASTLINE_LAYER_ID, "twf-labels");
-    }
-    if (map.getLayer(GREAT_LAKES_COASTLINE_LAYER_ID)) {
-      map.moveLayer(GREAT_LAKES_COASTLINE_LAYER_ID, "twf-labels");
     }
     if (map.getLayer(COUNTRY_BOUNDARY_LAYER_ID)) {
       map.moveLayer(COUNTRY_BOUNDARY_LAYER_ID, "twf-labels");
