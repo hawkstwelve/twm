@@ -334,10 +334,15 @@ function styleFor(
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "hydro",
         filter: ["==", "kind", "coastline"],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
+          "line-opacity": 0.86,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.95, 7, 1.3, 10, 1.7],
+          "line-blur": ["interpolate", ["linear"], ["zoom"], 3, 0.18, 6, 0.1, 10, 0.04],
         },
       },
       {
@@ -346,10 +351,15 @@ function styleFor(
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "boundaries",
         filter: ["==", "kind", "country"],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": 0.85,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.95, 7, 1.3, 10, 1.7],
+          "line-opacity": 0.78,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.9, 7, 1.2, 10, 1.55],
+          "line-blur": ["interpolate", ["linear"], ["zoom"], 3, 0.16, 6, 0.08, 10, 0.03],
         },
       },
       {
@@ -358,10 +368,15 @@ function styleFor(
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "boundaries",
         filter: ["==", "kind", "state"],
+        layout: {
+          "line-join": "round",
+          "line-cap": "round",
+        },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
+          "line-opacity": 0.92,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.1, 7, 1.5, 10, 1.9],
+          "line-blur": ["interpolate", ["linear"], ["zoom"], 3, 0.14, 6, 0.08, 10, 0.03],
         },
       },
       {
@@ -378,8 +393,9 @@ function styleFor(
         },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 6, 0.58, 7, 0.56, 8, 0.54, 10, 0.52],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.5, 6, 0.62, 8, 0.78, 10, 0.9],
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.68, 6, 0.66, 7, 0.64, 8, 0.62, 10, 0.58],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.58, 6, 0.72, 8, 0.88, 10, 1],
+          "line-blur": ["interpolate", ["linear"], ["zoom"], 5, 0.12, 7, 0.08, 10, 0.02],
         },
       },
       {
