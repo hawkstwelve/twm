@@ -77,6 +77,7 @@ const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
 const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
+const COUNTY_BOUNDARY_LAYER_ID = "twf-county-boundaries";
 const LAKE_MASK_LAYER_ID = "twf-lake-mask";
 const LAKE_SHORELINE_LAYER_ID = "twf-lake-shoreline";
 const LOOP_SOURCE_ID = "twf-loop-image";
@@ -376,6 +377,23 @@ function styleFor(
         },
       },
       {
+        id: COUNTY_BOUNDARY_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "boundary",
+        minzoom: 5,
+        filter: [
+          "all",
+          ["==", "admin_level", 6],
+          ["==", "maritime", 0],
+        ],
+        paint: {
+          "line-color": boundaryLineColor,
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.2, 6, 0.45, 8, 0.65, 10, 0.8],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.35, 6, 0.55, 8, 0.8, 10, 1.05],
+        },
+      },
+      {
         id: LAKE_MASK_LAYER_ID,
         type: "fill",
         source: STATE_BOUNDARY_SOURCE_ID,
@@ -599,6 +617,9 @@ export function MapCanvas({
     }
     if (map.getLayer(STATE_BOUNDARY_LAYER_ID)) {
       map.moveLayer(STATE_BOUNDARY_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(COUNTY_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(COUNTY_BOUNDARY_LAYER_ID, "twf-labels");
     }
     if (map.getLayer(LAKE_MASK_LAYER_ID)) {
       map.moveLayer(LAKE_MASK_LAYER_ID, "twf-labels");
