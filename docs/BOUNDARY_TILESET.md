@@ -37,7 +37,7 @@ Output MBTiles path:
 Implemented in the build script via separate tippecanoe passes and `tile-join`:
 
 - Country boundaries: `z0-z4`
-- Coastline: `z0-z5`
+- Coastline: `z0-z10`
 - State boundaries: `z3-z8`
 - County boundaries low detail: `z5-z7`
 - County boundaries high detail: `z8-z10`

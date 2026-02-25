@@ -56,7 +56,7 @@ tippecanoe -f -o "$TMP_DIR/boundary_county_high.mbtiles" -l boundaries -Z8 -z10 
 
 tippecanoe -f -o "$TMP_DIR/hydro_polygon.mbtiles" -l hydro -Z3 -z8 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_polygons.geojson"
 tippecanoe -f -o "$TMP_DIR/hydro_shoreline.mbtiles" -l hydro -Z3 -z10 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_shoreline.geojson"
-tippecanoe -f -o "$TMP_DIR/hydro_coastline.mbtiles" -l hydro -Z0 -z5 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/coastline_lines.geojson"
+tippecanoe -f -o "$TMP_DIR/hydro_coastline.mbtiles" -l hydro -Z0 -z10 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/coastline_lines.geojson"
 
 tile-join -f -o "$OUT_MBTILES" \
   "$TMP_DIR/boundary_country.mbtiles" \
