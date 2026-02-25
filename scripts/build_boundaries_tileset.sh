@@ -37,7 +37,7 @@ unzip -o "$SOURCE_DIR/counties.zip" -d "$SOURCE_DIR/counties_shp" >/dev/null
 ogr2ogr -f GeoJSON "$BUILD_DIR/states_polygons.geojson" "$SOURCE_DIR/states_shp/cb_2023_us_state_5m.shp" -t_srs EPSG:4326 -select GEOID,NAME,STUSPS
 ogr2ogr -f GeoJSON "$BUILD_DIR/counties_polygons.geojson" "$SOURCE_DIR/counties_shp/cb_2023_us_county_5m.shp" -t_srs EPSG:4326 -select GEOID,NAME,STATEFP,COUNTYFP
 
-mapshaper "$SOURCE_DIR/country_lines.geojson" -snap interval=0.00005 -clean -each 'kind="country";admin_level=2' -filter-fields kind,admin_level,name,name_en -o format=geojson "$BUILD_DIR/country_lines.geojson"
+mapshaper "$SOURCE_DIR/country_lines.geojson" -snap interval=0.00005 -clean -each 'kind="country";admin_level=2' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/country_lines.geojson"
 mapshaper "$SOURCE_DIR/coastline.geojson" -snap interval=0.00005 -clean -each 'kind="coastline"' -filter-fields kind -o format=geojson "$BUILD_DIR/coastline_lines.geojson"
 
 mapshaper "$BUILD_DIR/states_polygons.geojson" -snap interval=0.00005 -clean -innerlines -each 'kind="state";admin_level=4' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/state_lines.geojson"
