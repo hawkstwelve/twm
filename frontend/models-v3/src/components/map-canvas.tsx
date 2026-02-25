@@ -116,7 +116,7 @@ function getOverlayPaintSettings(variable?: string): {
   brightnessMin: number;
   brightnessMax: number;
 } {
-  if (variable === "wspd10m") {
+  if (variable === "wspd10m" || variable === "wgst10m") {
     return {
       contrast: 0,
       saturation: 0,

@@ -366,6 +366,7 @@ UNIT_CONVERTERS: dict[str, Any] = {
     "tmp2m": _celsius_to_fahrenheit,
     "dp2m": _celsius_to_fahrenheit,
     "wspd10m": _ms_to_mph,
+    "wgst10m": _ms_to_mph,
     "snowfall_total": _meters_to_inches,
     "precip_total": _kgm2_to_inches,
 }

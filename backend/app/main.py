@@ -49,6 +49,7 @@ VAR_ORDER_BY_MODEL = {
         "precip_total",
         "snowfall_total",
         "wspd10m",
+        "wgst10m",
         "radar_ptype",
     ],
 }

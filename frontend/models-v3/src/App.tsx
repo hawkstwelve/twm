@@ -87,6 +87,7 @@ const VARIABLE_PRIORITY_ORDER = [
   "precip_total",
   "snowfall_total",
   "wspd10m",
+  "wgst10m",
 ];
 
 function percentile(values: number[], pct: number): number | null {

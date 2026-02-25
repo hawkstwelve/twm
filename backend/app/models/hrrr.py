@@ -31,6 +31,8 @@ class HRRRPlugin(BaseModelPlugin):
             return "refc"
         if normalized == "wspd10m":
             return "wspd10m"
+        if normalized in {"wgst10m", "gust10m", "10m_gust", "gust", "wind_gust"}:
+            return "wgst10m"
         if normalized in {"radar_ptype", "radarptype"}:
             return "radar_ptype"
         return normalized
@@ -159,6 +161,23 @@ HRRR_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="wspd10m",
+        kind="continuous",
+        units="mph",
+    ),
+    "wgst10m": VarSpec(
+        id="wgst10m",
+        name="10m Wind Gust",
+        selectors=VarSelectors(
+            search=[":GUST:surface:"],
+            filter_by_keys={
+                "shortName": "gust",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "gust",
+            },
+        ),
+        primary=True,
         kind="continuous",
         units="mph",
     ),

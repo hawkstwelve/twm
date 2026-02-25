@@ -439,6 +439,15 @@ VAR_SPECS = {
         "legend_title": "Wind Speed (mph)",
         "display_smoothing_sigma": 0.8,
     },
+    "wgst10m": {
+        "type": "continuous",
+        "units": "mph",
+        "range": WSPD10M_RANGE,
+        "anchors": WSPD10M_COLOR_ANCHORS,
+        "display_name": "10m Wind Gust",
+        "legend_title": "Wind Gust (mph)",
+        "display_smoothing_sigma": 0.8,
+    },
     "refc": {
         "type": "discrete",
         "units": "dBZ",

@@ -19,7 +19,7 @@ export const DEFAULTS = {
   overlayOpacity: 0.9,
 };
 
-export const ALLOWED_VARIABLES = new Set(["tmp2m", "tmp850", "dp2m", "precip_total", "snowfall_total", "wspd10m", "radar_ptype", "precip_ptype", "qpf6h"]);
+export const ALLOWED_VARIABLES = new Set(["tmp2m", "tmp850", "dp2m", "precip_total", "snowfall_total", "wspd10m", "wgst10m", "radar_ptype", "precip_ptype", "qpf6h"]);
 
 export const VARIABLE_LABELS: Record<string, string> = {
   tmp2m: "Surface Temperature",
@@ -28,6 +28,7 @@ export const VARIABLE_LABELS: Record<string, string> = {
   precip_total: "Total Precipitation",
   snowfall_total: "Total Snowfall (10:1)",
   wspd10m: "Wind Speed",
+  wgst10m: "Wind Gust",
   radar_ptype: "Composite Reflectivity + P-Type",
   precip_ptype: "Precip + Type",
   qpf6h: "6-hr Precip",
