@@ -42,36 +42,32 @@ mapshaper "$SOURCE_DIR/coastline.geojson" -snap interval=0.00005 -clean -each 'k
 
 mapshaper "$BUILD_DIR/states_polygons.geojson" -snap interval=0.00005 -clean -innerlines -each 'kind="state";admin_level=4' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/state_lines.geojson"
 mapshaper "$BUILD_DIR/counties_polygons.geojson" -snap interval=0.00003 -clean -innerlines -each 'kind="county";admin_level=6' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/county_lines_raw.geojson"
+# Remove null geometries before tippecanoe to avoid null-geometry warnings and dropped features.
+mapshaper "$BUILD_DIR/county_lines_raw.geojson" -filter 'this.geometry' -o format=geojson "$BUILD_DIR/county_lines_raw_nonnull.geojson"
 
-mapshaper "$BUILD_DIR/county_lines_raw.geojson" -snap interval=0.00003 -clean -simplify weighted 8% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_low.geojson"
-mapshaper "$BUILD_DIR/county_lines_raw.geojson" -snap interval=0.00003 -clean -simplify weighted 22% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_high.geojson"
+mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -clean -simplify weighted 8% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_low.geojson"
+mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -clean -simplify weighted 22% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_high.geojson"
 
 mapshaper "$SOURCE_DIR/lakes.geojson" -snap interval=0.00005 -clean -filter 'name=="Lake Superior" || name=="Lake Michigan" || name=="Lake Huron" || name=="Lake Erie" || name=="Lake Ontario" || name_en=="Lake Superior" || name_en=="Lake Michigan" || name_en=="Lake Huron" || name_en=="Lake Erie" || name_en=="Lake Ontario"' -each 'kind="great_lake_polygon"' -filter-fields kind,name,name_en -o format=geojson "$BUILD_DIR/great_lake_polygons.geojson"
 mapshaper "$BUILD_DIR/great_lake_polygons.geojson" -snap interval=0.00005 -clean -lines -each 'kind="great_lake_shoreline"' -filter-fields kind -o format=geojson "$BUILD_DIR/great_lake_shoreline.geojson"
 
-# MapLibre rejects vector tiles when geometry exceeds allowed extent.
-# Lower buffers + simplification reduce extent overflow and prevent tile rejection.
-tippecanoe -f -o "$TMP_DIR/boundary_country_low.mbtiles" -l boundaries -Z0 -z6 --buffer=0 --simplification=2 --detect-shared-borders "$BUILD_DIR/country_lines.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_country_high.mbtiles" -l boundaries -Z7 -z10 --buffer=2 --simplification=2 --detect-shared-borders "$BUILD_DIR/country_lines.geojson"
+# MapLibre can reject vector tiles when geometry exceeds allowed extent; keep buffers modest with simplification.
+# Also avoid mismatched maxzoom joins, which can create holes/error-prone tile behavior near zoom boundaries.
+tippecanoe -f -o "$TMP_DIR/boundary_country.mbtiles" -l boundaries -Z0 -z10 --buffer=3 --simplification=2 --detect-shared-borders "$BUILD_DIR/country_lines.geojson"
 tippecanoe -f -o "$TMP_DIR/boundary_state.mbtiles" -l boundaries -Z3 -z8 --buffer=6 --detect-shared-borders --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/state_lines.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_county_low.mbtiles" -l counties -Z5 -z7 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=10 "$BUILD_DIR/county_lines_low.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_county_high.mbtiles" -l counties -Z8 -z10 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=6 "$BUILD_DIR/county_lines_high.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_county.mbtiles" -l counties -Z5 -z10 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=8 "$BUILD_DIR/county_lines_raw_nonnull.geojson"
 
 tippecanoe -f -o "$TMP_DIR/hydro_polygon.mbtiles" -l hydro -Z3 -z8 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_polygons.geojson"
 tippecanoe -f -o "$TMP_DIR/hydro_shoreline.mbtiles" -l hydro -Z3 -z10 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_shoreline.geojson"
-tippecanoe -f -o "$TMP_DIR/hydro_coastline_low.mbtiles" -l hydro -Z0 -z6 --buffer=0 --simplification=2 "$BUILD_DIR/coastline_lines.geojson"
-tippecanoe -f -o "$TMP_DIR/hydro_coastline_high.mbtiles" -l hydro -Z7 -z10 --buffer=2 --simplification=2 "$BUILD_DIR/coastline_lines.geojson"
+tippecanoe -f -o "$TMP_DIR/hydro_coastline.mbtiles" -l hydro -Z0 -z10 --buffer=3 --simplification=2 "$BUILD_DIR/coastline_lines.geojson"
 
 tile-join -f -o "$OUT_MBTILES" \
-  "$TMP_DIR/boundary_country_low.mbtiles" \
-  "$TMP_DIR/boundary_country_high.mbtiles" \
+  "$TMP_DIR/boundary_country.mbtiles" \
   "$TMP_DIR/boundary_state.mbtiles" \
-  "$TMP_DIR/boundary_county_low.mbtiles" \
-  "$TMP_DIR/boundary_county_high.mbtiles" \
+  "$TMP_DIR/boundary_county.mbtiles" \
   "$TMP_DIR/hydro_polygon.mbtiles" \
   "$TMP_DIR/hydro_shoreline.mbtiles" \
-  "$TMP_DIR/hydro_coastline_low.mbtiles" \
-  "$TMP_DIR/hydro_coastline_high.mbtiles"
+  "$TMP_DIR/hydro_coastline.mbtiles"
 
 VECTOR_LAYERS='[{"id":"boundaries","description":"country/state linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":0,"maxzoom":10},{"id":"counties","description":"county linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":5,"maxzoom":10},{"id":"hydro","description":"coastline and Great Lakes polygon/shoreline","fields":{"kind":"String"},"minzoom":0,"maxzoom":10}]'
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('name','TWF Boundaries v1');"
