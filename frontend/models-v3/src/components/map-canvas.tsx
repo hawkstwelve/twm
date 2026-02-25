@@ -71,6 +71,7 @@ const HIDDEN_PREFETCH_OPACITY = 0;
 const WARM_PREFETCH_OPACITY = 0.001;
 const PREFETCH_TILE_EVENT_BUDGET = 1;
 const PREFETCH_READY_TIMEOUT_MS = 8000;
+const REGION_MAX_BOUNDS_PADDING_DEGREES = 1.5;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
@@ -234,6 +235,16 @@ function setLayerVisibility(map: maplibregl.Map, id: string, visible: boolean) {
     return;
   }
   map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
+}
+
+function expandedBoundsFromViewBbox(bbox: [number, number, number, number]): [[number, number], [number, number]] {
+  const [west, south, east, north] = bbox;
+  const pad = REGION_MAX_BOUNDS_PADDING_DEGREES;
+  const minLon = Math.max(-180, west - pad);
+  const minLat = Math.max(-85.0511, south - pad);
+  const maxLon = Math.min(180, east + pad);
+  const maxLat = Math.min(85.0511, north + pad);
+  return [[minLon, minLat], [maxLon, maxLat]];
 }
 
 function styleFor(
@@ -884,6 +895,7 @@ export function MapCanvas({
       zoom: view.zoom,
       minZoom: view.minZoom ?? 3,
       maxZoom: view.maxZoom ?? 11,
+      maxBounds: view.bbox ? expandedBoundsFromViewBbox(view.bbox) : undefined,
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
@@ -1038,6 +1050,8 @@ export function MapCanvas({
     const debugDump = () => {
       const zoom = Number(map.getZoom().toFixed(2));
       const bucket = Math.max(0, Math.floor(zoom));
+      const center = map.getCenter();
+      const bounds = map.getBounds();
 
       let renderedCoast = 0;
       let renderedCountry = 0;
@@ -1082,6 +1096,13 @@ export function MapCanvas({
       console.debug("[map][boundaries-debug]", {
         zoom,
         bucket,
+        center: { lon: Number(center.lng.toFixed(4)), lat: Number(center.lat.toFixed(4)) },
+        bounds: {
+          west: Number(bounds.getWest().toFixed(4)),
+          south: Number(bounds.getSouth().toFixed(4)),
+          east: Number(bounds.getEast().toFixed(4)),
+          north: Number(bounds.getNorth().toFixed(4)),
+        },
         hideCounties: boundaryDebugFlags.hideCounties,
         rendered: {
           coastline: renderedCoast,
@@ -1098,6 +1119,7 @@ export function MapCanvas({
 
       console.debug(
         `[map][boundaries-debug-line] z=${zoom} b=${bucket} hideCounties=${boundaryDebugFlags.hideCounties}`
+        + ` center=(${center.lng.toFixed(4)},${center.lat.toFixed(4)})`
         + ` rendered(coast=${renderedCoast},country=${renderedCountry},state=${renderedState},county=${renderedCounty})`
         + ` source(coast=${sourceCoast},country=${sourceCountry},county=${sourceCounty})`
       );
@@ -1557,6 +1579,11 @@ export function MapCanvas({
     const map = mapRef.current;
     if (!map || !isLoaded) {
       return;
+    }
+    if (view.bbox) {
+      map.setMaxBounds(expandedBoundsFromViewBbox(view.bbox));
+    } else {
+      map.setMaxBounds(null);
     }
     if (view.bbox) {
       const [west, south, east, north] = view.bbox;
