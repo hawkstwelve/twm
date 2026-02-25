@@ -74,16 +74,26 @@ const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
+const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
-const STATE_MARITIME_BOUNDARY_LAYER_ID = "twf-state-maritime-boundaries";
-const COUNTRY_MARITIME_BOUNDARY_LAYER_ID = "twf-country-maritime-boundaries";
-const WATER_MASK_LAYER_ID = "twf-water-mask";
+const GREAT_LAKES_COASTLINE_LAYER_ID = "twf-great-lakes-coastline";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
   type: "FeatureCollection",
   features: [],
+};
+
+const GREAT_LAKES_FILTER_POLYGON: GeoJSON.Polygon = {
+  type: "Polygon",
+  coordinates: [[
+    [-93.5, 49.8],
+    [-74.0, 49.8],
+    [-74.0, 40.2],
+    [-93.5, 40.2],
+    [-93.5, 49.8],
+  ]],
 };
 
 const TRANSPARENT_PIXEL_DATA_URL =
@@ -190,10 +200,6 @@ function getBoundaryLineColor(basemapMode: BasemapMode): string {
   return basemapMode === "dark" ? "#f3f4f6" : "#000000";
 }
 
-function getWaterFillColor(basemapMode: BasemapMode): string {
-  return basemapMode === "dark" ? "#2C353C" : "#d4dadc";
-}
-
 function getBasemapPaintSettings(basemapMode: BasemapMode): {
   "raster-brightness-min": number;
   "raster-brightness-max": number;
@@ -237,7 +243,6 @@ function styleFor(
   const basemapTiles = basemapMode === "dark" ? CARTO_DARK_BASE_TILES : CARTO_LIGHT_BASE_TILES;
   const labelTiles = basemapMode === "dark" ? CARTO_DARK_LABEL_TILES : CARTO_LIGHT_LABEL_TILES;
   const boundaryLineColor = getBoundaryLineColor(basemapMode);
-  const waterFillColor = getWaterFillColor(basemapMode);
   const basemapPaint = getBasemapPaintSettings(basemapMode);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
@@ -328,6 +333,22 @@ function styleFor(
       },
       ...prefetchLayers,
       {
+        id: COASTLINE_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "water",
+        filter: [
+          "all",
+          ["==", "$type", "Polygon"],
+          ["in", "class", "ocean", "sea"],
+        ],
+        paint: {
+          "line-color": boundaryLineColor,
+          "line-opacity": 0.8,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.9, 7, 1.2, 10, 1.6],
+        },
+      },
+      {
         id: COUNTRY_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
@@ -336,6 +357,7 @@ function styleFor(
           "all",
           ["==", "admin_level", 2],
           ["==", "maritime", 0],
+          ["!", ["within", GREAT_LAKES_FILTER_POLYGON]],
         ],
         paint: {
           "line-color": boundaryLineColor,
@@ -352,6 +374,7 @@ function styleFor(
           "all",
           ["==", "admin_level", 4],
           ["==", "maritime", 0],
+          ["!", ["within", GREAT_LAKES_FILTER_POLYGON]],
         ],
         paint: {
           "line-color": boundaryLineColor,
@@ -360,41 +383,15 @@ function styleFor(
         },
       },
       {
-        id: WATER_MASK_LAYER_ID,
-        type: "fill",
+        id: GREAT_LAKES_COASTLINE_LAYER_ID,
+        type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "water",
-        filter: ["==", "$type", "Polygon"],
-        paint: {
-          "fill-color": waterFillColor,
-          "fill-opacity": 1,
-        },
-      },
-      {
-        id: COUNTRY_MARITIME_BOUNDARY_LAYER_ID,
-        type: "line",
-        source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundary",
         filter: [
           "all",
-          ["==", "admin_level", 2],
-          ["==", "maritime", 1],
-        ],
-        paint: {
-          "line-color": boundaryLineColor,
-          "line-opacity": 0.85,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.95, 7, 1.3, 10, 1.7],
-        },
-      },
-      {
-        id: STATE_MARITIME_BOUNDARY_LAYER_ID,
-        type: "line",
-        source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundary",
-        filter: [
-          "all",
-          ["==", "admin_level", 4],
-          ["==", "maritime", 1],
+          ["==", "$type", "Polygon"],
+          ["==", "class", "lake"],
+          ["within", GREAT_LAKES_FILTER_POLYGON],
         ],
         paint: {
           "line-color": boundaryLineColor,
@@ -581,14 +578,17 @@ export function MapCanvas({
     if (map.getLayer(LOOP_LAYER_ID)) {
       map.moveLayer(LOOP_LAYER_ID, "twf-labels");
     }
-    if (map.getLayer(WATER_MASK_LAYER_ID)) {
-      map.moveLayer(WATER_MASK_LAYER_ID, "twf-labels");
+    if (map.getLayer(COASTLINE_LAYER_ID)) {
+      map.moveLayer(COASTLINE_LAYER_ID, "twf-labels");
     }
-    if (map.getLayer(COUNTRY_MARITIME_BOUNDARY_LAYER_ID)) {
-      map.moveLayer(COUNTRY_MARITIME_BOUNDARY_LAYER_ID, "twf-labels");
+    if (map.getLayer(GREAT_LAKES_COASTLINE_LAYER_ID)) {
+      map.moveLayer(GREAT_LAKES_COASTLINE_LAYER_ID, "twf-labels");
     }
-    if (map.getLayer(STATE_MARITIME_BOUNDARY_LAYER_ID)) {
-      map.moveLayer(STATE_MARITIME_BOUNDARY_LAYER_ID, "twf-labels");
+    if (map.getLayer(COUNTRY_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(COUNTRY_BOUNDARY_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(STATE_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(STATE_BOUNDARY_LAYER_ID, "twf-labels");
     }
     map.moveLayer("twf-labels");
   }, []);
