@@ -74,9 +74,9 @@ const PREFETCH_READY_TIMEOUT_MS = 8000;
 const CONTOUR_SOURCE_ID = "twf-contours";
 const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
-const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
+const WATER_MASK_LAYER_ID = "twf-water-mask";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -188,6 +188,10 @@ function getBoundaryLineColor(basemapMode: BasemapMode): string {
   return basemapMode === "dark" ? "#f3f4f6" : "#000000";
 }
 
+function getWaterFillColor(basemapMode: BasemapMode): string {
+  return basemapMode === "dark" ? "#2C353C" : "#d4dadc";
+}
+
 function getBasemapPaintSettings(basemapMode: BasemapMode): {
   "raster-brightness-min": number;
   "raster-brightness-max": number;
@@ -231,6 +235,7 @@ function styleFor(
   const basemapTiles = basemapMode === "dark" ? CARTO_DARK_BASE_TILES : CARTO_LIGHT_BASE_TILES;
   const labelTiles = basemapMode === "dark" ? CARTO_DARK_LABEL_TILES : CARTO_LIGHT_LABEL_TILES;
   const boundaryLineColor = getBoundaryLineColor(basemapMode);
+  const waterFillColor = getWaterFillColor(basemapMode);
   const basemapPaint = getBasemapPaintSettings(basemapMode);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
@@ -321,22 +326,6 @@ function styleFor(
       },
       ...prefetchLayers,
       {
-        id: COASTLINE_LAYER_ID,
-        type: "line",
-        source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
-        filter: [
-          "all",
-          ["==", "$type", "Polygon"],
-          ["in", "class", "ocean", "sea"],
-        ],
-        paint: {
-          "line-color": boundaryLineColor,
-          "line-opacity": 0.8,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.9, 7, 1.2, 10, 1.6],
-        },
-      },
-      {
         id: COUNTRY_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
@@ -366,6 +355,17 @@ function styleFor(
           "line-color": boundaryLineColor,
           "line-opacity": 0.9,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
+        },
+      },
+      {
+        id: WATER_MASK_LAYER_ID,
+        type: "fill",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "water",
+        filter: ["==", "$type", "Polygon"],
+        paint: {
+          "fill-color": waterFillColor,
+          "fill-opacity": 1,
         },
       },
       {
@@ -547,14 +547,8 @@ export function MapCanvas({
     if (map.getLayer(LOOP_LAYER_ID)) {
       map.moveLayer(LOOP_LAYER_ID, "twf-labels");
     }
-    if (map.getLayer(COASTLINE_LAYER_ID)) {
-      map.moveLayer(COASTLINE_LAYER_ID, "twf-labels");
-    }
-    if (map.getLayer(COUNTRY_BOUNDARY_LAYER_ID)) {
-      map.moveLayer(COUNTRY_BOUNDARY_LAYER_ID, "twf-labels");
-    }
-    if (map.getLayer(STATE_BOUNDARY_LAYER_ID)) {
-      map.moveLayer(STATE_BOUNDARY_LAYER_ID, "twf-labels");
+    if (map.getLayer(WATER_MASK_LAYER_ID)) {
+      map.moveLayer(WATER_MASK_LAYER_ID, "twf-labels");
     }
     map.moveLayer("twf-labels");
   }, []);
