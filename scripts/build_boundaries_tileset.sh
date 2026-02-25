@@ -37,17 +37,17 @@ unzip -o "$SOURCE_DIR/counties.zip" -d "$SOURCE_DIR/counties_shp" >/dev/null
 ogr2ogr -f GeoJSON "$BUILD_DIR/states_polygons.geojson" "$SOURCE_DIR/states_shp/cb_2023_us_state_5m.shp" -t_srs EPSG:4326 -select GEOID,NAME,STUSPS
 ogr2ogr -f GeoJSON "$BUILD_DIR/counties_polygons.geojson" "$SOURCE_DIR/counties_shp/cb_2023_us_county_5m.shp" -t_srs EPSG:4326 -select GEOID,NAME,STATEFP,COUNTYFP
 
-mapshaper "$SOURCE_DIR/country_lines.geojson" -clean snap interval=0.00005 -each 'kind="country";admin_level=2' -filter-fields kind,admin_level,name,name_en -o format=geojson "$BUILD_DIR/country_lines.geojson"
-mapshaper "$SOURCE_DIR/coastline.geojson" -clean snap interval=0.00005 -each 'kind="coastline"' -filter-fields kind -o format=geojson "$BUILD_DIR/coastline_lines.geojson"
+mapshaper "$SOURCE_DIR/country_lines.geojson" -snap interval=0.00005 -clean -each 'kind="country";admin_level=2' -filter-fields kind,admin_level,name,name_en -o format=geojson "$BUILD_DIR/country_lines.geojson"
+mapshaper "$SOURCE_DIR/coastline.geojson" -snap interval=0.00005 -clean -each 'kind="coastline"' -filter-fields kind -o format=geojson "$BUILD_DIR/coastline_lines.geojson"
 
-mapshaper "$BUILD_DIR/states_polygons.geojson" -clean snap interval=0.00005 -innerlines -each 'kind="state";admin_level=4' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/state_lines.geojson"
-mapshaper "$BUILD_DIR/counties_polygons.geojson" -clean snap interval=0.00003 -innerlines -each 'kind="county";admin_level=6' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/county_lines_raw.geojson"
+mapshaper "$BUILD_DIR/states_polygons.geojson" -snap interval=0.00005 -clean -innerlines -each 'kind="state";admin_level=4' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/state_lines.geojson"
+mapshaper "$BUILD_DIR/counties_polygons.geojson" -snap interval=0.00003 -clean -innerlines -each 'kind="county";admin_level=6' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/county_lines_raw.geojson"
 
-mapshaper "$BUILD_DIR/county_lines_raw.geojson" -clean snap interval=0.00003 -simplify weighted 8% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_low.geojson"
-mapshaper "$BUILD_DIR/county_lines_raw.geojson" -clean snap interval=0.00003 -simplify weighted 22% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_high.geojson"
+mapshaper "$BUILD_DIR/county_lines_raw.geojson" -snap interval=0.00003 -clean -simplify weighted 8% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_low.geojson"
+mapshaper "$BUILD_DIR/county_lines_raw.geojson" -snap interval=0.00003 -clean -simplify weighted 22% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_high.geojson"
 
-mapshaper "$SOURCE_DIR/lakes.geojson" -clean snap interval=0.00005 -filter 'name=="Lake Superior" || name=="Lake Michigan" || name=="Lake Huron" || name=="Lake Erie" || name=="Lake Ontario" || name_en=="Lake Superior" || name_en=="Lake Michigan" || name_en=="Lake Huron" || name_en=="Lake Erie" || name_en=="Lake Ontario"' -each 'kind="great_lake_polygon"' -filter-fields kind,name,name_en -o format=geojson "$BUILD_DIR/great_lake_polygons.geojson"
-mapshaper "$BUILD_DIR/great_lake_polygons.geojson" -clean snap interval=0.00005 -lines -each 'kind="great_lake_shoreline"' -filter-fields kind -o format=geojson "$BUILD_DIR/great_lake_shoreline.geojson"
+mapshaper "$SOURCE_DIR/lakes.geojson" -snap interval=0.00005 -clean -filter 'name=="Lake Superior" || name=="Lake Michigan" || name=="Lake Huron" || name=="Lake Erie" || name=="Lake Ontario" || name_en=="Lake Superior" || name_en=="Lake Michigan" || name_en=="Lake Huron" || name_en=="Lake Erie" || name_en=="Lake Ontario"' -each 'kind="great_lake_polygon"' -filter-fields kind,name,name_en -o format=geojson "$BUILD_DIR/great_lake_polygons.geojson"
+mapshaper "$BUILD_DIR/great_lake_polygons.geojson" -snap interval=0.00005 -clean -lines -each 'kind="great_lake_shoreline"' -filter-fields kind -o format=geojson "$BUILD_DIR/great_lake_shoreline.geojson"
 
 tippecanoe -f -o "$TMP_DIR/boundary_country.mbtiles" -l boundaries -Z0 -z4 --buffer=6 --detect-shared-borders --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/country_lines.geojson"
 tippecanoe -f -o "$TMP_DIR/boundary_state.mbtiles" -l boundaries -Z3 -z8 --buffer=6 --detect-shared-borders --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/state_lines.geojson"
