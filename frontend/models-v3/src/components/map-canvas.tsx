@@ -394,8 +394,8 @@ function styleFor(
         },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.68, 6, 0.66, 7, 0.64, 8, 0.62, 10, 0.6],
-          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.58, 6, 0.72, 8, 0.9, 10, 1.02],
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 6, 0.58, 7, 0.56, 8, 0.54, 10, 0.52],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.5, 6, 0.62, 8, 0.78, 10, 0.9],
         },
       },
       {
