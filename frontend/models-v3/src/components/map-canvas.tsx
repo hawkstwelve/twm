@@ -330,11 +330,11 @@ function styleFor(
         id: COASTLINE_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundary",
+        "source-layer": "water",
         filter: [
           "all",
-          ["in", "admin_level", 2, 4],
-          ["==", "maritime", 1],
+          ["==", "$type", "Polygon"],
+          ["in", "class", "ocean", "sea"],
         ],
         paint: {
           "line-color": boundaryLineColor,
