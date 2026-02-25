@@ -78,7 +78,6 @@ const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
 const LAKE_MASK_LAYER_ID = "twf-lake-mask";
-const LAKE_SHORELINE_LAYER_ID = "twf-lake-shoreline";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -331,11 +330,11 @@ function styleFor(
         id: COASTLINE_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
+        "source-layer": "boundary",
         filter: [
           "all",
-          ["==", "$type", "Polygon"],
-          ["in", "class", "ocean", "sea"],
+          ["in", "admin_level", 2, 4],
+          ["==", "maritime", 1],
         ],
         paint: {
           "line-color": boundaryLineColor,
@@ -388,26 +387,6 @@ function styleFor(
         paint: {
           "fill-color": lakeFillColor,
           "fill-opacity": 1,
-        },
-      },
-      {
-        id: LAKE_SHORELINE_LAYER_ID,
-        type: "line",
-        source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "water",
-        filter: [
-          "all",
-          ["==", "$type", "Polygon"],
-          ["==", "class", "lake"],
-        ],
-        layout: {
-          "line-join": "round",
-          "line-cap": "round",
-        },
-        paint: {
-          "line-color": boundaryLineColor,
-          "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
         },
       },
       {
@@ -600,9 +579,6 @@ export function MapCanvas({
     }
     if (map.getLayer(LAKE_MASK_LAYER_ID)) {
       map.moveLayer(LAKE_MASK_LAYER_ID, "twf-labels");
-    }
-    if (map.getLayer(LAKE_SHORELINE_LAYER_ID)) {
-      map.moveLayer(LAKE_SHORELINE_LAYER_ID, "twf-labels");
     }
     map.moveLayer("twf-labels");
   }, []);
