@@ -9,7 +9,7 @@ TMP_DIR="${WORK_DIR}/tmp"
 OUT_DIR="${ROOT_DIR}/data/v3/boundaries/v1"
 OUT_MBTILES="${OUT_DIR}/twf_boundaries.mbtiles"
 
-for cmd in curl unzip ogr2ogr mapshaper tippecanoe tile-join sqlite3; do
+for cmd in curl unzip ogr2ogr mapshaper tippecanoe tile-join sqlite3 python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
     echo "Missing required command: $cmd" >&2
     exit 1
@@ -43,7 +43,31 @@ mapshaper "$SOURCE_DIR/coastline.geojson" -snap interval=0.00005 -clean -each 'k
 mapshaper "$BUILD_DIR/states_polygons.geojson" -snap interval=0.00005 -clean -innerlines -each 'kind="state";admin_level=4' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/state_lines.geojson"
 mapshaper "$BUILD_DIR/counties_polygons.geojson" -snap interval=0.00003 -clean -innerlines -each 'kind="county";admin_level=6' -filter-fields kind,admin_level -o format=geojson "$BUILD_DIR/county_lines_raw.geojson"
 # Remove null geometries before tippecanoe to avoid null-geometry warnings and dropped features.
-mapshaper "$BUILD_DIR/county_lines_raw.geojson" -filter 'this.geometry != null && this.geometry.type != null' -o format=geojson "$BUILD_DIR/county_lines_raw_nonnull.geojson"
+python3 - "$BUILD_DIR/county_lines_raw.geojson" "$BUILD_DIR/county_lines_raw_nonnull.geojson" <<'PY'
+import json
+import sys
+
+source_path, output_path = sys.argv[1], sys.argv[2]
+
+with open(source_path, "r", encoding="utf-8") as src_file:
+  feature_collection = json.load(src_file)
+
+features = feature_collection.get("features", [])
+nonnull_features = [
+  feature
+  for feature in features
+  if isinstance(feature, dict)
+  and isinstance(feature.get("geometry"), dict)
+  and feature["geometry"].get("type")
+]
+
+feature_collection["features"] = nonnull_features
+
+with open(output_path, "w", encoding="utf-8") as out_file:
+  json.dump(feature_collection, out_file, separators=(",", ":"))
+
+print(f"[nonnull] Retained {len(nonnull_features)} of {len(features)} features")
+PY
 
 mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -clean -simplify weighted 8% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_low.geojson"
 mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -clean -simplify weighted 22% keep-shapes -o format=geojson "$BUILD_DIR/county_lines_high.geojson"
