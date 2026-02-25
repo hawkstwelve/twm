@@ -102,7 +102,8 @@ def decode_tile_kinds(mbtiles_path: str, z: int, x: int, y: int) -> tuple[dict[s
     ]
     counts: dict[str, int] = {}
     for kind in kinds:
-        count = text.count(f'"kind":"{kind}"')
+        pattern = re.compile(rf'"kind"\s*:\s*"{re.escape(kind)}"')
+        count = len(pattern.findall(text))
         if count > 0:
             counts[kind] = count
     return counts, None
