@@ -332,7 +332,6 @@ function styleFor(
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "water",
-        minzoom: 5,
         filter: [
           "all",
           ["==", "$type", "Polygon"],
@@ -349,7 +348,6 @@ function styleFor(
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "boundary",
-        minzoom: 5,
         filter: [
           "all",
           ["==", "admin_level", 2],
