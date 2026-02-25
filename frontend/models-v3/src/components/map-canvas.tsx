@@ -76,6 +76,8 @@ const CONTOUR_LAYER_ID = "twf-contours";
 const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
+const STATE_MARITIME_BOUNDARY_LAYER_ID = "twf-state-maritime-boundaries";
+const COUNTRY_MARITIME_BOUNDARY_LAYER_ID = "twf-country-maritime-boundaries";
 const WATER_MASK_LAYER_ID = "twf-water-mask";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
@@ -369,6 +371,38 @@ function styleFor(
         },
       },
       {
+        id: COUNTRY_MARITIME_BOUNDARY_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "boundary",
+        filter: [
+          "all",
+          ["==", "admin_level", 2],
+          ["==", "maritime", 1],
+        ],
+        paint: {
+          "line-color": boundaryLineColor,
+          "line-opacity": 0.85,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.95, 7, 1.3, 10, 1.7],
+        },
+      },
+      {
+        id: STATE_MARITIME_BOUNDARY_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "boundary",
+        filter: [
+          "all",
+          ["==", "admin_level", 4],
+          ["==", "maritime", 1],
+        ],
+        paint: {
+          "line-color": boundaryLineColor,
+          "line-opacity": 0.9,
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
+        },
+      },
+      {
         id: CONTOUR_LAYER_ID,
         type: "line",
         source: CONTOUR_SOURCE_ID,
@@ -549,6 +583,12 @@ export function MapCanvas({
     }
     if (map.getLayer(WATER_MASK_LAYER_ID)) {
       map.moveLayer(WATER_MASK_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(COUNTRY_MARITIME_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(COUNTRY_MARITIME_BOUNDARY_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(STATE_MARITIME_BOUNDARY_LAYER_ID)) {
+      map.moveLayer(STATE_MARITIME_BOUNDARY_LAYER_ID, "twf-labels");
     }
     map.moveLayer("twf-labels");
   }, []);
