@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
-import { Cloud, Clock, Globe } from "lucide-react";
+import { Cloud, Clock, Globe, Moon, Sun } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   Select,
   SelectContent,
@@ -26,6 +27,8 @@ type WeatherToolbarProps = {
   models: Option[];
   runs: Option[];
   variables: Option[];
+  basemapMode: "light" | "dark";
+  onBasemapModeChange: (value: "light" | "dark") => void;
   disabled?: boolean;
 };
 
@@ -77,6 +80,8 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     models,
     runs,
     variables,
+    basemapMode,
+    onBasemapModeChange,
     disabled = false,
   } = props;
 
@@ -126,6 +131,22 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
           disabled={disabled}
           placeholder="Variable"
         />
+
+        <div className="ml-auto flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">Basemap</span>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            disabled={disabled}
+            aria-pressed={basemapMode === "dark"}
+            onClick={() => onBasemapModeChange(basemapMode === "dark" ? "light" : "dark")}
+            className="h-8 border border-border/50 bg-secondary/40 px-2.5 text-xs font-medium text-foreground shadow-sm transition-all duration-150 hover:border-border hover:bg-secondary/60"
+          >
+            {basemapMode === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+            <span>{basemapMode === "dark" ? "Light map" : "Dark map"}</span>
+          </Button>
+        </div>
       </div>
     </header>
   );

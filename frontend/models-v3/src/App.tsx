@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle } from "lucide-react";
 
 import { BottomForecastControls } from "@/components/bottom-forecast-controls";
-import { MapCanvas } from "@/components/map-canvas";
+import { MapCanvas, type BasemapMode } from "@/components/map-canvas";
 import { type LegendPayload, MapLegend } from "@/components/map-legend";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
@@ -89,6 +89,31 @@ const VARIABLE_PRIORITY_ORDER = [
   "wspd10m",
   "wgst10m",
 ];
+
+const BASEMAP_MODE_STORAGE_KEY = "twf.map.basemap_mode";
+
+function readBasemapModePreference(): BasemapMode {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+  try {
+    const stored = window.localStorage.getItem(BASEMAP_MODE_STORAGE_KEY);
+    return stored === "dark" ? "dark" : "light";
+  } catch {
+    return "light";
+  }
+}
+
+function writeBasemapModePreference(mode: BasemapMode): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    window.localStorage.setItem(BASEMAP_MODE_STORAGE_KEY, mode);
+  } catch {
+    // Ignore storage errors.
+  }
+}
 
 function percentile(values: number[], pct: number): number | null {
   if (!values.length) {
@@ -548,6 +573,7 @@ export default function App() {
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubRequestedHour, setScrubRequestedHour] = useState<number | null>(null);
   const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
+  const [basemapMode, setBasemapMode] = useState<BasemapMode>(() => readBasemapModePreference());
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === "undefined" ? true : !document.hidden
   );
@@ -620,6 +646,10 @@ export default function App() {
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
   const frameSetRef = useRef<Set<number>>(new Set());
+
+  useEffect(() => {
+    writeBasemapModePreference(basemapMode);
+  }, [basemapMode]);
 
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
@@ -2765,6 +2795,8 @@ export default function App() {
         models={models}
         runs={runOptions}
         variables={variables}
+        basemapMode={basemapMode}
+        onBasemapModeChange={setBasemapMode}
         disabled={loading || models.length === 0}
       />
 
@@ -2778,6 +2810,7 @@ export default function App() {
           mode={isLoopDisplayActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
           variable={variable}
           model={model}
+          basemapMode={basemapMode}
           prefetchTileUrls={prefetchTileUrls}
           crossfade={false}
           loopImageUrl={activeLoopUrl}

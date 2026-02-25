@@ -18,6 +18,20 @@ const CARTO_LIGHT_LABEL_TILES = [
   "https://d.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
 ];
 
+const CARTO_DARK_BASE_TILES = [
+  "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+  "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+  "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+  "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+];
+
+const CARTO_DARK_LABEL_TILES = [
+  "https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
+  "https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
+  "https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
+  "https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
+];
+
 const CARTO_VECTOR_TILES_URL = "https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/tiles.json";
 
 type RegionView = {
@@ -27,6 +41,8 @@ type RegionView = {
   minZoom?: number;
   maxZoom?: number;
 };
+
+export type BasemapMode = "light" | "dark";
 
 const SCRUB_SWAP_TIMEOUT_MS = 650;
 const AUTOPLAY_SWAP_TIMEOUT_MS = 1500;
@@ -38,6 +54,14 @@ const OVERLAY_RASTER_CONTRAST = 0.08;
 const OVERLAY_RASTER_SATURATION = 0.08;
 const OVERLAY_RASTER_BRIGHTNESS_MIN = 0.02;
 const OVERLAY_RASTER_BRIGHTNESS_MAX = 0.98;
+const OVERLAY_RASTER_DARK_CONTRAST = 0.14;
+const OVERLAY_RASTER_DARK_SATURATION = 0.14;
+const OVERLAY_RASTER_DARK_BRIGHTNESS_MIN = 0.06;
+const OVERLAY_RASTER_DARK_BRIGHTNESS_MAX = 1;
+const OVERLAY_RASTER_DARK_GRAY_BOOST_CONTRAST = 0.2;
+const OVERLAY_RASTER_DARK_GRAY_BOOST_SATURATION = 0.16;
+const OVERLAY_RASTER_DARK_GRAY_BOOST_BRIGHTNESS_MIN = 0.1;
+const OVERLAY_RASTER_DARK_GRAY_BOOST_BRIGHTNESS_MAX = 1;
 
 // Keep inactive swap buffer warm at tiny opacity to avoid one-frame basemap flash.
 const HIDDEN_SWAP_BUFFER_OPACITY = 0.001;
@@ -72,6 +96,7 @@ const LOOP_CONUS_COORDINATES: [[number, number], [number, number], [number, numb
 
 type OverlayBuffer = "a" | "b";
 type PlaybackMode = "autoplay" | "scrub";
+const GRAY_LOW_END_VARIABLES = new Set(["precip_total", "snowfall_total", "qpf6h", "wspd10m", "wgst10m"]);
 
 function sourceId(buffer: OverlayBuffer): string {
   return `twf-overlay-${buffer}`;
@@ -110,12 +135,39 @@ function getResamplingMode(variable?: string): "nearest" | "linear" {
   return "linear";
 }
 
-function getOverlayPaintSettings(variable?: string): {
+function getOverlayPaintSettingsForDark(variable?: string): {
   contrast: number;
   saturation: number;
   brightnessMin: number;
   brightnessMax: number;
 } {
+  if (variable && GRAY_LOW_END_VARIABLES.has(variable)) {
+    return {
+      contrast: OVERLAY_RASTER_DARK_GRAY_BOOST_CONTRAST,
+      saturation: OVERLAY_RASTER_DARK_GRAY_BOOST_SATURATION,
+      brightnessMin: OVERLAY_RASTER_DARK_GRAY_BOOST_BRIGHTNESS_MIN,
+      brightnessMax: OVERLAY_RASTER_DARK_GRAY_BOOST_BRIGHTNESS_MAX,
+    };
+  }
+
+  return {
+    contrast: OVERLAY_RASTER_DARK_CONTRAST,
+    saturation: OVERLAY_RASTER_DARK_SATURATION,
+    brightnessMin: OVERLAY_RASTER_DARK_BRIGHTNESS_MIN,
+    brightnessMax: OVERLAY_RASTER_DARK_BRIGHTNESS_MAX,
+  };
+}
+
+function getOverlayPaintSettings(variable?: string, basemapMode: BasemapMode = "light"): {
+  contrast: number;
+  saturation: number;
+  brightnessMin: number;
+  brightnessMax: number;
+} {
+  if (basemapMode === "dark") {
+    return getOverlayPaintSettingsForDark(variable);
+  }
+
   if (variable === "wspd10m" || variable === "wgst10m") {
     return {
       contrast: 0,
@@ -132,6 +184,10 @@ function getOverlayPaintSettings(variable?: string): {
   };
 }
 
+function getBoundaryLineColor(basemapMode: BasemapMode): string {
+  return basemapMode === "dark" ? "#f3f4f6" : "#000000";
+}
+
 function setLayerVisibility(map: maplibregl.Map, id: string, visible: boolean) {
   if (!map.getLayer(id)) {
     return;
@@ -144,10 +200,14 @@ function styleFor(
   opacity: number,
   variable?: string,
   model?: string,
-  contourGeoJsonUrl?: string | null
+  contourGeoJsonUrl?: string | null,
+  basemapMode: BasemapMode = "light"
 ): StyleSpecification {
   const resamplingMode = getResamplingMode(variable);
-  const paintSettings = getOverlayPaintSettings(variable);
+  const paintSettings = getOverlayPaintSettings(variable, basemapMode);
+  const basemapTiles = basemapMode === "dark" ? CARTO_DARK_BASE_TILES : CARTO_LIGHT_BASE_TILES;
+  const labelTiles = basemapMode === "dark" ? CARTO_DARK_LABEL_TILES : CARTO_LIGHT_LABEL_TILES;
+  const boundaryLineColor = getBoundaryLineColor(basemapMode);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
     : opacity;
@@ -183,7 +243,7 @@ function styleFor(
     sources: {
       "twf-basemap": {
         type: "raster",
-        tiles: CARTO_LIGHT_BASE_TILES,
+        tiles: basemapTiles,
         tileSize: 256,
       },
       [sourceId("a")]: {
@@ -199,7 +259,7 @@ function styleFor(
       ...prefetchSources,
       "twf-labels": {
         type: "raster",
-        tiles: CARTO_LIGHT_LABEL_TILES,
+        tiles: labelTiles,
         tileSize: 256,
       },
       [STATE_BOUNDARY_SOURCE_ID]: {
@@ -246,7 +306,7 @@ function styleFor(
           ["in", "class", "ocean", "sea"],
         ],
         paint: {
-          "line-color": "#000000",
+          "line-color": boundaryLineColor,
           "line-opacity": 0.8,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.9, 7, 1.2, 10, 1.6],
         },
@@ -262,7 +322,7 @@ function styleFor(
           ["==", "maritime", 0],
         ],
         paint: {
-          "line-color": "#000000",
+          "line-color": boundaryLineColor,
           "line-opacity": 0.85,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.95, 7, 1.3, 10, 1.7],
         },
@@ -278,7 +338,7 @@ function styleFor(
           ["==", "maritime", 0],
         ],
         paint: {
-          "line-color": "#000000",
+          "line-color": boundaryLineColor,
           "line-opacity": 0.9,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
         },
@@ -292,7 +352,7 @@ function styleFor(
           "line-cap": "round",
         },
         paint: {
-          "line-color": "#000000",
+          "line-color": boundaryLineColor,
           "line-opacity": 0.9,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 8, 2, 12, 3],
         },
@@ -328,6 +388,7 @@ type MapCanvasProps = {
   mode: PlaybackMode;
   variable?: string;
   model?: string;
+  basemapMode: BasemapMode;
   prefetchTileUrls?: string[];
   crossfade?: boolean;
   loopImageUrl?: string | null;
@@ -352,6 +413,7 @@ export function MapCanvas({
   mode,
   variable,
   model,
+  basemapMode,
   prefetchTileUrls = [],
   crossfade = false,
   loopImageUrl,
@@ -380,6 +442,8 @@ export function MapCanvas({
   const fadeTokenRef = useRef(0);
   const fadeRafRef = useRef<number | null>(null);
   const tileViewportReadyTokenRef = useRef(0);
+  const basemapStyleSwapTokenRef = useRef(0);
+  const lastAppliedBasemapModeRef = useRef<BasemapMode>(basemapMode);
 
   const view = useMemo(() => {
     return regionViews?.[region] ?? {
@@ -387,6 +451,24 @@ export function MapCanvas({
       zoom: DEFAULTS.zoom,
     };
   }, [region, regionViews]);
+
+  const initializeSourceTracking = useCallback((currentTileUrl: string) => {
+    const sourceA = sourceId("a");
+    const sourceB = sourceId("b");
+    sourceRequestedUrlRef.current.set(sourceA, currentTileUrl);
+    sourceRequestedUrlRef.current.set(sourceB, currentTileUrl);
+    sourceRequestTokenRef.current.set(sourceA, 0);
+    sourceRequestTokenRef.current.set(sourceB, 0);
+    sourceEventCountRef.current.set(sourceA, 0);
+    sourceEventCountRef.current.set(sourceB, 0);
+
+    for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
+      const prefetchSource = prefetchSourceId(idx);
+      sourceRequestedUrlRef.current.set(prefetchSource, currentTileUrl);
+      sourceRequestTokenRef.current.set(prefetchSource, 0);
+      sourceEventCountRef.current.set(prefetchSource, 0);
+    }
+  }, []);
 
   const setLayerOpacity = useCallback((map: maplibregl.Map, id: string, value: number) => {
     if (!map.getLayer(id)) {
@@ -399,13 +481,14 @@ export function MapCanvas({
     (
       map: maplibregl.Map,
       id: string,
-      variableId?: string
+      variableId?: string,
+      basemapModeValue: BasemapMode = "light"
     ) => {
       if (!map.getLayer(id)) {
         return;
       }
       const resamplingMode = getResamplingMode(variableId);
-      const paintSettings = getOverlayPaintSettings(variableId);
+      const paintSettings = getOverlayPaintSettings(variableId, basemapModeValue);
       map.setPaintProperty(id, "raster-resampling", resamplingMode);
       map.setPaintProperty(id, "raster-contrast", paintSettings.contrast);
       map.setPaintProperty(id, "raster-saturation", paintSettings.saturation);
@@ -692,7 +775,7 @@ export function MapCanvas({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleFor(tileUrl, opacity, variable, model, contourGeoJsonUrl),
+      style: styleFor(tileUrl, opacity, variable, model, contourGeoJsonUrl, basemapMode),
       center: view.center,
       zoom: view.zoom,
       minZoom: view.minZoom ?? 3,
@@ -703,22 +786,8 @@ export function MapCanvas({
 
     map.on("load", () => {
       setIsLoaded(true);
-
-      const sourceA = sourceId("a");
-      const sourceB = sourceId("b");
-      sourceRequestedUrlRef.current.set(sourceA, tileUrl);
-      sourceRequestedUrlRef.current.set(sourceB, tileUrl);
-      sourceRequestTokenRef.current.set(sourceA, 0);
-      sourceRequestTokenRef.current.set(sourceB, 0);
-      sourceEventCountRef.current.set(sourceA, 0);
-      sourceEventCountRef.current.set(sourceB, 0);
-      for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
-        const prefetchSource = prefetchSourceId(idx);
-        sourceRequestedUrlRef.current.set(prefetchSource, tileUrl);
-        sourceRequestTokenRef.current.set(prefetchSource, 0);
-        sourceEventCountRef.current.set(prefetchSource, 0);
-      }
-
+      initializeSourceTracking(tileUrl);
+      lastAppliedBasemapModeRef.current = basemapMode;
       enforceLayerOrder(map);
     });
 
@@ -730,7 +799,7 @@ export function MapCanvas({
       mapRef.current = null;
       setIsLoaded(false);
     };
-  }, [cancelCrossfade, enforceLayerOrder]);
+  }, [cancelCrossfade, enforceLayerOrder, initializeSourceTracking]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -756,6 +825,98 @@ export function MapCanvas({
     );
     enforceLayerOrder(map);
   }, [isLoaded, variable, enforceLayerOrder]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) {
+      return;
+    }
+    if (lastAppliedBasemapModeRef.current === basemapMode) {
+      return;
+    }
+
+    const token = ++basemapStyleSwapTokenRef.current;
+    lastAppliedBasemapModeRef.current = basemapMode;
+    cancelCrossfade();
+
+    const style = styleFor(
+      activeTileUrlRef.current,
+      opacity,
+      variable,
+      model,
+      contourGeoJsonUrl,
+      basemapMode
+    );
+
+    const onStyleData = () => {
+      if (token !== basemapStyleSwapTokenRef.current) {
+        return;
+      }
+
+      initializeSourceTracking(activeTileUrlRef.current);
+
+      const activeBuffer = activeBufferRef.current;
+      const inactiveBuffer = otherBuffer(activeBuffer);
+      if (loopActive) {
+        setLayerOpacity(map, layerId(activeBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+        setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+        setLayerVisibility(map, layerId(activeBuffer), false);
+        setLayerVisibility(map, layerId(inactiveBuffer), false);
+      } else {
+        setLayerVisibility(map, layerId(activeBuffer), true);
+        setLayerOpacity(map, layerId(activeBuffer), opacity);
+        setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+        setLayerVisibility(map, layerId(inactiveBuffer), false);
+      }
+
+      if (loopImageUrl) {
+        const loopSource = map.getSource(LOOP_SOURCE_ID) as maplibregl.ImageSource | undefined;
+        if (loopSource && typeof loopSource.updateImage === "function") {
+          loopSource.updateImage({
+            url: loopImageUrl,
+            coordinates: LOOP_CONUS_COORDINATES,
+          });
+        }
+      }
+
+      setLayerVisibility(map, LOOP_LAYER_ID, Boolean(loopActive && loopImageUrl));
+      setLayerOpacity(map, LOOP_LAYER_ID, opacity);
+      for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
+        setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
+        setLayerVisibility(map, prefetchLayerId(idx), false);
+      }
+      setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m" && !loopActive);
+
+      setLayerRasterPaint(map, layerId("a"), variable, basemapMode);
+      setLayerRasterPaint(map, layerId("b"), variable, basemapMode);
+      for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
+        setLayerRasterPaint(map, prefetchLayerId(idx), variable, basemapMode);
+      }
+
+      enforceLayerOrder(map);
+    };
+
+    map.once("styledata", onStyleData);
+    map.setStyle(style);
+
+    return () => {
+      map.off("styledata", onStyleData);
+    };
+  }, [
+    basemapMode,
+    isLoaded,
+    cancelCrossfade,
+    contourGeoJsonUrl,
+    enforceLayerOrder,
+    initializeSourceTracking,
+    loopActive,
+    loopImageUrl,
+    model,
+    opacity,
+    setLayerOpacity,
+    setLayerRasterPaint,
+    variable,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1169,12 +1330,12 @@ export function MapCanvas({
       return;
     }
 
-    setLayerRasterPaint(map, layerId("a"), variable);
-    setLayerRasterPaint(map, layerId("b"), variable);
+    setLayerRasterPaint(map, layerId("a"), variable, basemapMode);
+    setLayerRasterPaint(map, layerId("b"), variable, basemapMode);
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
-      setLayerRasterPaint(map, prefetchLayerId(idx), variable);
+      setLayerRasterPaint(map, prefetchLayerId(idx), variable, basemapMode);
     }
-  }, [isLoaded, variable, setLayerRasterPaint]);
+  }, [isLoaded, variable, basemapMode, setLayerRasterPaint]);
 
   useEffect(() => {
     const map = mapRef.current;
