@@ -77,6 +77,8 @@ const STATE_BOUNDARY_SOURCE_ID = "twf-boundaries";
 const COASTLINE_LAYER_ID = "twf-coastline";
 const STATE_BOUNDARY_LAYER_ID = "twf-state-boundaries";
 const COUNTRY_BOUNDARY_LAYER_ID = "twf-country-boundaries";
+const LAKE_MASK_LAYER_ID = "twf-lake-mask";
+const LAKE_SHORELINE_LAYER_ID = "twf-lake-shoreline";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -188,6 +190,10 @@ function getBoundaryLineColor(basemapMode: BasemapMode): string {
   return basemapMode === "dark" ? "#f3f4f6" : "#000000";
 }
 
+function getLakeFillColor(basemapMode: BasemapMode): string {
+  return basemapMode === "dark" ? "#2C353C" : "#d4dadc";
+}
+
 function getBasemapPaintSettings(basemapMode: BasemapMode): {
   "raster-brightness-min": number;
   "raster-brightness-max": number;
@@ -231,6 +237,7 @@ function styleFor(
   const basemapTiles = basemapMode === "dark" ? CARTO_DARK_BASE_TILES : CARTO_LIGHT_BASE_TILES;
   const labelTiles = basemapMode === "dark" ? CARTO_DARK_LABEL_TILES : CARTO_LIGHT_LABEL_TILES;
   const boundaryLineColor = getBoundaryLineColor(basemapMode);
+  const lakeFillColor = getLakeFillColor(basemapMode);
   const basemapPaint = getBasemapPaintSettings(basemapMode);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
@@ -366,6 +373,37 @@ function styleFor(
           "line-color": boundaryLineColor,
           "line-opacity": 0.9,
           "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
+        },
+      },
+      {
+        id: LAKE_MASK_LAYER_ID,
+        type: "fill",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "water",
+        filter: [
+          "all",
+          ["==", "$type", "Polygon"],
+          ["==", "class", "lake"],
+        ],
+        paint: {
+          "fill-color": lakeFillColor,
+          "fill-opacity": 1,
+        },
+      },
+      {
+        id: LAKE_SHORELINE_LAYER_ID,
+        type: "line",
+        source: STATE_BOUNDARY_SOURCE_ID,
+        "source-layer": "water",
+        filter: [
+          "all",
+          ["==", "$type", "Polygon"],
+          ["==", "class", "lake"],
+        ],
+        paint: {
+          "line-color": boundaryLineColor,
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.35, 7, 0.48, 10, 0.62],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.75, 7, 1.0, 10, 1.25],
         },
       },
       {
@@ -555,6 +593,12 @@ export function MapCanvas({
     }
     if (map.getLayer(STATE_BOUNDARY_LAYER_ID)) {
       map.moveLayer(STATE_BOUNDARY_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(LAKE_MASK_LAYER_ID)) {
+      map.moveLayer(LAKE_MASK_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(LAKE_SHORELINE_LAYER_ID)) {
+      map.moveLayer(LAKE_SHORELINE_LAYER_ID, "twf-labels");
     }
     map.moveLayer("twf-labels");
   }, []);
