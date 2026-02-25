@@ -43,6 +43,8 @@ _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 # Cache headers per the caching strategy in ROADMAP_V3
 CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
+# Empty gzip-compressed MVT tile body; use 200 responses for expected-empty vector tiles.
+EMPTY_GZIP_MVT_TILE = base64.b64decode("H4sIAHR2n2kC/wMAAAAAAAAAAAA=")
 
 
 def _mbtiles_get_metadata(path: Path) -> dict[str, str]:
@@ -243,6 +245,15 @@ def _transparent_png_response(*, cache_control: str) -> Response:
     )
 
 
+def _empty_mvt_response(*, cache_control: str) -> Response:
+    headers = {"Cache-Control": cache_control, "Content-Encoding": "gzip"}
+    return Response(
+        content=EMPTY_GZIP_MVT_TILE,
+        media_type="application/vnd.mapbox-vector-tile",
+        headers=headers,
+    )
+
+
 def _tile_is_fully_masked(tile) -> bool:
     """Return True when tile mask indicates no visible pixels (all zeros)."""
     mask = getattr(tile, "mask", None)
@@ -359,7 +370,8 @@ def boundaries_tilejson():
 def boundaries_tile(z: int, x: int, y: int):
     tile = _mbtiles_lookup_tile(BOUNDARIES_MBTILES, z=z, x=x, y=y)
     if tile is None:
-        return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
+        # Return an empty vector tile (200) so MapLibre treats expected-empty tiles as normal.
+        return _empty_mvt_response(cache_control=CACHE_MISS)
 
     headers = {"Cache-Control": CACHE_HIT}
     if len(tile) >= 2 and tile[0] == 0x1F and tile[1] == 0x8B:
