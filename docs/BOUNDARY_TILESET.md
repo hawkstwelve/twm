@@ -17,7 +17,8 @@ Served by `backend/app/services/tile_server.py`:
 
 Expected source layers:
 
-- `boundaries` with `kind` in `country|state|county`
+- `boundaries` with `kind` in `country|state`
+- `counties` with `kind` in `county`
 - `hydro` with `kind` in `coastline|great_lake_polygon|great_lake_shoreline`
 
 ## Build script

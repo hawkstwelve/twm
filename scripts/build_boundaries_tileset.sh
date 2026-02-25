@@ -52,8 +52,8 @@ mapshaper "$BUILD_DIR/great_lake_polygons.geojson" -snap interval=0.00005 -clean
 tippecanoe -f -o "$TMP_DIR/boundary_country_low.mbtiles" -l boundaries -Z0 -z6 --buffer=8 --detect-shared-borders --no-feature-limit --no-tile-size-limit "$BUILD_DIR/country_lines.geojson"
 tippecanoe -f -o "$TMP_DIR/boundary_country_high.mbtiles" -l boundaries -Z7 -z10 --buffer=8 --simplification=2 --detect-shared-borders --no-feature-limit --no-tile-size-limit "$BUILD_DIR/country_lines.geojson"
 tippecanoe -f -o "$TMP_DIR/boundary_state.mbtiles" -l boundaries -Z3 -z8 --buffer=6 --detect-shared-borders --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/state_lines.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_county_low.mbtiles" -l boundaries -Z5 -z7 --buffer=5 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=8 "$BUILD_DIR/county_lines_low.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_county_high.mbtiles" -l boundaries -Z8 -z10 --buffer=5 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=4 "$BUILD_DIR/county_lines_high.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_county_low.mbtiles" -l counties -Z5 -z7 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=10 "$BUILD_DIR/county_lines_low.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_county_high.mbtiles" -l counties -Z8 -z10 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=6 "$BUILD_DIR/county_lines_high.geojson"
 
 tippecanoe -f -o "$TMP_DIR/hydro_polygon.mbtiles" -l hydro -Z3 -z8 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_polygons.geojson"
 tippecanoe -f -o "$TMP_DIR/hydro_shoreline.mbtiles" -l hydro -Z3 -z10 --buffer=6 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_shoreline.geojson"
@@ -71,7 +71,7 @@ tile-join -f -o "$OUT_MBTILES" \
   "$TMP_DIR/hydro_coastline_low.mbtiles" \
   "$TMP_DIR/hydro_coastline_high.mbtiles"
 
-VECTOR_LAYERS='[{"id":"boundaries","description":"country/state/county linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":0,"maxzoom":10},{"id":"hydro","description":"coastline and Great Lakes polygon/shoreline","fields":{"kind":"String"},"minzoom":0,"maxzoom":10}]'
+VECTOR_LAYERS='[{"id":"boundaries","description":"country/state linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":0,"maxzoom":10},{"id":"counties","description":"county linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":5,"maxzoom":10},{"id":"hydro","description":"coastline and Great Lakes polygon/shoreline","fields":{"kind":"String"},"minzoom":0,"maxzoom":10}]'
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('name','TWF Boundaries v1');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('id','twf-boundaries-v1');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('description','Canonical boundary + hydro tileset for TWF V3');"

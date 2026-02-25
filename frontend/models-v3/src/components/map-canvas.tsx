@@ -394,7 +394,7 @@ function styleFor(
         id: COUNTY_BOUNDARY_LAYER_ID,
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
-        "source-layer": "boundaries",
+        "source-layer": "counties",
         minzoom: 5,
         maxzoom: 10,
         filter: ["==", "kind", "county"],
@@ -1071,6 +1071,14 @@ export function MapCanvas({
         }).length;
       } catch {}
 
+      let sourceCounty = 0;
+      try {
+        sourceCounty = map.querySourceFeatures(STATE_BOUNDARY_SOURCE_ID, {
+          sourceLayer: "counties",
+          filter: ["==", "kind", "county"],
+        }).length;
+      } catch {}
+
       console.debug("[map][boundaries-debug]", {
         zoom,
         bucket,
@@ -1084,17 +1092,37 @@ export function MapCanvas({
         source: {
           coastline: sourceCoast,
           country: sourceCountry,
+          county: sourceCounty,
         },
       });
+
+      console.debug(
+        `[map][boundaries-debug-line] z=${zoom} b=${bucket} hideCounties=${boundaryDebugFlags.hideCounties}`
+        + ` rendered(coast=${renderedCoast},country=${renderedCountry},state=${renderedState},county=${renderedCounty})`
+        + ` source(coast=${sourceCoast},country=${sourceCountry},county=${sourceCounty})`
+      );
+    };
+
+    const onMapError = (event: any) => {
+      const sourceId = event?.sourceId;
+      const tileId = event?.tile?.tileID;
+      const canonical = tileId?.canonical;
+      const z = canonical?.z;
+      const x = canonical?.x;
+      const y = canonical?.y;
+      const message = event?.error?.message ?? String(event?.error ?? "unknown map error");
+      console.warn("[map][boundaries-debug-error]", { sourceId, z, x, y, message });
     };
 
     map.on("moveend", debugDump);
     map.on("zoomend", debugDump);
+    map.on("error", onMapError);
     debugDump();
 
     return () => {
       map.off("moveend", debugDump);
       map.off("zoomend", debugDump);
+      map.off("error", onMapError);
     };
   }, [boundaryDebugFlags.enabled, boundaryDebugFlags.hideCounties, isLoaded]);
 
