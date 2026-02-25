@@ -35,6 +35,7 @@ BOUNDARIES_MBTILES = Path(
 )
 BOUNDARIES_TILESET_ID = os.environ.get("TWF_V3_BOUNDARIES_TILESET_ID", "twf-boundaries-v1")
 BOUNDARIES_TILESET_NAME = os.environ.get("TWF_V3_BOUNDARIES_TILESET_NAME", "TWF Boundaries v1")
+TILES_PUBLIC_BASE_URL = os.environ.get("TWF_V3_TILES_PUBLIC_BASE_URL", "https://api.theweathermodels.com").rstrip("/")
 
 # Regex to match run IDs like 20260217_20z
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
@@ -135,7 +136,7 @@ def _tilejson_for_boundaries() -> dict:
         "maxzoom": maxzoom,
         "bounds": bounds,
         "center": center_vals,
-        "tiles": ["/tiles/v3/boundaries/v1/{z}/{x}/{y}.mvt"],
+        "tiles": [f"{TILES_PUBLIC_BASE_URL}/tiles/v3/boundaries/v1/{{z}}/{{x}}/{{y}}.mvt"],
     }
 
     if "vector_layers" in metadata:
