@@ -188,6 +188,29 @@ function getBoundaryLineColor(basemapMode: BasemapMode): string {
   return basemapMode === "dark" ? "#f3f4f6" : "#000000";
 }
 
+function getBasemapPaintSettings(basemapMode: BasemapMode): {
+  "raster-brightness-min": number;
+  "raster-brightness-max": number;
+  "raster-contrast": number;
+  "raster-saturation": number;
+} {
+  if (basemapMode === "dark") {
+    return {
+      "raster-brightness-min": 0.08,
+      "raster-brightness-max": 0.94,
+      "raster-contrast": -0.06,
+      "raster-saturation": -0.08,
+    };
+  }
+
+  return {
+    "raster-brightness-min": 0,
+    "raster-brightness-max": 1,
+    "raster-contrast": 0,
+    "raster-saturation": 0,
+  };
+}
+
 function setLayerVisibility(map: maplibregl.Map, id: string, visible: boolean) {
   if (!map.getLayer(id)) {
     return;
@@ -208,6 +231,7 @@ function styleFor(
   const basemapTiles = basemapMode === "dark" ? CARTO_DARK_BASE_TILES : CARTO_LIGHT_BASE_TILES;
   const labelTiles = basemapMode === "dark" ? CARTO_DARK_LABEL_TILES : CARTO_LIGHT_LABEL_TILES;
   const boundaryLineColor = getBoundaryLineColor(basemapMode);
+  const basemapPaint = getBasemapPaintSettings(basemapMode);
   const overlayOpacity: any = model === "gfs"
     ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
     : opacity;
@@ -281,6 +305,7 @@ function styleFor(
         id: "twf-basemap",
         type: "raster",
         source: "twf-basemap",
+        paint: basemapPaint,
       },
       {
         id: layerId("a"),
