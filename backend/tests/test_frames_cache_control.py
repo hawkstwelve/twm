@@ -21,6 +21,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     loop_cache_root = tmp_path / "loop-cache"
 
     run_id = "20260224_14z"
+    incomplete_run_id = "20260224_15z"
     model = "hrrr"
     var = "radar_ptype"
 
@@ -31,6 +32,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
             {
                 "variables": {
                     var: {
+                        "expected_frames": 2,
+                        "available_frames": 2,
                         "frames": [
                             {"fh": 0},
                             {"fh": 1},
@@ -40,9 +43,25 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
             }
         )
     )
+    (model_manifest_dir / f"{incomplete_run_id}.json").write_text(
+        json.dumps(
+            {
+                "variables": {
+                    var: {
+                        "expected_frames": 2,
+                        "available_frames": 1,
+                        "frames": [
+                            {"fh": 0},
+                        ],
+                    }
+                }
+            }
+        )
+    )
 
     model_published_dir = published_root / model
     (model_published_dir / run_id).mkdir(parents=True, exist_ok=True)
+    (model_published_dir / incomplete_run_id).mkdir(parents=True, exist_ok=True)
     (model_published_dir / "LATEST.json").write_text(json.dumps({"run_id": run_id}))
 
     monkeypatch.setattr(main_module, "DATA_ROOT", data_root)
@@ -74,4 +93,14 @@ def test_frames_historical_cache_control_is_immutable(client: TestClient) -> Non
     cache_control = response.headers.get("cache-control", "")
     assert "max-age=31536000" in cache_control
     assert "immutable" in cache_control
+    assert response.headers.get("etag")
+
+
+def test_frames_incomplete_historical_cache_control_is_short(client: TestClient) -> None:
+    response = client.get("/api/v3/hrrr/20260224_15z/radar_ptype/frames")
+
+    assert response.status_code == 200
+    cache_control = response.headers.get("cache-control", "")
+    assert "max-age=60" in cache_control
+    assert "immutable" not in cache_control
     assert response.headers.get("etag")

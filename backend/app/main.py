@@ -81,8 +81,8 @@ CACHE_HIT = "public, max-age=31536000, immutable"
 CACHE_MISS = "public, max-age=15"
 
 
-def _frames_cache_control(run: str) -> str:
-    if run == "latest":
+def _frames_cache_control(run: str, *, run_complete: bool) -> str:
+    if run == "latest" or not run_complete:
         return "public, max-age=60"
     return "public, max-age=31536000, immutable"
 
@@ -337,6 +337,43 @@ def _load_manifest(model: str, run: str) -> dict | None:
     if not path.is_file():
         return None
     return _load_json_cached(path, _manifest_cache)
+
+
+def _manifest_run_complete(manifest: dict[str, Any]) -> bool:
+    variables = manifest.get("variables")
+    if not isinstance(variables, dict) or not variables:
+        return False
+
+    saw_expected = False
+    for var_entry in variables.values():
+        if not isinstance(var_entry, dict):
+            return False
+
+        expected_raw = var_entry.get("expected_frames")
+        available_raw = var_entry.get("available_frames")
+        expected = int(expected_raw) if isinstance(expected_raw, int) else None
+        available = int(available_raw) if isinstance(available_raw, int) else None
+
+        if expected is None:
+            frames = var_entry.get("frames")
+            if isinstance(frames, list):
+                expected = len(frames)
+                available = len(frames)
+            else:
+                return False
+
+        if available is None:
+            frames = var_entry.get("frames")
+            if isinstance(frames, list):
+                available = len(frames)
+            else:
+                return False
+
+        saw_expected = saw_expected or expected > 0
+        if available < expected:
+            return False
+
+    return saw_expected
 
 
 def _run_version_token(model: str, run: str) -> str:
@@ -675,6 +712,8 @@ def list_frames(request: Request, model: str, run: str, var: str):
     if not isinstance(frame_entries, list):
         frame_entries = []
 
+    run_complete = _manifest_run_complete(manifest)
+
     version_token = _run_version_token(model, resolved)
 
     frames: list[dict] = []
@@ -707,7 +746,7 @@ def list_frames(request: Request, model: str, run: str, var: str):
         )
 
     frames.sort(key=lambda row: row["fh"])
-    cache_control = _frames_cache_control(run)
+    cache_control = _frames_cache_control(run, run_complete=run_complete)
     etag = _make_etag(frames)
     r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
     if r304 is not None:

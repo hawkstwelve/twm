@@ -2324,7 +2324,8 @@ export default function App() {
       }
 
       try {
-        const rows = await fetchFrames(model, resolvedRunForRequests, variable, { signal: controller.signal });
+        const framesRunKey = run === "latest" ? "latest" : resolvedRunForRequests;
+        const rows = await fetchFrames(model, framesRunKey, variable, { signal: controller.signal });
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setFrameRows(rows);
         const frameMeta = extractLegendMeta(rows[0] ?? null);
