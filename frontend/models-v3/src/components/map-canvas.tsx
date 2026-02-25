@@ -395,10 +395,12 @@ function styleFor(
         type: "line",
         source: STATE_BOUNDARY_SOURCE_ID,
         "source-layer": "water",
+        minzoom: 4,
         filter: [
           "all",
           ["==", "$type", "Polygon"],
           ["==", "class", "lake"],
+          ["!=", "intermittent", 1],
         ],
         layout: {
           "line-join": "round",
@@ -406,8 +408,8 @@ function styleFor(
         },
         paint: {
           "line-color": boundaryLineColor,
-          "line-opacity": 0.9,
-          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1.05, 7, 1.4, 10, 1.8],
+          "line-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.2, 5, 0.75, 7, 0.9, 10, 0.9],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.6, 5, 1.05, 7, 1.4, 10, 1.8],
         },
       },
       {
