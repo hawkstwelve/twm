@@ -2089,17 +2089,19 @@ export default function App() {
         const supportedModelIds = capabilitiesData.supported_models.filter(
           (modelId) => Boolean(capabilitiesData.model_catalog?.[modelId])
         );
-        const modelOptions = supportedModelIds.map((modelId) => ({
-          value: modelId,
-          label: capabilitiesData.model_catalog[modelId]?.name || modelId,
-        }));
-        setModels(modelOptions);
-
         const availableModelId = supportedModelIds.find((modelId) => {
           const availability = capabilitiesData.availability?.[modelId];
           return Boolean(availability?.latest_run);
         });
         const nextModel = availableModelId ?? supportedModelIds[0] ?? "";
+        const orderedModelIds = nextModel
+          ? [nextModel, ...supportedModelIds.filter((modelId) => modelId !== nextModel)]
+          : supportedModelIds;
+        const modelOptions = orderedModelIds.map((modelId) => ({
+          value: modelId,
+          label: capabilitiesData.model_catalog[modelId]?.name || modelId,
+        }));
+        setModels(modelOptions);
         setModel(nextModel);
 
         const modelCapability = nextModel ? capabilitiesData.model_catalog[nextModel] : null;
