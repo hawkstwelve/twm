@@ -25,7 +25,6 @@ import {
 import {
   API_ORIGIN,
   getPlaybackBufferPolicy,
-  isAnimationDebugEnabled,
   isWebpDefaultRenderEnabled,
   MAP_VIEW_DEFAULTS,
   OVERLAY_DEFAULT_OPACITY,
@@ -106,16 +105,6 @@ function writeBasemapModePreference(mode: BasemapMode): void {
   } catch {
     // Ignore storage errors.
   }
-}
-
-function percentile(values: number[], pct: number): number | null {
-  if (!values.length) {
-    return null;
-  }
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
-  const value = sorted[rank];
-  return Number.isFinite(value) ? value : null;
 }
 
 function pickPreferred(values: string[], preferred: string): string {
@@ -633,7 +622,6 @@ export default function App() {
   const requestGenerationRef = useRef(0);
   const scrubRafRef = useRef<number | null>(null);
   const pendingScrubHourRef = useRef<number | null>(null);
-  const animationDebugRef = useRef(isAnimationDebugEnabled());
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
   const preloadProgressRef = useRef({
@@ -967,17 +955,6 @@ export default function App() {
     return loopFrameHours.every((fh) => Boolean(loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh)));
   }, [loopFrameHours, loopTier0UrlByHour, loopUrlByHour]);
 
-  const debugLog = useCallback((message: string, payload?: Record<string, unknown>) => {
-    if (!animationDebugRef.current) {
-      return;
-    }
-    if (payload) {
-      console.debug(`[animation] ${message}`, payload);
-      return;
-    }
-    console.debug(`[animation] ${message}`);
-  }, []);
-
   useEffect(() => {
     mapZoomRef.current = mapZoom;
   }, [mapZoom]);
@@ -1001,13 +978,6 @@ export default function App() {
     const hasTier0 = Boolean(loopTier0UrlByHour.get(forecastHour) ?? loopUrlByHour.get(forecastHour));
     if (!hasTier1 && hasTier0) {
       tierFailoverCycleRef.current = { key: cycleKey, emitted: true };
-      debugLog("tier failover", {
-        from: "webp_tier1",
-        to: "webp_tier0",
-        reason: "tier1_unavailable",
-        fh: forecastHour,
-        cycle: cycleKey,
-      });
     }
   }, [
     webpDefaultEnabled,
@@ -1019,30 +989,7 @@ export default function App() {
     loopTier1UrlByHour,
     loopTier0UrlByHour,
     loopUrlByHour,
-    debugLog,
   ]);
-
-  useEffect(() => {
-    if (!webpDefaultEnabled || !animationDebugRef.current) {
-      return;
-    }
-    const interval = window.setInterval(() => {
-      const readyP50 = percentile(loopDecodeReadySamplesRef.current, 50);
-      const readyP95 = percentile(loopDecodeReadySamplesRef.current, 95);
-      const fetchP95 = percentile(loopDecodeFetchSamplesRef.current, 95);
-      const decodeP95 = percentile(loopDecodeOnlySamplesRef.current, 95);
-      debugLog("telemetry decode/cache", {
-        percentile_basis: "rolling_window_256_samples",
-        webp_ready_ms: { p50: readyP50, p95: readyP95 },
-        webp_fetch_ms: { p95: fetchP95 },
-        webp_decode_ms: { p95: decodeP95 },
-        decoded_cache_high_water_bytes: loopDecodedCacheHighWaterRef.current,
-      });
-    }, 15000);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [webpDefaultEnabled, debugLog]);
 
   useEffect(() => {
     const clearDwellTimer = () => {
@@ -1231,12 +1178,6 @@ export default function App() {
         if (nextRetry >= FRAME_MAX_RETRIES || ageMs >= FRAME_HARD_DEADLINE_MS) {
           failed.add(fh);
           frameNextRetryAtRef.current.delete(fh);
-          debugLog("frame failed", {
-            fh,
-            retries: nextRetry,
-            ageMs,
-            hardDeadlineMs: FRAME_HARD_DEADLINE_MS,
-          });
         } else {
           const retryDelayMs = FRAME_RETRY_BASE_MS * 2 ** (nextRetry - 1);
           frameNextRetryAtRef.current.set(fh, now + retryDelayMs);
@@ -1293,7 +1234,7 @@ export default function App() {
       version,
     };
     setBufferSnapshot(snapshot);
-  }, [frameHours, forecastHour, debugLog]);
+  }, [frameHours, forecastHour]);
 
   const contourGeoJsonUrl = useMemo(() => {
     if (!hasRenderableSelection || variable !== "tmp2m") {
@@ -1478,7 +1419,7 @@ export default function App() {
         updateBufferSnapshot();
       });
     }
-  }, [tileUrlToHour, updateBufferSnapshot, debugLog]);
+  }, [tileUrlToHour, updateBufferSnapshot]);
 
   const isTileReady = useCallback((url: string): boolean => {
     const ts = readyTileUrlsRef.current.get(url);
@@ -2465,12 +2406,6 @@ export default function App() {
         setIsPlaying(false);
         showTransientFrameStatus("Buffering frames");
         autoplayPrimedRef.current = false;
-        debugLog("autopause low ahead buffer", {
-          ahead: bufferSnapshot.bufferedAheadCount,
-          minAheadRequired,
-          totalFrames: frameHours.length,
-          fh: forecastHour,
-        });
         return;
       }
 
@@ -2531,7 +2466,6 @@ export default function App() {
     showTransientFrameStatus,
     bufferSnapshot.bufferedAheadCount,
     playbackPolicy.minAheadWhilePlaying,
-    debugLog,
     renderMode,
   ]);
 
@@ -2687,13 +2621,8 @@ export default function App() {
       return;
     }
     lastTileViewportCommitUrlRef.current = readyTileUrl;
-    debugLog("tiles visual swap committed", {
-      tileUrl: readyTileUrl,
-      mode: renderMode,
-      visibleMode: "tiles",
-    });
     setVisibleRenderMode("tiles");
-  }, [renderMode, tileUrl, visibleRenderMode, debugLog]);
+  }, [renderMode, tileUrl, visibleRenderMode]);
 
   useEffect(() => {
     if (isPlaying && isScrubbing) {

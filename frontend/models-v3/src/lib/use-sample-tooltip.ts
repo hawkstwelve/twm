@@ -1,16 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type SampleResult, fetchSample } from "@/lib/api";
 
-function percentile(values: number[], pct: number): number | null {
-  if (!values.length) {
-    return null;
-  }
-  const sorted = [...values].sort((a, b) => a - b);
-  const rank = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
-  const value = sorted[rank];
-  return Number.isFinite(value) ? value : null;
-}
-
 // ── LRU Cache ────────────────────────────────────────────────────────
 
 const LRU_CAPACITY = 256;
@@ -97,7 +87,6 @@ export function useSampleTooltip(ctx: SampleContext) {
   const genRef = useRef(0);
   const timerRef = useRef<number | null>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
-  const latencySamplesRef = useRef<number[]>([]);
   const cacheRef = useRef(new LRUCache());
   const prevCtxRef = useRef<string>("");
   const canSample = hasValidSampleContext(ctx);
@@ -110,27 +99,6 @@ export function useSampleTooltip(ctx: SampleContext) {
       prevCtxRef.current = ctxFingerprint;
     }
   }, [ctxFingerprint]);
-
-  useEffect(() => {
-    const isDebug = typeof window !== "undefined" && window.localStorage.getItem("twf_debug_animation") === "1";
-    if (!isDebug) {
-      return;
-    }
-    const interval = window.setInterval(() => {
-      const p95 = percentile(latencySamplesRef.current, 95);
-      if (p95 === null) {
-        return;
-      }
-      console.debug("[sampling] latency", {
-        percentile_basis: "rolling_window_256_samples",
-        sample_request_latency_ms: { p95 },
-        samples: latencySamplesRef.current.length,
-      });
-    }, 15000);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, []);
 
   const onHover = useCallback(
     (lat: number, lon: number, x: number, y: number) => {
@@ -166,7 +134,6 @@ export function useSampleTooltip(ctx: SampleContext) {
         requestAbortRef.current?.abort();
         const controller = new AbortController();
         requestAbortRef.current = controller;
-        const requestStartedAt = performance.now();
         fetchSample({
           model: ctx.model,
           run: ctx.run,
@@ -177,11 +144,6 @@ export function useSampleTooltip(ctx: SampleContext) {
           signal: controller.signal,
         })
           .then((result) => {
-            const elapsedMs = Math.max(0, Math.round(performance.now() - requestStartedAt));
-            latencySamplesRef.current.push(elapsedMs);
-            if (latencySamplesRef.current.length > 256) {
-              latencySamplesRef.current.splice(0, latencySamplesRef.current.length - 256);
-            }
             cacheRef.current.set(key, result);
             if (gen !== genRef.current) return; // stale — cursor already moved
             if (!result) {

@@ -101,17 +101,6 @@ type OverlayBuffer = "a" | "b";
 type PlaybackMode = "autoplay" | "scrub";
 const GRAY_LOW_END_VARIABLES = new Set(["precip_total", "snowfall_total", "qpf6h", "wspd10m", "wgst10m"]);
 
-function getBoundaryDebugFlags(): { enabled: boolean; hideCounties: boolean } {
-  if (typeof window === "undefined") {
-    return { enabled: false, hideCounties: false };
-  }
-  const params = new URLSearchParams(window.location.search);
-  return {
-    enabled: params.has("debugBoundaries"),
-    hideCounties: params.has("hideCounties"),
-  };
-}
-
 function sourceId(buffer: OverlayBuffer): string {
   return `twf-overlay-${buffer}`;
 }
@@ -548,7 +537,6 @@ export function MapCanvas({
   const tileViewportReadyTokenRef = useRef(0);
   const basemapStyleSwapTokenRef = useRef(0);
   const lastAppliedBasemapModeRef = useRef<BasemapMode>(basemapMode);
-  const boundaryDebugFlags = useMemo(() => getBoundaryDebugFlags(), []);
 
   const view = useMemo(() => {
     return regionViews?.[region] ?? {
@@ -903,9 +891,6 @@ export function MapCanvas({
       initializeSourceTracking(tileUrl);
       lastAppliedBasemapModeRef.current = basemapMode;
       enforceLayerOrder(map);
-      if (boundaryDebugFlags.hideCounties) {
-        setLayerVisibility(map, COUNTY_BOUNDARY_LAYER_ID, false);
-      }
     });
 
     mapRef.current = map;
@@ -916,7 +901,7 @@ export function MapCanvas({
       mapRef.current = null;
       setIsLoaded(false);
     };
-  }, [boundaryDebugFlags.hideCounties, cancelCrossfade, enforceLayerOrder, initializeSourceTracking]);
+  }, [cancelCrossfade, enforceLayerOrder, initializeSourceTracking]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1003,9 +988,6 @@ export function MapCanvas({
         setLayerVisibility(map, prefetchLayerId(idx), false);
       }
       setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m" && !loopActive);
-      if (boundaryDebugFlags.hideCounties) {
-        setLayerVisibility(map, COUNTY_BOUNDARY_LAYER_ID, false);
-      }
 
       setLayerRasterPaint(map, layerId("a"), variable, basemapMode);
       setLayerRasterPaint(map, layerId("b"), variable, basemapMode);
@@ -1023,7 +1005,6 @@ export function MapCanvas({
       map.off("styledata", onStyleData);
     };
   }, [
-    boundaryDebugFlags.hideCounties,
     basemapMode,
     isLoaded,
     cancelCrossfade,
@@ -1038,121 +1019,6 @@ export function MapCanvas({
     setLayerRasterPaint,
     variable,
   ]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isLoaded || !boundaryDebugFlags.enabled) {
-      return;
-    }
-
-    const debugDump = () => {
-      const zoom = Number(map.getZoom().toFixed(2));
-      const bucket = Math.max(0, Math.floor(zoom));
-      const center = map.getCenter();
-      const bounds = map.getBounds();
-
-      let renderedCoast = 0;
-      let renderedCountry = 0;
-      let renderedState = 0;
-      let renderedCounty = 0;
-      let sourceCoast = 0;
-      let sourceCountry = 0;
-
-      try {
-        renderedCoast = map.queryRenderedFeatures({ layers: [COASTLINE_LAYER_ID] }).length;
-      } catch {}
-      try {
-        renderedCountry = map.queryRenderedFeatures({ layers: [COUNTRY_BOUNDARY_LAYER_ID] }).length;
-      } catch {}
-      try {
-        renderedState = map.queryRenderedFeatures({ layers: [STATE_BOUNDARY_LAYER_ID] }).length;
-      } catch {}
-      try {
-        renderedCounty = map.queryRenderedFeatures({ layers: [COUNTY_BOUNDARY_LAYER_ID] }).length;
-      } catch {}
-      try {
-        sourceCoast = map.querySourceFeatures(STATE_BOUNDARY_SOURCE_ID, {
-          sourceLayer: "hydro",
-          filter: ["==", "kind", "coastline"],
-        }).length;
-      } catch {}
-      try {
-        sourceCountry = map.querySourceFeatures(STATE_BOUNDARY_SOURCE_ID, {
-          sourceLayer: "boundaries",
-          filter: ["==", "kind", "country"],
-        }).length;
-      } catch {}
-
-      let sourceCounty = 0;
-      try {
-        sourceCounty = map.querySourceFeatures(STATE_BOUNDARY_SOURCE_ID, {
-          sourceLayer: "counties",
-          filter: ["==", "kind", "county"],
-        }).length;
-      } catch {}
-
-      console.debug("[map][boundaries-debug]", {
-        zoom,
-        bucket,
-        center: { lon: Number(center.lng.toFixed(4)), lat: Number(center.lat.toFixed(4)) },
-        bounds: {
-          west: Number(bounds.getWest().toFixed(4)),
-          south: Number(bounds.getSouth().toFixed(4)),
-          east: Number(bounds.getEast().toFixed(4)),
-          north: Number(bounds.getNorth().toFixed(4)),
-        },
-        hideCounties: boundaryDebugFlags.hideCounties,
-        rendered: {
-          coastline: renderedCoast,
-          country: renderedCountry,
-          state: renderedState,
-          county: renderedCounty,
-        },
-        source: {
-          coastline: sourceCoast,
-          country: sourceCountry,
-          county: sourceCounty,
-        },
-      });
-
-      console.debug(
-        `[map][boundaries-debug-line] z=${zoom} b=${bucket} hideCounties=${boundaryDebugFlags.hideCounties}`
-        + ` center=(${center.lng.toFixed(4)},${center.lat.toFixed(4)})`
-        + ` rendered(coast=${renderedCoast},country=${renderedCountry},state=${renderedState},county=${renderedCounty})`
-        + ` source(coast=${sourceCoast},country=${sourceCountry},county=${sourceCounty})`
-      );
-    };
-
-    const onMapError = (event: any) => {
-      const sourceId = event?.sourceId;
-      const tileId = event?.tile?.tileID;
-      const canonical = tileId?.canonical;
-      const z = canonical?.z;
-      const x = canonical?.x;
-      const y = canonical?.y;
-      const message = event?.error?.message ?? String(event?.error ?? "unknown map error");
-      console.warn("[map][boundaries-debug-error]", { sourceId, z, x, y, message });
-    };
-
-    map.on("moveend", debugDump);
-    map.on("zoomend", debugDump);
-    map.on("error", onMapError);
-    debugDump();
-
-    return () => {
-      map.off("moveend", debugDump);
-      map.off("zoomend", debugDump);
-      map.off("error", onMapError);
-    };
-  }, [boundaryDebugFlags.enabled, boundaryDebugFlags.hideCounties, isLoaded]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isLoaded) {
-      return;
-    }
-    setLayerVisibility(map, COUNTY_BOUNDARY_LAYER_ID, !boundaryDebugFlags.hideCounties);
-  }, [boundaryDebugFlags.hideCounties, isLoaded]);
 
   useEffect(() => {
     const map = mapRef.current;

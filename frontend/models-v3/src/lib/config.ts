@@ -60,13 +60,6 @@ export function getPlaybackBufferPolicy(params: {
   };
 }
 
-export function isAnimationDebugEnabled(): boolean {
-  if (typeof window === "undefined") {
-    return false;
-  }
-  return window.localStorage.getItem("twf_debug_animation") === "1";
-}
-
 export function isWebpDefaultRenderEnabled(): boolean {
   const envValue = String(import.meta.env.VITE_TWF_V3_WEBP_DEFAULT_ENABLED ?? "").trim().toLowerCase();
   if (envValue === "1" || envValue === "true" || envValue === "yes" || envValue === "on") {
