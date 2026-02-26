@@ -41,7 +41,7 @@ TILES_PUBLIC_BASE_URL = os.environ.get("TWF_V3_TILES_PUBLIC_BASE_URL", "https://
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 
 # Cache headers per the caching strategy in ROADMAP_V3
-CACHE_HIT = "public, max-age=31536000, immutable"
+CACHE_HIT = "no-store"
 CACHE_MISS = "public, max-age=15"
 # Empty gzip-compressed MVT tile body; use 200 responses for expected-empty vector tiles.
 EMPTY_GZIP_MVT_TILE = base64.b64decode("H4sIAHR2n2kC/wMAAAAAAAAAAAA=")
