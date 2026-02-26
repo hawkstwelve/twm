@@ -2099,11 +2099,12 @@ export default function App() {
           return availability?.latest_run_ready === true;
         });
         const visibleModelIds = readyModelIds.length > 0 ? readyModelIds : supportedModelIds;
+        const preferredDefaultModel = visibleModelIds.includes("hrrr") ? "hrrr" : "";
         const availableModelId = visibleModelIds.find((modelId) => {
           const availability = capabilitiesData.availability?.[modelId];
           return Boolean(availability?.latest_run);
         });
-        const nextModel = availableModelId ?? visibleModelIds[0] ?? "";
+        const nextModel = preferredDefaultModel || availableModelId || visibleModelIds[0] || "";
         const modelOptions = visibleModelIds.map((modelId) => ({
           value: modelId,
           label: capabilitiesData.model_catalog[modelId]?.name || modelId,
