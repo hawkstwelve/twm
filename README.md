@@ -221,6 +221,153 @@ cp deployment/systemd/tile-server.env.example  /etc/twf-v3/tile-server.env
 
 Services expect the virtualenv at `/opt/twf_v3/.venv` and the project at `/opt/twf_v3/`. The tile server should sit behind an nginx reverse proxy; see `docs/NGINX_V3.md` for a recommended configuration.
 
+## Adding a New Model
+
+Models are self-contained plugins. Adding one requires three steps: create the plugin module, register it, and add color maps for its variables.
+
+### 1. Create the plugin module
+
+Create `backend/app/models/mymodel.py`, following the pattern in [backend/app/models/hrrr.py](backend/app/models/hrrr.py).
+
+**Define regions** — one `RegionSpec` per geographic coverage area:
+
+```python
+from .base import BaseModelPlugin, ModelCapabilities, RegionSpec, VarSelectors, VarSpec, VariableCapability
+
+MY_REGIONS: dict[str, RegionSpec] = {
+    "conus": RegionSpec(
+        id="conus",
+        name="CONUS",
+        bbox_wgs84=(-125.0, 24.0, -66.5, 50.0),
+        clip=True,
+    ),
+}
+```
+
+**Define variables** — one `VarSpec` per field. Use `primary=True` for variables fetched directly from GRIB, `derived=True` for variables computed from other fields:
+
+```python
+MY_VARS: dict[str, VarSpec] = {
+    "tmp2m": VarSpec(
+        id="tmp2m",
+        name="2m Temperature",
+        selectors=VarSelectors(
+            search=[":TMP:2 m above ground:"],
+            filter_by_keys={"shortName": "2t", "typeOfLevel": "heightAboveGround", "level": "2"},
+            hints={"upstream_var": "t2m"},
+        ),
+        primary=True,
+        kind="continuous",   # "continuous" | "discrete"
+        units="F",
+    ),
+    # derived example — computed from u/v components:
+    "wspd10m": VarSpec(
+        id="wspd10m",
+        name="10m Wind Speed",
+        selectors=VarSelectors(hints={"u_component": "10u", "v_component": "10v"}),
+        derived=True,
+        derive="wspd10m",   # derive strategy id used by builder/derive.py
+        kind="continuous",
+        units="mph",
+    ),
+}
+```
+
+**Implement the plugin class** — extend `BaseModelPlugin` and implement at minimum `target_fhs()`, which returns the list of forecast hours to build for a given cycle hour:
+
+```python
+class MyModelPlugin(BaseModelPlugin):
+    def target_fhs(self, cycle_hour: int) -> list[int]:
+        # Example: 6-hourly cycles produce 240 hours, others produce 120
+        if cycle_hour in {0, 6, 12, 18}:
+            return list(range(0, 241, 3))
+        return list(range(0, 121, 3))
+
+    def normalize_var_id(self, var_id: str) -> str:
+        # Optional: map alternative names to canonical keys
+        if var_id.lower() in {"t2m", "2t"}:
+            return "tmp2m"
+        return var_id
+```
+
+**Build `ModelCapabilities`** — maps variable keys to `VariableCapability` objects and declares run-discovery config:
+
+```python
+MY_COLOR_MAP_BY_VAR_KEY = {"tmp2m": "tmp2m", "wspd10m": "wspd10m"}
+MY_CONVERSION_BY_VAR_KEY = {"tmp2m": "c_to_f", "wspd10m": "ms_to_mph"}
+
+MY_VARIABLE_CATALOG: dict[str, VariableCapability] = {
+    var_key: VariableCapability(
+        var_key=var_key,
+        name=spec.name,
+        selectors=spec.selectors,
+        primary=spec.primary,
+        derived=spec.derived,
+        derive_strategy_id=spec.derive,
+        kind=spec.kind,
+        units=spec.units,
+        color_map_id=MY_COLOR_MAP_BY_VAR_KEY.get(var_key),
+        conversion=MY_CONVERSION_BY_VAR_KEY.get(var_key),
+        buildable=bool(spec.primary or spec.derived),
+    )
+    for var_key, spec in MY_VARS.items()
+}
+
+MY_CAPABILITIES = ModelCapabilities(
+    model_id="mymodel",
+    name="My Model",
+    product="sfc",
+    canonical_region="conus",
+    grid_meters_by_region={"conus": 13_000.0},
+    run_discovery={
+        "probe_var_key": "tmp2m",
+        "probe_enabled": True,
+        "cycle_cadence_hours": 6,
+        "probe_attempts": 4,
+        "fallback_lag_hours": 6,
+    },
+    ui_defaults={"default_var_key": "tmp2m", "default_run": "latest"},
+    variable_catalog=MY_VARIABLE_CATALOG,
+)
+
+MY_MODEL = MyModelPlugin(
+    id="mymodel",
+    name="My Model",
+    regions=MY_REGIONS,
+    vars=MY_VARS,
+    product="sfc",
+    capabilities=MY_CAPABILITIES,
+)
+```
+
+### 2. Register the plugin
+
+Add the model to `MODEL_REGISTRY` in [backend/app/models/registry.py](backend/app/models/registry.py):
+
+```python
+from .mymodel import MY_MODEL
+
+MODEL_REGISTRY: dict[str, ModelPlugin] = {
+    HRRR_MODEL.id: HRRR_MODEL,
+    MY_MODEL.id: MY_MODEL,
+}
+```
+
+For optional models (e.g., those with extra dependencies), wrap the import in a try/except as done for GFS.
+
+### 3. Add color maps
+
+Each `color_map_id` referenced in `MY_COLOR_MAP_BY_VAR_KEY` must be present in the palette catalog in [backend/app/services/colormaps.py](backend/app/services/colormaps.py). Add an entry to the `COLOR_MAPS` dict keyed by the `color_map_id` string. See existing entries in that file for the expected format (stops, kind, units, etc.).
+
+### 4. Run the scheduler
+
+```bash
+cd backend
+python -m app.services.scheduler --model mymodel
+```
+
+Configure which variables to build via `TWF_V3_SCHEDULER_VARS` in the scheduler env file.
+
 ## Building Vector Boundaries
 
 ```bash
