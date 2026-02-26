@@ -7,28 +7,28 @@ import { type LegendPayload, MapLegend } from "@/components/map-legend";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
   buildContourUrl,
+  type CapabilitiesResponse,
+  type CapabilityModel,
+  type CapabilityVariable,
   type FrameRow,
   type LegendMeta,
   type LoopManifestResponse,
   type RegionPreset,
   type RunManifestResponse,
-  type VarRow,
   fetchManifest,
+  fetchCapabilities,
   fetchFrames,
   fetchLoopManifest,
-  fetchModels,
   fetchRegionPresets,
   fetchRuns,
-  fetchVars,
 } from "@/lib/api";
 import {
   API_BASE,
-  DEFAULTS,
   getPlaybackBufferPolicy,
   isAnimationDebugEnabled,
   isWebpDefaultRenderEnabled,
-  VARIABLE_INITIAL_FORECAST_HOUR,
-  VARIABLE_LABELS,
+  MAP_VIEW_DEFAULTS,
+  OVERLAY_DEFAULT_OPACITY,
   WEBP_RENDER_MODE_THRESHOLDS,
 } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
@@ -77,18 +77,10 @@ type Option = {
 type VariableEntry = {
   id: string;
   displayName?: string;
+  order?: number | null;
+  defaultFh?: number | null;
+  buildable?: boolean;
 };
-
-const VARIABLE_PRIORITY_ORDER = [
-  "radar_ptype",
-  "tmp2m",
-  "tmp850",
-  "dp2m",
-  "precip_total",
-  "snowfall_total",
-  "wspd10m",
-  "wgst10m",
-];
 
 const BASEMAP_MODE_STORAGE_KEY = "twf.map.basemap_mode";
 
@@ -137,30 +129,69 @@ function makeRegionLabel(id: string, preset?: RegionPreset): string {
 }
 
 function makeVariableLabel(id: string, preferredLabel?: string | null): string {
-  if (id === "precip_ptype") {
-    return VARIABLE_LABELS.precip_ptype;
-  }
   if (preferredLabel && preferredLabel.trim()) {
     return preferredLabel.trim();
   }
-  return VARIABLE_LABELS[id] ?? id;
+  return id;
 }
 
-function normalizeVarRows(rows: VarRow[]): VariableEntry[] {
-  const normalized: VariableEntry[] = [];
-  for (const row of rows) {
-    if (typeof row === "string") {
-      const id = row.trim();
-      if (!id) continue;
-      normalized.push({ id });
-      continue;
-    }
-    const id = String(row.id ?? "").trim();
-    if (!id) continue;
-    const displayName = row.display_name ?? row.name ?? row.label;
-    normalized.push({ id, displayName: displayName?.trim() || undefined });
+function toNumberOrNull(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function variableDefaultFh(entry?: CapabilityVariable | null): number | null {
+  const defaultFh = toNumberOrNull(entry?.default_fh);
+  if (defaultFh !== null) {
+    return defaultFh;
   }
-  return normalized;
+  const minFh = toNumberOrNull(entry?.constraints?.min_fh);
+  if (minFh !== null) {
+    return minFh;
+  }
+  return null;
+}
+
+function normalizeCapabilityVarRows(modelCapability: CapabilityModel | null | undefined): VariableEntry[] {
+  if (!modelCapability?.variables) {
+    return [];
+  }
+  const normalized: VariableEntry[] = Object.entries(modelCapability.variables)
+    .map(([id, entry]) => ({
+      id: String(id).trim(),
+      displayName: entry.display_name?.trim() || undefined,
+      order: toNumberOrNull(entry.order),
+      defaultFh: variableDefaultFh(entry),
+      buildable: entry.buildable !== false,
+    }))
+    .filter((entry) => Boolean(entry.id) && entry.buildable);
+
+  return normalized.sort((a, b) => {
+    const aOrder = Number.isFinite(a.order) ? Number(a.order) : Number.POSITIVE_INFINITY;
+    const bOrder = Number.isFinite(b.order) ? Number(b.order) : Number.POSITIVE_INFINITY;
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+    return a.id.localeCompare(b.id);
+  });
+}
+
+function capabilityVarsForManifest(
+  manifestVars: RunManifestResponse["variables"] | null | undefined,
+  capabilityVars: VariableEntry[]
+): VariableEntry[] {
+  if (!manifestVars) {
+    return capabilityVars;
+  }
+  const manifestKeys = Object.keys(manifestVars);
+  if (manifestKeys.length === 0) {
+    return [];
+  }
+  const manifestSet = new Set(manifestKeys);
+  const known = capabilityVars.filter((entry) => manifestSet.has(entry.id));
+  const knownSet = new Set(known.map((entry) => entry.id));
+  const extras = normalizeManifestVarRows(manifestVars).filter((entry) => !knownSet.has(entry.id));
+  return [...known, ...extras];
 }
 
 function normalizeManifestVarRows(
@@ -181,20 +212,8 @@ function normalizeManifestVarRows(
   return normalized;
 }
 
-function prioritizeVariableEntries(entries: VariableEntry[]): VariableEntry[] {
-  const priorityRank = new Map<string, number>(VARIABLE_PRIORITY_ORDER.map((id, index) => [id, index]));
-  return entries
-    .map((entry, sourceIndex) => ({
-      entry,
-      sourceIndex,
-      rank: priorityRank.get(entry.id) ?? Number.MAX_SAFE_INTEGER,
-    }))
-    .sort((a, b) => a.rank - b.rank || a.sourceIndex - b.sourceIndex)
-    .map(({ entry }) => entry);
-}
-
 function makeVariableOptions(entries: VariableEntry[]): Option[] {
-  return prioritizeVariableEntries(entries).map((entry) => ({
+  return entries.map((entry) => ({
     value: entry.id,
     label: makeVariableLabel(entry.id, entry.displayName),
   }));
@@ -274,39 +293,37 @@ function nearestFrame(frames: number[], current: number): number {
   }, frames[0]);
 }
 
-function selectableFramesForVariable(frames: number[], variableId: string): number[] {
+function selectableFramesForVariable(frames: number[], preferredFh: number | null | undefined): number[] {
   if (frames.length === 0) {
     return frames;
   }
-  const configured = VARIABLE_INITIAL_FORECAST_HOUR[variableId];
-  if (!Number.isFinite(configured)) {
+  if (!Number.isFinite(preferredFh)) {
     return frames;
   }
-  const minimumFh = Number(configured);
+  const minimumFh = Number(preferredFh);
   const filtered = frames.filter((fh) => fh >= minimumFh);
   return filtered.length > 0 ? filtered : frames;
 }
 
-function preferredInitialFrame(frames: number[], variableId: string): number {
+function preferredInitialFrame(frames: number[], preferredFh: number | null | undefined): number {
   if (frames.length === 0) {
     return 0;
   }
-  const configured = VARIABLE_INITIAL_FORECAST_HOUR[variableId];
-  if (!Number.isFinite(configured)) {
+  if (!Number.isFinite(preferredFh)) {
     return frames[0];
   }
-  return nearestFrame(frames, Number(configured));
+  return nearestFrame(frames, Number(preferredFh));
 }
 
-function resolveForecastHour(frames: number[], current: number, variableId: string): number {
-  const selectableFrames = selectableFramesForVariable(frames, variableId);
+function resolveForecastHour(frames: number[], current: number, preferredFh: number | null | undefined): number {
+  const selectableFrames = selectableFramesForVariable(frames, preferredFh);
   if (selectableFrames.length === 0) {
     return 0;
   }
   if (Number.isFinite(current)) {
     return nearestFrame(selectableFrames, current);
   }
-  return preferredInitialFrame(selectableFrames, variableId);
+  return preferredInitialFrame(selectableFrames, preferredFh);
 }
 
 function getEffectiveZoom(zoom: number): number {
@@ -543,6 +560,7 @@ function buildLegend(meta: LegendMeta | null | undefined, opacity: number): Lege
 
 export default function App() {
   const webpDefaultEnabled = isWebpDefaultRenderEnabled();
+  const [capabilities, setCapabilities] = useState<CapabilitiesResponse | null>(null);
   const [models, setModels] = useState<Option[]>([]);
   const [regions, setRegions] = useState<Option[]>([]);
   const [runs, setRuns] = useState<string[]>([]);
@@ -552,14 +570,14 @@ export default function App() {
   const [loopManifest, setLoopManifest] = useState<LoopManifestResponse | null>(null);
   const [regionPresets, setRegionPresets] = useState<Record<string, RegionPreset>>({});
 
-  const [model, setModel] = useState(DEFAULTS.model);
-  const [region, setRegion] = useState(DEFAULTS.region);
-  const [run, setRun] = useState(DEFAULTS.run);
-  const [variable, setVariable] = useState(DEFAULTS.variable);
+  const [model, setModel] = useState("");
+  const [region, setRegion] = useState(MAP_VIEW_DEFAULTS.region);
+  const [run, setRun] = useState("latest");
+  const [variable, setVariable] = useState("");
   const [forecastHour, setForecastHour] = useState(Number.POSITIVE_INFINITY);
   const [targetForecastHour, setTargetForecastHour] = useState(Number.POSITIVE_INFINITY);
-  const [, setZoomBucket] = useState(Math.round(DEFAULTS.zoom));
-  const [mapZoom, setMapZoom] = useState(DEFAULTS.zoom);
+  const [, setZoomBucket] = useState(Math.round(MAP_VIEW_DEFAULTS.zoom));
+  const [mapZoom, setMapZoom] = useState(MAP_VIEW_DEFAULTS.zoom);
   const [zoomGestureActive, setZoomGestureActive] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [renderMode, setRenderMode] = useState<RenderModeState>(webpDefaultEnabled ? "webp_tier0" : "tiles");
@@ -572,7 +590,7 @@ export default function App() {
   const [isPreloadingForPlay, setIsPreloadingForPlay] = useState(false);
   const [isScrubbing, setIsScrubbing] = useState(false);
   const [scrubRequestedHour, setScrubRequestedHour] = useState<number | null>(null);
-  const [opacity, setOpacity] = useState(DEFAULTS.overlayOpacity);
+  const [opacity, setOpacity] = useState(OVERLAY_DEFAULT_OPACITY);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>(() => readBasemapModePreference());
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === "undefined" ? true : !document.hidden
@@ -624,7 +642,7 @@ export default function App() {
   const loopPreloadTokenRef = useRef(0);
   const loopReadyHoursRef = useRef<Set<number>>(new Set());
   const loopFailedHoursRef = useRef<Set<number>>(new Set());
-  const mapZoomRef = useRef(DEFAULTS.zoom);
+  const mapZoomRef = useRef(MAP_VIEW_DEFAULTS.zoom);
   const renderModeDwellTimerRef = useRef<number | null>(null);
   const transitionTokenRef = useRef(0);
   const lastTileViewportCommitUrlRef = useRef<string | null>(null);
@@ -637,10 +655,6 @@ export default function App() {
   const loopDecodeFetchSamplesRef = useRef<number[]>([]);
   const loopDecodeOnlySamplesRef = useRef<number[]>([]);
   const tierFailoverCycleRef = useRef<{ key: string; emitted: boolean }>({ key: "", emitted: false });
-  // Tracks current selector values so the async fast-path callback can guard against
-  // stale-closure issues (updated every render, not inside an effect).
-  const activeSelectorRef = useRef({ model, region, variable, run });
-  activeSelectorRef.current = { model, region, variable, run };
   const runsLoadedForModelRef = useRef<string>("");
   // Pre-built Set of valid forecast hours, kept in sync with frameHours.
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
@@ -651,14 +665,39 @@ export default function App() {
     writeBasemapModePreference(basemapMode);
   }, [basemapMode]);
 
+  const modelCatalog = capabilities?.model_catalog ?? {};
+  const selectedModelCapability: CapabilityModel | null = model ? modelCatalog[model] ?? null : null;
+  const selectedCapabilityVars = useMemo(
+    () => normalizeCapabilityVarRows(selectedModelCapability),
+    [selectedModelCapability]
+  );
+  const selectedCapabilityVarMap = useMemo(() => {
+    const map = new Map<string, VariableEntry>();
+    for (const entry of selectedCapabilityVars) {
+      map.set(entry.id, entry);
+    }
+    return map;
+  }, [selectedCapabilityVars]);
+  const selectedVariableDefaultFh = selectedCapabilityVarMap.get(variable)?.defaultFh ?? null;
+  const selectedModelConstraints = (selectedModelCapability?.constraints ?? {}) as Record<string, unknown>;
+  const zoomHintMinZoom = toNumberOrNull(selectedModelConstraints.zoom_hint_min);
+  const overlayFadeOutZoom = useMemo(() => {
+    const start = toNumberOrNull(selectedModelConstraints.overlay_fade_out_zoom_start);
+    const end = toNumberOrNull(selectedModelConstraints.overlay_fade_out_zoom_end);
+    if (start === null || end === null || end <= start) {
+      return null;
+    }
+    return { start, end };
+  }, [selectedModelConstraints.overlay_fade_out_zoom_start, selectedModelConstraints.overlay_fade_out_zoom_end]);
+
   const frameHours = useMemo(() => {
     const hours = frameRows.map((row) => Number(row.fh)).filter(Number.isFinite);
     return Array.from(new Set(hours)).sort((a, b) => a - b);
   }, [frameRows]);
 
   const selectableFrameHours = useMemo(
-    () => selectableFramesForVariable(frameHours, variable),
-    [frameHours, variable]
+    () => selectableFramesForVariable(frameHours, selectedVariableDefaultFh),
+    [frameHours, selectedVariableDefaultFh]
   );
 
   // Keep frameSetRef in sync so updateBufferSnapshot never allocates a one-off Set.
@@ -2082,42 +2121,50 @@ export default function App() {
       });
   }, [isLoopDisplayActive, resolvedLoopForecastHour, visibleRenderMode, ensureLoopFrameDecoded]);
 
-  // ── Fast-path: fire discovery fetches in parallel on mount ──────────────────────────────────
-  // The runtime payload now comes from run manifest so vars/frames are derived from one
-  // response instead of separate sequential vars + frames requests.
   useEffect(() => {
     const controller = new AbortController();
     const generation = requestGenerationRef.current;
 
-    Promise.all([
-      fetchModels({ signal: controller.signal }),
-      fetchRegionPresets({ signal: controller.signal }),
-      fetchRuns(DEFAULTS.model, { signal: controller.signal }),
-      fetchManifest(DEFAULTS.model, DEFAULTS.run, { signal: controller.signal }),
-    ])
-      .then(([modelsData, regionPresetData, runsData, manifestData]) => {
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-
-        // If the user changed a selector while requests were in-flight, bail out and
-        // let the sequential waterfall (still running concurrently) handle things.
-        const s = activeSelectorRef.current;
-        if (
-          s.model !== DEFAULTS.model ||
-          s.region !== DEFAULTS.region ||
-          s.variable !== DEFAULTS.variable ||
-          s.run !== DEFAULTS.run
-        ) {
+    async function bootstrap() {
+      setLoading(true);
+      setError(null);
+      try {
+        const [capabilitiesData, regionPresetData] = await Promise.all([
+          fetchCapabilities({ signal: controller.signal }),
+          fetchRegionPresets({ signal: controller.signal }),
+        ]);
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
           return;
         }
 
-        // Batch-apply all discovery state in one synchronous pass.
-        const modelOptions = modelsData.map((item) => ({
-          value: item.id,
-          label: item.name || item.id,
+        setCapabilities(capabilitiesData);
+
+        const supportedModelIds = capabilitiesData.supported_models.filter(
+          (modelId) => Boolean(capabilitiesData.model_catalog?.[modelId])
+        );
+        const modelOptions = supportedModelIds.map((modelId) => ({
+          value: modelId,
+          label: capabilitiesData.model_catalog[modelId]?.name || modelId,
         }));
-        const modelIds = modelOptions.map((opt) => opt.value);
         setModels(modelOptions);
-        setModel(pickPreferred(modelIds, DEFAULTS.model));
+
+        const availableModelId = supportedModelIds.find((modelId) => {
+          const availability = capabilitiesData.availability?.[modelId];
+          return Boolean(availability?.latest_run);
+        });
+        const nextModel = availableModelId ?? supportedModelIds[0] ?? "";
+        setModel(nextModel);
+
+        const modelCapability = nextModel ? capabilitiesData.model_catalog[nextModel] : null;
+        const capabilityVars = normalizeCapabilityVarRows(modelCapability);
+        const variableOptions = makeVariableOptions(capabilityVars);
+        const variableIds = variableOptions.map((opt) => opt.value);
+        const defaultVarKey = String(modelCapability?.defaults?.default_var_key ?? "").trim();
+        const nextVariable = variableIds.includes(defaultVarKey)
+          ? defaultVarKey
+          : (variableIds[0] ?? "");
+        setVariables(variableOptions);
+        setVariable(nextVariable);
 
         setRegionPresets(regionPresetData);
         const regionIds = Object.keys(regionPresetData);
@@ -2126,61 +2173,24 @@ export default function App() {
           label: makeRegionLabel(id, regionPresetData[id]),
         }));
         setRegions(regionOptions);
-        setRegion((prev) => (regionIds.includes(prev) ? prev : pickPreferred(regionIds, DEFAULTS.region)));
+        const canonicalRegion = String(
+          modelCapability?.constraints?.canonical_region
+          ?? modelCapability?.canonical_region
+          ?? MAP_VIEW_DEFAULTS.region
+        ).trim();
+        const nextRegion = pickPreferred(regionIds, canonicalRegion || MAP_VIEW_DEFAULTS.region);
+        setRegion(nextRegion);
 
-        setRuns(runsData);
-        setRun(DEFAULTS.run);
-        setRunManifest(manifestData);
-
-        const normalizedVars = normalizeManifestVarRows(manifestData.variables);
-        if (normalizedVars.length === 0) {
-          throw new Error("Manifest contained no variables");
-        }
-        const variableOptions = makeVariableOptions(normalizedVars);
-        const variableIds = variableOptions.map((opt) => opt.value);
-        const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
-        setVariables(variableOptions);
-        setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
-
-        const { rows: manifestRows } = resolveManifestFrames(manifestData, nextVar);
-        setFrameRows((prevRows) => mergeManifestRowsWithPrevious(manifestRows, prevRows));
-        const frames = manifestRows.map((row) => Number(row.fh)).filter(Number.isFinite);
-        setForecastHour((prev) => resolveForecastHour(frames, prev, nextVar));
-        setTargetForecastHour((prev) => resolveForecastHour(frames, prev, nextVar));
+        setRun("latest");
+        setRuns([]);
+        setRunManifest(null);
+        setFrameRows([]);
         setLoopManifest(null);
-
-        setLoading(false);
-      })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === "AbortError") {
+      } catch (err) {
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
           return;
         }
-        // Fast-path failed silently. The sequential waterfall handles recovery.
-      });
-
-    return () => {
-      controller.abort();
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const generation = requestGenerationRef.current;
-
-    async function loadModels() {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await fetchModels({ signal: controller.signal });
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        const options = data.map((item) => ({ value: item.id, label: item.name || item.id }));
-        setModels(options);
-        const modelIds = options.map((opt) => opt.value);
-        const nextModel = pickPreferred(modelIds, DEFAULTS.model);
-        setModel(nextModel);
-      } catch (err) {
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load models");
+        setError(err instanceof Error ? err.message : "Failed to load capabilities");
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
@@ -2188,41 +2198,11 @@ export default function App() {
       }
     }
 
-    loadModels();
+    bootstrap();
     return () => {
       controller.abort();
     };
   }, []);
-
-  useEffect(() => {
-    if (!model) return;
-    const controller = new AbortController();
-    const generation = requestGenerationRef.current;
-
-    async function loadRegions() {
-      setError(null);
-      try {
-        void model;
-        const presets = await fetchRegionPresets({ signal: controller.signal });
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        setRegionPresets(presets);
-        const ids = Object.keys(presets);
-        const options = ids.map((id) => ({ value: id, label: makeRegionLabel(id, presets[id]) }));
-        setRegions(options);
-        const regionIds = options.map((opt) => opt.value);
-        const nextRegion = pickPreferred(regionIds, DEFAULTS.region);
-        setRegion((prev) => (regionIds.includes(prev) ? prev : nextRegion));
-      } catch (err) {
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load regions");
-      }
-    }
-
-    loadRegions();
-    return () => {
-      controller.abort();
-    };
-  }, [model]);
 
   useEffect(() => {
     if (!model) return;
@@ -2259,26 +2239,17 @@ export default function App() {
         }
         setRun(nextRun);
 
-        const manifestVars = normalizeManifestVarRows(manifestData?.variables);
-        if (manifestData && manifestVars.length > 0) {
-          setRunManifest(manifestData);
-          const variableOptions = makeVariableOptions(manifestVars);
-          const variableIds = variableOptions.map((opt) => opt.value);
-          const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
-          setVariables(variableOptions);
-          setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
-          return;
-        }
-
-        const varData = await fetchVars(model, nextRun, { signal: controller.signal });
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
-          return;
-        }
-        setRunManifest(null);
-        const normalizedVars = normalizeVarRows(varData);
-        const variableOptions = makeVariableOptions(normalizedVars);
+        setRunManifest(manifestData);
+        const baseCapabilityVars = selectedCapabilityVars;
+        const resolvedVars = manifestData
+          ? capabilityVarsForManifest(manifestData.variables, baseCapabilityVars)
+          : baseCapabilityVars;
+        const variableOptions = makeVariableOptions(resolvedVars);
         const variableIds = variableOptions.map((opt) => opt.value);
-        const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
+        const defaultVarKey = String(selectedModelCapability?.defaults?.default_var_key ?? "").trim();
+        const nextVar = variableIds.includes(defaultVarKey)
+          ? defaultVarKey
+          : (variableIds[0] ?? "");
         setVariables(variableOptions);
         setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
       } catch (err) {
@@ -2292,7 +2263,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [model, run]);
+  }, [model, run, runs, selectedCapabilityVars, selectedModelCapability]);
 
   useEffect(() => {
     setFrameRows([]);
@@ -2347,8 +2318,8 @@ export default function App() {
         if (hasFrameList) {
           setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-          setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
-          setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+          setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
+          setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
           hydratedFromManifest = true;
         }
       }
@@ -2368,8 +2339,8 @@ export default function App() {
           );
         }
         const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-        setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
-        setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+        setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
+        setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
       } catch (err) {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         if (!hydratedFromManifest) {
@@ -2383,7 +2354,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [model, run, variable, resolvedRunForRequests, runManifest]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest, selectedVariableDefaultFh]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -2419,11 +2390,14 @@ export default function App() {
               return;
             }
             setRunManifest(manifestData);
-            const normalizedVars = normalizeManifestVarRows(manifestData.variables);
-            if (normalizedVars.length > 0) {
-              const variableOptions = makeVariableOptions(normalizedVars);
+            const capabilityVars = capabilityVarsForManifest(manifestData.variables, selectedCapabilityVars);
+            if (capabilityVars.length > 0) {
+              const variableOptions = makeVariableOptions(capabilityVars);
               const variableIds = variableOptions.map((opt) => opt.value);
-              const nextVar = pickPreferred(variableIds, DEFAULTS.variable);
+              const defaultVarKey = String(selectedModelCapability?.defaults?.default_var_key ?? "").trim();
+              const nextVar = variableIds.includes(defaultVarKey)
+                ? defaultVarKey
+                : (variableIds[0] ?? "");
               setVariables(variableOptions);
               setVariable((prev) => (variableIds.includes(prev) ? prev : nextVar));
             }
@@ -2431,8 +2405,8 @@ export default function App() {
             if (hasFrameList) {
               setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
               const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-              setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
-              setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+              setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
+              setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
             }
           })
           .catch((err) => {
@@ -2454,8 +2428,8 @@ export default function App() {
           }
           setFrameRows(rows);
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
-          setForecastHour((prev) => resolveForecastHour(frames, prev, variable));
-          setTargetForecastHour((prev) => resolveForecastHour(frames, prev, variable));
+          setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
+          setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
         })
         .catch((err) => {
           if (err instanceof DOMException && err.name === "AbortError") {
@@ -2470,7 +2444,7 @@ export default function App() {
       tickController?.abort();
       window.clearInterval(interval);
     };
-  }, [model, run, variable, resolvedRunForRequests, runManifest, isPageVisible]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest, isPageVisible, selectedCapabilityVars, selectedModelCapability, selectedVariableDefaultFh]);
 
   useEffect(() => {
     if (!isPlaying || renderMode !== "tiles" || frameHours.length === 0) return;
@@ -2809,7 +2783,8 @@ export default function App() {
           opacity={opacity}
           mode={isLoopDisplayActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
           variable={variable}
-          model={model}
+          overlayFadeOutZoom={overlayFadeOutZoom}
+          zoomHintMinZoom={zoomHintMinZoom}
           basemapMode={basemapMode}
           prefetchTileUrls={prefetchTileUrls}
           crossfade={false}

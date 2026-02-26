@@ -1,8 +1,46 @@
-import { API_BASE } from "@/lib/config";
+import { API_BASE, API_V4_BASE } from "@/lib/config";
 
 export type ModelOption = {
   id: string;
   name: string;
+};
+
+export type CapabilityVariable = {
+  var_key: string;
+  display_name?: string;
+  kind?: string | null;
+  units?: string | null;
+  order?: number | null;
+  default_fh?: number | null;
+  buildable?: boolean;
+  color_map_id?: string | null;
+  constraints?: Record<string, unknown>;
+  derived?: boolean;
+  derive_strategy_id?: string | null;
+};
+
+export type CapabilityModel = {
+  model_id: string;
+  name: string;
+  product?: string | null;
+  canonical_region?: string | null;
+  defaults?: Record<string, unknown>;
+  constraints?: Record<string, unknown>;
+  run_discovery?: Record<string, unknown>;
+  variables: Record<string, CapabilityVariable>;
+};
+
+export type CapabilitiesResponse = {
+  contract_version: string;
+  supported_models: string[];
+  model_catalog: Record<string, CapabilityModel>;
+  availability: Record<
+    string,
+    {
+      latest_run: string | null;
+      published_runs: string[];
+    }
+  >;
 };
 
 export type RegionPreset = {
@@ -205,7 +243,11 @@ export async function fetchRegionPresets(options?: FetchOptions): Promise<Record
 }
 
 export async function fetchModels(options?: FetchOptions): Promise<ModelOption[]> {
-  return fetchJson<ModelOption[]>(`${API_BASE}/models`, options);
+  return fetchJson<ModelOption[]>(`${API_V4_BASE}/models`, options);
+}
+
+export async function fetchCapabilities(options?: FetchOptions): Promise<CapabilitiesResponse> {
+  return fetchJson<CapabilitiesResponse>(`${API_V4_BASE}/capabilities`, options);
 }
 
 export async function fetchRegions(model: string, options?: FetchOptions): Promise<string[]> {

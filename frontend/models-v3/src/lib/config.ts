@@ -1,4 +1,5 @@
 export const API_BASE = "https://api.theweathermodels.com/api/v3";
+export const API_V4_BASE = API_BASE.replace(/\/api\/v3$/i, "/api/v4");
 
 export const TILES_BASE = "https://api.theweathermodels.com";
 
@@ -9,37 +10,13 @@ export const WEBP_RENDER_MODE_THRESHOLDS = {
   dwellMs: 200,
 };
 
-export const DEFAULTS = {
-  model: "hrrr",
+export const MAP_VIEW_DEFAULTS = {
   region: "conus",
-  run: "latest",
-  variable: "radar_ptype",
   center: [39.83, -98.58] as [number, number],
   zoom: 4,
-  overlayOpacity: 0.9,
 };
 
-export const ALLOWED_VARIABLES = new Set(["tmp2m", "tmp850", "dp2m", "precip_total", "snowfall_total", "wspd10m", "wgst10m", "radar_ptype", "precip_ptype", "qpf6h"]);
-
-export const VARIABLE_LABELS: Record<string, string> = {
-  tmp2m: "Surface Temperature",
-  tmp850: "850mb Temperature",
-  dp2m: "2m Dew Point",
-  precip_total: "Total Precipitation",
-  snowfall_total: "Total Snowfall (10:1)",
-  wspd10m: "Wind Speed",
-  wgst10m: "Wind Gust",
-  radar_ptype: "Composite Reflectivity + P-Type",
-  precip_ptype: "Precip + Type",
-  qpf6h: "6-hr Precip",
-};
-
-export const VARIABLE_INITIAL_FORECAST_HOUR: Partial<Record<string, number>> = {
-  radar_ptype: 1,
-  precip_total: 1,
-  snowfall_total: 1,
-  precip_ptype: 1,
-};
+export const OVERLAY_DEFAULT_OPACITY = 0.9;
 
 export type PlaybackBufferPolicy = {
   bufferTarget: number;

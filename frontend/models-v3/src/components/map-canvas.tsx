@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 
-import { DEFAULTS, TILES_BASE } from "@/lib/config";
+import { MAP_VIEW_DEFAULTS, TILES_BASE } from "@/lib/config";
 
 const CARTO_LIGHT_BASE_TILES = [
   "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
@@ -240,7 +240,7 @@ function styleFor(
   overlayUrl: string,
   opacity: number,
   variable?: string,
-  model?: string,
+  overlayFadeOutZoom?: { start: number; end: number } | null,
   contourGeoJsonUrl?: string | null,
   basemapMode: BasemapMode = "light"
 ): StyleSpecification {
@@ -251,8 +251,16 @@ function styleFor(
   const boundaryLineColor = getBoundaryLineColor(basemapMode);
   const lakeFillColor = getLakeFillColor(basemapMode);
   const basemapPaint = getBasemapPaintSettings(basemapMode);
-  const overlayOpacity: any = model === "gfs"
-    ? ["interpolate", ["linear"], ["zoom"], 6, opacity, 7, 0]
+  const overlayOpacity: any = overlayFadeOutZoom
+    ? [
+      "interpolate",
+      ["linear"],
+      ["zoom"],
+      overlayFadeOutZoom.start,
+      opacity,
+      overlayFadeOutZoom.end,
+      0,
+    ]
     : opacity;
   const overlayPaint: any = {
     "raster-opacity": overlayOpacity,
@@ -481,7 +489,8 @@ type MapCanvasProps = {
   opacity: number;
   mode: PlaybackMode;
   variable?: string;
-  model?: string;
+  overlayFadeOutZoom?: { start: number; end: number } | null;
+  zoomHintMinZoom?: number | null;
   basemapMode: BasemapMode;
   prefetchTileUrls?: string[];
   crossfade?: boolean;
@@ -506,7 +515,8 @@ export function MapCanvas({
   opacity,
   mode,
   variable,
-  model,
+  overlayFadeOutZoom = null,
+  zoomHintMinZoom = null,
   basemapMode,
   prefetchTileUrls = [],
   crossfade = false,
@@ -542,8 +552,8 @@ export function MapCanvas({
 
   const view = useMemo(() => {
     return regionViews?.[region] ?? {
-      center: [DEFAULTS.center[1], DEFAULTS.center[0]] as [number, number],
-      zoom: DEFAULTS.zoom,
+      center: [MAP_VIEW_DEFAULTS.center[1], MAP_VIEW_DEFAULTS.center[0]] as [number, number],
+      zoom: MAP_VIEW_DEFAULTS.zoom,
     };
   }, [region, regionViews]);
 
@@ -879,7 +889,7 @@ export function MapCanvas({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleFor(tileUrl, opacity, variable, model, contourGeoJsonUrl, basemapMode),
+      style: styleFor(tileUrl, opacity, variable, overlayFadeOutZoom, contourGeoJsonUrl, basemapMode),
       center: view.center,
       zoom: view.zoom,
       minZoom: view.minZoom ?? 3,
@@ -950,7 +960,7 @@ export function MapCanvas({
       activeTileUrlRef.current,
       opacity,
       variable,
-      model,
+      overlayFadeOutZoom,
       contourGeoJsonUrl,
       basemapMode
     );
@@ -1022,7 +1032,7 @@ export function MapCanvas({
     initializeSourceTracking,
     loopActive,
     loopImageUrl,
-    model,
+    overlayFadeOutZoom,
     opacity,
     setLayerOpacity,
     setLayerRasterPaint,
@@ -1183,7 +1193,7 @@ export function MapCanvas({
         onZoomBucketChange?.(bucket);
       }
       if (onZoomHint) {
-        const shouldShow = model === "gfs" && zoom >= 7;
+        const shouldShow = Number.isFinite(zoomHintMinZoom) && zoom >= Number(zoomHintMinZoom);
         if (shouldShow !== lastHintStateRef.current) {
           lastHintStateRef.current = shouldShow;
           onZoomHint(shouldShow);
@@ -1225,7 +1235,7 @@ export function MapCanvas({
         onZoomHint(false);
       }
     };
-  }, [isLoaded, model, onZoomHint, onZoomBucketChange, onZoomRoutingSignal]);
+  }, [isLoaded, zoomHintMinZoom, onZoomHint, onZoomBucketChange, onZoomRoutingSignal]);
 
   useEffect(() => {
     const map = mapRef.current;
