@@ -272,9 +272,20 @@ def _resolve_latest_run_dt(*, plugin: Any, probe_var: str | None) -> datetime:
 
     if probe_enabled and probe_var:
         base = _align_to_cycle_hour(now, cadence_hours)
+        attempts_used = 0
         for offset in range(probe_attempts):
+            attempts_used += 1
             candidate = base - timedelta(hours=offset * cadence_hours)
             if _probe_run_exists(plugin=plugin, run_dt=candidate, probe_var=probe_var):
+                logger.info(
+                    "Run probe summary: model=%s base_run=%s target_run=%s probe_var=%s attempts=%d/%d success=true reason=probe_hit fallback_used=false",
+                    plugin.id,
+                    _run_id_from_dt(base),
+                    _run_id_from_dt(candidate),
+                    probe_var,
+                    attempts_used,
+                    probe_attempts,
+                )
                 return candidate
         fallback = _align_to_cycle_hour(now - timedelta(hours=fallback_lag_hours), cadence_hours)
         logger.warning(
@@ -283,12 +294,34 @@ def _resolve_latest_run_dt(*, plugin: Any, probe_var: str | None) -> datetime:
             plugin.id,
             _run_id_from_dt(fallback),
         )
+        logger.info(
+            "Run probe summary: model=%s base_run=%s target_run=%s probe_var=%s attempts=%d/%d success=false reason=probe_miss fallback_used=true fallback_run=%s",
+            plugin.id,
+            _run_id_from_dt(base),
+            _run_id_from_dt(base),
+            probe_var,
+            attempts_used,
+            probe_attempts,
+            _run_id_from_dt(fallback),
+        )
         return fallback
 
     if probe_enabled and not probe_var:
         logger.warning("Run probe requested for model=%s but no probe var resolved; using heuristic", plugin.id)
     target = now - timedelta(hours=fallback_lag_hours)
-    return _align_to_cycle_hour(target, cadence_hours)
+    resolved = _align_to_cycle_hour(target, cadence_hours)
+    logger.info(
+        "Run probe summary: model=%s base_run=%s target_run=%s probe_var=%s attempts=0/%d success=%s reason=%s fallback_used=%s",
+        plugin.id,
+        _run_id_from_dt(_align_to_cycle_hour(now, cadence_hours)),
+        _run_id_from_dt(resolved),
+        probe_var or "none",
+        probe_attempts,
+        "false" if probe_enabled and not probe_var else "true",
+        "probe_var_unset" if probe_enabled and not probe_var else "heuristic",
+        "true" if probe_enabled and not probe_var else "false",
+    )
+    return resolved
 
 
 def _resolve_run_dt(run_arg: str | None, *, plugin: Any, probe_var: str | None) -> datetime:

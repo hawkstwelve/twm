@@ -159,6 +159,16 @@ Set `VITE_TWF_V3_WEBP_DEFAULT_ENABLED=1` to enable adaptive WebP rendering (on b
 | `TWF_HERBIE_SUBSET_RETRIES` | `4` | GRIB subset download retries |
 | `HERBIE_SAVE_DIR` | — | Herbie GRIB cache directory |
 
+### GFS Scheduler Rollout (`/etc/twf-v3/scheduler-gfs.env`)
+
+Use a dedicated env file for GFS so HRRR remains isolated. Initial rollout should use only:
+
+| Variable | Recommended value | Description |
+|---|---|---|
+| `TWF_V3_SCHEDULER_VARS` | `tmp2m,wspd10m` | Core rollout vars for GFS |
+| `TWF_V3_SCHEDULER_PRIMARY_VARS` | `tmp2m` | Promotion/probe gate var |
+| `TWF_V3_SCHEDULER_PROBE_VAR` | `tmp2m` | Run-availability probe var |
+
 ### Frontend
 
 | Variable | Default | Description |
@@ -173,7 +183,7 @@ Base: `/api/v4`
 |---|---|---|
 | GET | `/health` | Health check |
 | GET | `/` | API info |
-| GET | `/capabilities` | All models, variables, and current availability |
+| GET | `/capabilities` | All models, variables, and current availability (includes `latest_run_ready*` readiness fields) |
 | GET | `/models/{model}/capabilities` | Single-model capabilities |
 | GET | `/{model}/runs` | Available published runs |
 | GET | `/{model}/{run}/manifest` | Run manifest |
@@ -184,6 +194,13 @@ Base: `/api/v4`
 | GET | `/sample` | Point-sample a raw value from a val COG |
 | GET | `/{model}/{run}/{var}/{fh}/contours/{key}` | GeoJSON contour layer |
 | GET | `/api/regions` | Region presets (bbox, center, zoom) |
+
+### GFS Rollout Semantics
+
+1. Backend capabilities may advertise the full GFS model catalog.
+2. Scheduler configuration controls which vars are actually published during rollout.
+3. `GET /api/v4/{model}/{run}/vars` is manifest-driven and only returns published vars for that run.
+4. `GET /api/v4/{model}/{run}/{var}/frames` returns `[]` when the var is not published for that run.
 
 **Tile URL pattern** (tile server at port 8201):
 
@@ -216,10 +233,17 @@ Systemd unit files are in `deployment/systemd/`. Copy the example env files and 
 ```bash
 cp deployment/systemd/api.env.example          /etc/twf-v3/api.env
 cp deployment/systemd/scheduler.env.example    /etc/twf-v3/scheduler.env
+cp deployment/systemd/scheduler-gfs.env.example /etc/twf-v3/scheduler-gfs.env
 cp deployment/systemd/tile-server.env.example  /etc/twf-v3/tile-server.env
 ```
 
 Services expect the virtualenv at `/opt/twf_v3/.venv` and the project at `/opt/twf_v3/`. The tile server should sit behind an nginx reverse proxy; see `docs/NGINX_V3.md` for a recommended configuration.
+
+For model schedulers, deploy both units and keep env files isolated per model:
+
+```bash
+sudo systemctl enable twm-hrrr-scheduler twm-gfs-scheduler twm-api twm-tile-server
+```
 
 ## Adding a New Model
 

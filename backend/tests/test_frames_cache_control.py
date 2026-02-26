@@ -26,6 +26,9 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     incomplete_run_id = "20260224_15z"
     model = "hrrr"
     var = "radar_ptype"
+    gfs_model = "gfs"
+    gfs_run_id = "20260224_12z"
+    gfs_var = "tmp2m"
 
     model_manifest_dir = manifests_root / model
     model_manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -60,11 +63,29 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
             }
         )
     )
+    gfs_manifest_dir = manifests_root / gfs_model
+    gfs_manifest_dir.mkdir(parents=True, exist_ok=True)
+    (gfs_manifest_dir / f"{gfs_run_id}.json").write_text(
+        json.dumps(
+            {
+                "variables": {
+                    gfs_var: {
+                        "expected_frames": 1,
+                        "available_frames": 0,
+                        "frames": [],
+                    }
+                }
+            }
+        )
+    )
 
     model_published_dir = published_root / model
     (model_published_dir / run_id).mkdir(parents=True, exist_ok=True)
     (model_published_dir / incomplete_run_id).mkdir(parents=True, exist_ok=True)
     (model_published_dir / "LATEST.json").write_text(json.dumps({"run_id": run_id}))
+    gfs_published_dir = published_root / gfs_model
+    (gfs_published_dir / gfs_run_id).mkdir(parents=True, exist_ok=True)
+    (gfs_published_dir / "LATEST.json").write_text(json.dumps({"run_id": gfs_run_id}))
 
     # Seed loop cache artifacts so frame payloads include loop URLs.
     for fh in (0, 1):
@@ -166,3 +187,23 @@ async def test_capabilities_invariant_supported_models_matches_catalog(client: h
         for var_key, var_payload in variables.items():
             assert var_payload["var_key"] == var_key
             assert "buildable" in var_payload
+
+
+async def test_capabilities_availability_readiness_fields(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v4/capabilities")
+
+    assert response.status_code == 200
+    payload = response.json()
+    availability = payload["availability"]
+
+    hrrr = availability["hrrr"]
+    assert hrrr["latest_run"] == "20260224_14z"
+    assert hrrr["latest_run_ready"] is True
+    assert hrrr["latest_run_ready_vars"] == ["radar_ptype"]
+    assert hrrr["latest_run_ready_frame_count"] == 2
+
+    gfs = availability["gfs"]
+    assert gfs["latest_run"] == "20260224_12z"
+    assert gfs["latest_run_ready"] is False
+    assert gfs["latest_run_ready_vars"] == []
+    assert gfs["latest_run_ready_frame_count"] == 0

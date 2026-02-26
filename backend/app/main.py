@@ -324,13 +324,79 @@ def _serialize_model_capability(model_id: str, capability: Any) -> dict[str, Any
     }
 
 
-def _availability_for_models(model_ids: list[str]) -> dict[str, dict[str, Any]]:
+def _manifest_var_available_frames(var_entry: dict[str, Any]) -> int:
+    available_raw = var_entry.get("available_frames")
+    if isinstance(available_raw, int):
+        return max(0, available_raw)
+    frames = var_entry.get("frames")
+    if isinstance(frames, list):
+        return len(frames)
+    return 0
+
+
+def _latest_run_readiness(
+    model_id: str,
+    latest_run: str | None,
+    *,
+    model_capability: Any | None,
+) -> tuple[bool, list[str], int]:
+    if latest_run is None:
+        return False, [], 0
+
+    manifest = _load_manifest(model_id, latest_run)
+    if not isinstance(manifest, dict):
+        return False, [], 0
+
+    variables = manifest.get("variables")
+    if not isinstance(variables, dict):
+        return False, [], 0
+
+    variable_catalog = getattr(model_capability, "variable_catalog", {}) if model_capability is not None else {}
+    catalog_present = isinstance(variable_catalog, dict) and bool(variable_catalog)
+    buildable_keys: set[str] = set()
+    if catalog_present:
+        buildable_keys = {
+            str(var_key)
+            for var_key, capability in variable_catalog.items()
+            if bool(getattr(capability, "buildable", False))
+        }
+
+    ready_vars: list[str] = []
+    ready_frame_count = 0
+    for var_key, var_entry in variables.items():
+        if not isinstance(var_entry, dict):
+            continue
+        if catalog_present and var_key not in buildable_keys:
+            continue
+        available_frames = _manifest_var_available_frames(var_entry)
+        if available_frames <= 0:
+            continue
+        ready_vars.append(var_key)
+        ready_frame_count += available_frames
+
+    ready_vars.sort()
+    return bool(ready_vars), ready_vars, ready_frame_count
+
+
+def _availability_for_models(
+    model_ids: list[str],
+    capabilities_by_model: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
     availability: dict[str, dict[str, Any]] = {}
     for model_id in model_ids:
         published_runs = _scan_manifest_runs(model_id)
+        latest_run = _resolve_latest_run(model_id)
+        latest_run_ready, latest_run_ready_vars, latest_run_ready_frame_count = _latest_run_readiness(
+            model_id,
+            latest_run,
+            model_capability=capabilities_by_model.get(model_id),
+        )
         availability[model_id] = {
-            "latest_run": _resolve_latest_run(model_id),
+            "latest_run": latest_run,
             "published_runs": published_runs,
+            "latest_run_ready": latest_run_ready,
+            "latest_run_ready_vars": latest_run_ready_vars,
+            "latest_run_ready_frame_count": latest_run_ready_frame_count,
         }
     return availability
 
@@ -342,7 +408,7 @@ def _build_capabilities_payload() -> dict[str, Any]:
         for model_id, capability in sorted(capabilities_by_model.items(), key=lambda item: item[0])
     }
     supported_models = sorted(model_catalog.keys())
-    availability = _availability_for_models(supported_models)
+    availability = _availability_for_models(supported_models, capabilities_by_model)
     return {
         "contract_version": CAPABILITIES_CONTRACT_VERSION,
         "supported_models": supported_models,

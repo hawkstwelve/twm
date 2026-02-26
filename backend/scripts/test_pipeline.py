@@ -247,8 +247,15 @@ def test_phase2_value_grid_semantics():
         def __init__(self, vars_map: dict[str, object]):
             self._vars_map = vars_map
 
+        def normalize_var_id(self, var_id: str) -> str:
+            return var_id
+
         def get_var(self, var_id: str):
             return self._vars_map.get(var_id)
+
+        def get_var_capability(self, var_key: str):
+            del var_key
+            return None
 
     def _var_with_search(search: str) -> object:
         return SimpleNamespace(selectors=SimpleNamespace(search=[search]))
@@ -317,6 +324,7 @@ def test_phase2_value_grid_semantics():
     try:
         wspd, _, _ = derive_module.derive_variable(
             model_id="hrrr",
+            var_key="wspd10m",
             product="sfc",
             run_date=run_date,
             fh=0,
@@ -329,6 +337,7 @@ def test_phase2_value_grid_semantics():
 
         radar_idx, _, _ = derive_module.derive_variable(
             model_id="hrrr",
+            var_key="radar_ptype",
             product="sfc",
             run_date=run_date,
             fh=0,

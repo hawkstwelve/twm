@@ -39,6 +39,9 @@ export type CapabilitiesResponse = {
     {
       latest_run: string | null;
       published_runs: string[];
+      latest_run_ready?: boolean;
+      latest_run_ready_vars?: string[];
+      latest_run_ready_frame_count?: number;
     }
   >;
 };

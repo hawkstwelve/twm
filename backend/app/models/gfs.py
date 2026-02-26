@@ -366,7 +366,8 @@ GFS_CAPABILITIES = ModelCapabilities(
     },
     run_discovery={
         "probe_var_key": "tmp2m",
-        "probe_enabled": False,
+        "probe_enabled": True,
+        "probe_attempts": 4,
         "cycle_cadence_hours": 6,
         "fallback_lag_hours": 5,
     },
