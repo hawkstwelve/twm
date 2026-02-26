@@ -20,3 +20,4 @@ extract_colorbar.py
 /docs/ANIMATION_FIX.md
 .hintrc
 .pytest_cache/
+.github/

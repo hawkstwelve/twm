@@ -321,10 +321,9 @@ TMP850_COLOR_ANCHORS = [
 ]
 TMP850_RANGE = (-40.0, 40.0)
 
-# Legacy transitional var-keyed palette specs.
-# Plugin capabilities are authoritative for variable metadata; this file remains
-# the palette/LUT store keyed by color_map_id.
-VAR_SPECS = {
+# Palette/LUT catalog keyed by color_map_id.
+# Variable identity/metadata lives in model plugin capabilities.
+COLOR_MAP_SPECS: dict[str, dict] = {
     "precip_rain": {
         "type": "discrete",
         "units": "mm/hr",
@@ -463,9 +462,7 @@ VAR_SPECS = {
     },
 }
 
-# Transitional color-map catalog. Existing entries are still var-keyed; aliases
-# allow plugins to emit explicit color_map_id values without immediate churn.
-COLOR_MAP_SPECS: dict[str, dict] = dict(VAR_SPECS)
+# Aliases kept for historical compatibility with already-published metadata.
 COLOR_MAP_ALIASES: dict[str, str] = {
     "temp_f_-60_120_tmp2m": "tmp2m",
     "wind_mph_0_100": "wspd10m",

@@ -60,12 +60,10 @@ Model plugins (or a model-aware var registry) should contain:
 3. `(model_id, var_key)` -> conversion key
 4. `(model_id, var_key)` -> `color_map_id`
 
-Transitional rule:
-1. `VAR_SPECS` remains temporarily but is explicitly treated as legacy transitional.
-2. Plugin capabilities are authoritative for model-variable metadata.
-3. `VAR_SPECS` may be consulted only as a legacy fallback for HRRR until retirement.
-4. New and migrated model-variable metadata should be authored in plugins, not added to global `VAR_SPECS`.
-5. `colormaps.py` remains the palette and LUT builder plus palette data store.
+Runtime rule:
+1. Plugin capabilities are authoritative for model-variable metadata.
+2. `VAR_SPECS` fallback paths are retired from runtime codepaths.
+3. `colormaps.py` remains the palette and LUT builder plus palette data store.
 
 ## Target Architecture
 
@@ -234,7 +232,7 @@ Work:
 5. Replace derive `if` and `elif` branch chain with derive-handler registry keyed by derive strategy ID.
 6. Enforce variable identity lookups via `(model_id, var_key)` at all builder and scheduler call sites.
 7. Refactor builder colorization inputs to resolve palette by `color_map_id` from plugin var metadata.
-8. Mark `VAR_SPECS` as legacy transitional and stop adding net-new variable metadata to it.
+8. Remove runtime dependence on `VAR_SPECS` and require plugin capability metadata.
 
 ## Phase 3: API Capability Surface
 Files:
@@ -272,7 +270,7 @@ Files:
 - `docs/NGINX_V3.md`
 
 Work:
-1. Add `/api/v4/*` runtime endpoints for parity with active `/api/v3/*` runtime calls:
+1. Add `/api/v4/*` runtime endpoints covering the full runtime contract:
    - `/api/v4/{model}/runs`
    - `/api/v4/{model}/{run}/manifest`
    - `/api/v4/{model}/{run}/vars`
@@ -283,11 +281,9 @@ Work:
    - `/api/v4/{model}/{run}/{var}/{fh:int}/contours/{key}`
 2. Migrate frontend runtime calls from `/api/v3/*` to `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
 3. Keep `/tiles/v3/*` unchanged for this phase (tile contract is out of scope for API-version cutover).
-4. Introduce a temporary frontend runtime fallback flag (`v4` default, `v3` emergency rollback) for one release window only.
-5. Update edge routing so `api.theweathermodels.com` proxies `/api/v4/*` with the same CORS/header behavior as `/api/v3/*`.
-6. Run parity smoke tests on production for one model, one var, one run, one FH and verify v3/v4 response-equivalent behavior.
-7. Mark `/api/v3/*` runtime endpoints as deprecated with a defined retirement gate.
-8. Remove fallback and retire `/api/v3/*` after parity signoff and one stable release window.
+4. Update edge routing so `api.theweathermodels.com` proxies `/api/v4/*` with the same CORS/header behavior used for runtime APIs.
+5. Run production smoke tests on one model/var/run/FH across all runtime endpoints.
+6. Retire `/api/v3/*` runtime endpoints in the same refactor stream (no long-lived dual runtime contract).
 
 ## Phase 5: Guardrails and Docs
 Files:
@@ -311,7 +307,7 @@ Work:
 7. Existing frame cache behavior unchanged for retained semantics.
 8. Availability contract tests validate clear distinction between `supported_models` and published run state.
 9. Capability schema tests validate `model_catalog` structure, `var_key` usage, and `supported_models == Object.keys(model_catalog)`.
-10. Legacy fallback tests validate `VAR_SPECS` is consulted only for HRRR transitional paths.
+10. Legacy fallback tests validate there is no runtime metadata fallback path outside plugin capabilities.
 11. Palette resolution tests validate `(model_id, var_key)` -> `color_map_id` -> palette behavior.
 
 ### Frontend tests and smoke
@@ -324,9 +320,9 @@ Work:
 ### Runtime cutover smoke (Phase 4.5 gate)
 1. Frontend runtime network calls resolve via `/api/v4/*` (except `/tiles/v3/*`).
 2. `GET /api/v4/capabilities` succeeds from public edge (not just localhost).
-3. One-model parity checks pass for runs, manifest, vars, frames, sample, and loop-manifest between v3 and v4.
+3. One-model runtime checks pass for runs, manifest, vars, frames, sample, and loop-manifest on `/api/v4/*`.
 4. No empty-selector runtime requests are emitted (for example `model=&var=&fh=Infinity`).
-5. Temporary fallback flag can force v3 runtime successfully, then return to v4.
+5. `/api/v3/*` runtime paths return 404 and no frontend runtime calls target v3.
 
 ### New model acceptance scenario
 1. Add synthetic plugin with one simple variable.
@@ -353,7 +349,7 @@ Work:
 6. `/api/v3/*` is removed or formally retired in the same refactor stream after `/api/v4/*` cutover.
 7. API explicitly distinguishes supported model existence from published data availability.
 8. `colormaps.py` is palette-focused (`color_map_id` keyed) and variable metadata is model-scoped.
-9. `VAR_SPECS` is explicitly documented and treated as legacy transitional until fully retired.
+9. Runtime metadata fallback through `VAR_SPECS` is retired.
 10. Existing HRRR and GFS behavior remains functionally equivalent for data loading and rendering.
 
 ## Assumptions
@@ -369,15 +365,15 @@ Work:
 5. Introduce derive strategy interface and registry keyed by strategy ID.
 6. Refactor builder conversion, grid, and derive lookups to `(model_id, var_key)`.
 7. Add model-scoped `color_map_id` mapping and route palette lookup through `colormaps.py`.
-8. Mark `VAR_SPECS` as legacy transitional and prevent new metadata growth there.
+8. Remove runtime dependence on `VAR_SPECS` and require plugin capability metadata.
 9. Add `GET /api/v4/capabilities` bootstrap endpoint plus optional per-model endpoint.
 10. Implement explicit `supported_models`, `model_catalog`, and availability (`published_runs`, `latest_run`) contract.
 11. Add and lock a capabilities schema v1 JSON example in docs.
 12. Migrate frontend bootstrap from `/api/v3` to single-call `/api/v4/capabilities`.
 13. Add `/api/v4` runtime endpoint parity for runs, manifest, vars, frames, sample, loops, and contours.
-14. Migrate frontend runtime API calls from `/api/v3` to `/api/v4` with temporary rollback flag.
-15. Validate production edge routing for `/api/v4/*` and run v3/v4 parity smoke tests.
-16. Deprecate and remove `/api/v3` routes in the same refactor stream.
+14. Migrate frontend runtime API calls from `/api/v3` to `/api/v4`.
+15. Validate production edge routing for `/api/v4/*` and run v4 runtime smoke tests.
+16. Remove `/api/v3` routes in the same refactor stream.
 17. Add backend capability, identity, derive-registry, schema, and palette-resolution tests.
 18. Run backend tests and frontend smoke checks.
 19. Update roadmap references.

@@ -15,7 +15,7 @@ This eliminates runtime science logic from the tile-serving path, makes adding v
 - Frontend bootstrap contract: `GET /api/v4/capabilities` (single-call bootstrap).
 - Frontend runtime API calls: `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
 - Tile serving remains `/tiles/v3/*` (unchanged path; separate from API contract versioning).
-- `/api/v3/*` remains available only as transitional compatibility and should be treated as legacy.
+- `/api/v3/*` runtime contract is retired.
 
 ### Why V3 over the current systems
 
@@ -83,7 +83,7 @@ github.com/hawkstwelve/twf_models_v3
 │   │       │   ├── cog_writer.py     (GeoTIFF → warp → overviews (gdaladdo subprocess) → COG (gdal_translate))
 │   │       │   └── pipeline.py       (orchestrator: fetch → warp → colorize → write → validate + sidecar JSON)
 │   │       ├── scheduler.py          (model_scheduler, run promotion, retention)
-│   │       ├── colormaps.py          (VAR_SPECS: encoding ranges, colors, legend config)
+│   │       ├── colormaps.py          (COLOR_MAP_SPECS: palette/LUT catalog keyed by color_map_id)
 │   │       ├── discovery.py          (manifest-based discovery)
 │   │       └── tile_server.py        (dumb RGBA COG → PNG, ~100 lines)
 │   ├── scripts/              (CLI tools, validation, debug)
@@ -213,10 +213,8 @@ python -m backend.app.services.builder.pipeline --model hrrr --region pnw --var 
 **Frontend config for local dev** (`frontend/models-v3/src/lib/config.ts`):
 
 ```typescript
-export const API_V3_BASE = "https://api.theweathermodels.com/api/v3";
-export const API_V4_BASE = API_V3_BASE.replace(/\/api\/v3$/i, "/api/v4");
-export const RUNTIME_API_VERSION = (import.meta.env.VITE_TWF_RUNTIME_API_VERSION ?? "v4").toLowerCase();
-export const RUNTIME_API_BASE = RUNTIME_API_VERSION === "v3" ? API_V3_BASE : API_V4_BASE;
+export const API_ORIGIN = "https://api.theweathermodels.com";
+export const API_V4_BASE = `${API_ORIGIN}/api/v4`;
 export const TILES_BASE = "https://api.theweathermodels.com";
 ```
 
@@ -306,7 +304,7 @@ This is the single rule that prevents regression into the V2 break/fix pattern. 
 **What it does:** Point query against value-grid COGs for hover-for-data
 
 ```
-GET /api/v3/sample?model=hrrr&region=conus&run=latest&var=tmp2m&fh=3&lat=47.6&lon=-122.3
+GET /api/v4/sample?model=hrrr&region=conus&run=latest&var=tmp2m&fh=3&lat=47.6&lon=-122.3
 
 Response:
 {
@@ -334,8 +332,8 @@ Response:
 - Dark toolbar, legend component (gradient + discrete + ptype segmented)
 
 **New:**
-- Hover handler calls `/api/v3/sample` on mousemove → shows tooltip with numeric value + units (see "Sampling Cost Control" below)
-- Reads from V3 tile URLs and manifests
+- Hover handler calls `/api/v4/sample` on mousemove → shows tooltip with numeric value + units (see "Sampling Cost Control" below)
+- Reads from `/tiles/v3/*` plus `/api/v4/*` manifests/runtime endpoints
 - No "Legacy tiles" checkbox — V3 is the only rendering path
 - CONUS as default region option
 
@@ -362,7 +360,7 @@ async function onHover(lat: number, lon: number) {
 
 **Tooltip hide:** Tooltip disappears immediately on `mouseleave` from the map container. No lingering stale values.
 
-**Server-side guard (belt-and-suspenders):** The `/api/v3/sample` endpoint does not need rate limiting for a single-user project, but if it ever becomes public, add a simple per-IP rate limit (e.g., 10 req/s) via nginx `limit_req`.
+**Server-side guard (belt-and-suspenders):** The `/api/v4/sample` endpoint does not need rate limiting for a single-user project, but if it ever becomes public, add a simple per-IP rate limit (e.g., 10 req/s) via nginx `limit_req`.
 
 ---
 
@@ -604,11 +602,9 @@ GET /api/v4/{model}/{run}/{var}/{fh}/contours/{key}
 GET /api/v4/sample?model={model}&run={run}&var={var}&fh={fh}&lat={lat}&lon={lon}
 ```
 
-### API v3 (legacy transitional)
+### API v3 (retired)
 
-```
-`/api/v3/*` is still routable for compatibility but should not be used for new frontend/runtime paths.
-```
+`/api/v3/*` runtime endpoints are retired and should not be used.
 
 ---
 
@@ -633,7 +629,7 @@ Already matches current V2 caching headers — no change needed.
 | System | File | Defines |
 |---|---|---|
 | Model plugins | `models/hrrr.py`, `models/gfs.py` | `VarSpec`: GRIB selectors, derivation type, component hints |
-| Colormap specs | `services/colormaps.py` | `VAR_SPECS`: encoding range, colors, units, kind |
+| Colormap specs | `services/colormaps.py` | `COLOR_MAP_SPECS`: encoding range, colors, units, kind |
 | Legacy registry | `services/variable_registry.py` | `VARIABLE_ALIASES`, `VARIABLE_SELECTORS`, `HERBIE_SEARCH` |
 
 ### Target state (single source of truth)
@@ -695,14 +691,14 @@ Adding a new variable becomes:
 7. ✅ Archive `twf_models` and `twf_models_legacy` repos on GitHub
 
 **Additional completions beyond Phase 0 scope:**
-- ✅ Nginx routing switched to `/models-v3`, `/api/v3/`, `/tiles/v3/`
+- ✅ Nginx routing switched to `/models-v3`, `/api/v4/`, `/tiles/v3/`
 - ✅ V2 endpoints return 410 Gone
 - ✅ Ports migrated (8200 API / 8201 tiles)
 - ✅ systemd services deployed: `twf-v3-api`, `twf-v3-tile-server`
-- ✅ API health endpoint live (`/api/v3/health`)
+- ✅ API health endpoint live (`/api/v4/health`)
 - ✅ Tile server health endpoint live (`/tiles/v3/health`)
 - ✅ Tile server enforces "Hard Rule: No Runtime Transformation" — no colormap logic, no var-branching
-- ✅ Frontend builds against V3 routes exclusively (V2 URL leakage fixed)
+- ✅ Frontend builds against v4 runtime routes (V2 URL leakage fixed)
 
 **Checkpoint:** ~~Single repo exists on GitHub, cloned to prod and local machine. V2 is stopped. Frontend skeleton loads (no data pipeline yet).~~ **PASSED.**
 
@@ -720,7 +716,7 @@ Adding a new variable becomes:
 4. ✅ Implement `builder/cog_writer.py` — GeoTIFF write + warp + overviews (gdaladdo subprocess) + COG (gdal_translate)
 5. ✅ Write HRRR tmp2m artifacts to staging — `gdalinfo` confirms contract-compliant RGBA + value COGs with correct CRS, bands, overviews
 6. ✅ Implement dumb tile server (~100 lines): read 4-band RGBA COG via rio-tiler → PNG tile with immutable cache headers
-7. ✅ Implement `/api/v3/sample` endpoint (~50 lines): read float32 COG → point query → JSON with units from sidecar
+7. ✅ Implement `/api/v4/sample` endpoint (~50 lines): read float32 COG → point query → JSON with units from sidecar
 8. ✅ Wire frontend to V3 tile URL and add hover tooltip calling `/sample` — *debounce + generation counter + LRU cache per sampling cost control spec*
 9. ✅ Validate: tiles return 200 at z2–z10; hover returns correct temperature values
 
@@ -865,7 +861,7 @@ Estimates use deflate-compressed COG sizes from the grid dimensions table. Per-f
 | `builder/colorize.py` | float → RGBA at build time |
 | `builder/value_grid.py` | float → float32 COG for hover |
 | `builder/pipeline.py` | Orchestrator dispatching fetch → derive → colorize → write |
-| `/api/v3/sample` endpoint | Point query for hover-for-data |
+| `/api/v4/sample` endpoint | Point query for hover-for-data |
 | Frontend hover tooltip | Calls `/sample`, shows value + units |
 | Run manifests (`{run}.json`) | Rich manifest with expected/available frames |
 
@@ -1013,13 +1009,6 @@ location /models-v3/ {
     try_files $uri $uri/ /models-v3/index.html;
 }
 
-# V3 API (discovery + sampling)
-location /api/v3/ {
-    proxy_pass http://127.0.0.1:8200;
-    proxy_set_header Host $host;
-    proxy_set_header X-Real-IP $remote_addr;
-}
-
 # V4 API (bootstrap + runtime)
 location /api/v4/ {
     proxy_pass http://127.0.0.1:8200;
@@ -1110,6 +1099,6 @@ No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropria
 6. ~~**Implement `builder/pipeline.py`** — orchestrator for fetch → warp → colorize → write → validate~~ ✅
 7. ~~**Generate one `fh000.rgba.cog.tif` + `fh000.val.cog.tif`** for HRRR tmp2m and validate with `gdalinfo`~~ ✅
 8. ~~**Upgrade tile server stub** to read 4-band RGBA COGs via rio-tiler and return PNG tiles~~ ✅
-9. ~~**Add `/api/v3/sample`** reading `val.cog.tif`~~ ✅
+9. ~~**Add `/api/v4/sample`** reading `val.cog.tif`~~ ✅
 10. ~~**Wire frontend hover tooltip** calling `/sample`~~ ✅
 11. **Validate end-to-end:** tiles at z2–z10, hover returns correct values ← **START HERE**

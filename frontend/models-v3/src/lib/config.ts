@@ -1,14 +1,5 @@
-export const API_V3_BASE = "https://api.theweathermodels.com/api/v3";
-export const API_V4_BASE = API_V3_BASE.replace(/\/api\/v3$/i, "/api/v4");
-export const API_BASE = API_V3_BASE;
-export const API_ORIGIN = API_V3_BASE.replace(/\/api\/v3$/i, "");
-
-const RUNTIME_API_VERSION_RAW = String(import.meta.env.VITE_TWF_RUNTIME_API_VERSION ?? "v4")
-  .trim()
-  .toLowerCase();
-
-export const RUNTIME_API_VERSION: "v3" | "v4" = RUNTIME_API_VERSION_RAW === "v3" ? "v3" : "v4";
-export const RUNTIME_API_BASE = RUNTIME_API_VERSION === "v3" ? API_V3_BASE : API_V4_BASE;
+export const API_ORIGIN = "https://api.theweathermodels.com";
+export const API_V4_BASE = `${API_ORIGIN}/api/v4`;
 
 export const TILES_BASE = "https://api.theweathermodels.com";
 

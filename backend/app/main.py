@@ -26,7 +26,7 @@ from rasterio.enums import Resampling
 from rasterio.windows import Window
 
 from .config.regions import REGION_PRESETS
-from .models.registry import MODEL_REGISTRY, list_model_capabilities
+from .models.registry import list_model_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ def _maybe_304(request: Request, *, etag: str, cache_control: str) -> Response |
     return None
 
 
-app = FastAPI(title="TWF V3 API", version="2.0.0")
+app = FastAPI(title="TWF API", version="4.0.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -274,16 +274,6 @@ def _scan_manifest_runs(model: str) -> list[str]:
             continue
         runs.append(run_id)
     return sorted(set(runs), reverse=True)
-
-
-def _model_name(model_id: str, capabilities_by_model: dict[str, Any] | None = None) -> str:
-    capabilities = (capabilities_by_model or {}).get(model_id)
-    if capabilities is not None:
-        return str(getattr(capabilities, "name", model_id.upper()))
-    plugin = MODEL_REGISTRY.get(model_id)
-    if plugin is not None:
-        return str(getattr(plugin, "name", model_id.upper()))
-    return model_id.upper()
 
 
 def _serialize_variable_capability(capability: Any) -> dict[str, Any]:
@@ -665,14 +655,9 @@ def _sample_payload(
     }
 
 
-@app.get("/api/v3/health")
-def health():
+@app.get("/api/v4/health")
+def health_v4():
     return {"ok": True, "data_root": str(DATA_ROOT)}
-
-
-@app.get("/api/v3")
-def root():
-    return {"service": "twf-v3-api", "version": "2.0.0"}
 
 
 @app.get("/api/v4")
@@ -774,25 +759,6 @@ def get_model_capabilities_v4(request: Request, model: str):
     )
 
 
-@app.get("/api/v3/models")
-def list_models():
-    models: set[str] = set()
-    if MANIFESTS_ROOT.is_dir():
-        models.update(child.name for child in MANIFESTS_ROOT.iterdir() if child.is_dir())
-    if PUBLISHED_ROOT.is_dir():
-        models.update(child.name for child in PUBLISHED_ROOT.iterdir() if child.is_dir())
-    capabilities_by_model = list_model_capabilities()
-    model_ids = sorted(models)
-    return [
-        {
-            "id": model_id,
-            "name": _model_name(model_id, capabilities_by_model),
-        }
-        for model_id in model_ids
-    ]
-
-
-@app.get("/api/v3/{model}/runs")
 @app.get("/api/v4/{model}/runs")
 def list_runs(request: Request, model: str):
     runs = _scan_manifest_runs(model)
@@ -810,7 +776,6 @@ def list_runs(request: Request, model: str):
     )
 
 
-@app.get("/api/v3/{model}/{run}/manifest")
 @app.get("/api/v4/{model}/{run}/manifest")
 def get_manifest(request: Request, model: str, run: str):
     resolved = _resolve_run(model, run)
@@ -834,7 +799,6 @@ def get_manifest(request: Request, model: str, run: str):
     )
 
 
-@app.get("/api/v3/{model}/{run}/vars")
 @app.get("/api/v4/{model}/{run}/vars")
 def list_vars(model: str, run: str):
     model_id = model.strip().lower()
@@ -862,7 +826,6 @@ def list_vars(model: str, run: str):
     return result
 
 
-@app.get("/api/v3/{model}/{run}/{var}/frames")
 @app.get("/api/v4/{model}/{run}/{var}/frames")
 def list_frames(request: Request, model: str, run: str, var: str):
     resolved = _resolve_run(model, run)
@@ -933,7 +896,6 @@ def list_frames(request: Request, model: str, run: str, var: str):
     )
 
 
-@app.get("/api/v3/{model}/{run}/{var}/loop-manifest")
 @app.get("/api/v4/{model}/{run}/{var}/loop-manifest")
 def get_loop_manifest(request: Request, model: str, run: str, var: str):
     resolved = _resolve_run(model, run)
@@ -1018,7 +980,6 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
     )
 
 
-@app.get("/api/v3/{model}/{run}/{var}/{fh:int}/loop.webp")
 @app.get("/api/v4/{model}/{run}/{var}/{fh:int}/loop.webp")
 def get_loop_webp(
     model: str,
@@ -1086,7 +1047,6 @@ def get_loop_webp(
     )
 
 
-@app.get("/api/v3/sample")
 @app.get("/api/v4/sample")
 def sample(
     request: Request,
@@ -1211,7 +1171,6 @@ def sample(
         return Response(status_code=500, content='{"error": "internal error"}', media_type="application/json")
 
 
-@app.get("/api/v3/{model}/{run}/{var}/{fh:int}/contours/{key}")
 @app.get("/api/v4/{model}/{run}/{var}/{fh:int}/contours/{key}")
 def get_contour_geojson(
     model: str,
@@ -1267,15 +1226,3 @@ def get_contour_geojson(
             contour_path,
         )
         raise HTTPException(status_code=500, detail=f"Failed to read contour GeoJSON: {exc}") from exc
-
-
-@app.get("/api/v3/admin/{model}/scan-runs")
-def admin_scan_runs(model: str):
-    runs = []
-    d = PUBLISHED_ROOT / model
-    if d.is_dir():
-        runs = sorted(
-            [child.name for child in d.iterdir() if child.is_dir() and _RUN_ID_RE.match(child.name)],
-            reverse=True,
-        )
-    return {"model": model, "runs": runs}

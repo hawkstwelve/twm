@@ -42,7 +42,7 @@ from app.services.builder.pipeline import (
     check_pixel_sanity,
     validate_cog,
 )
-from app.services.colormaps import RADAR_PTYPE_BREAKS, RADAR_PTYPE_ORDER, VAR_SPECS
+from app.services.colormaps import COLOR_MAP_SPECS, RADAR_PTYPE_BREAKS, RADAR_PTYPE_ORDER
 
 
 MODEL = "hrrr"
@@ -136,7 +136,7 @@ def test_validate_cog_gates():
         print("  Gate 1 (Value structural): PASS")
 
         # Gate 2: pixel sanity
-        var_spec = VAR_SPECS["tmp2m"]
+        var_spec = COLOR_MAP_SPECS["tmp2m"]
         assert check_pixel_sanity(
             rgba_path, val_path, var_spec,
         ), "Gate 2 failed"
@@ -150,7 +150,7 @@ def test_sidecar_json():
     data_f = convert_units(data_k, "tmp2m")
     _, meta = float_to_rgba(data_f, "tmp2m")
 
-    var_spec = VAR_SPECS["tmp2m"]
+    var_spec = COLOR_MAP_SPECS["tmp2m"]
     sidecar = build_sidecar_json(
         model=MODEL,
         region=REGION,

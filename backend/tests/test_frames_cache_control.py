@@ -88,9 +88,8 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
         yield test_client
 
 
-@pytest.mark.parametrize("api_version", ["v3", "v4"])
-async def test_frames_latest_cache_control_is_short(client: httpx.AsyncClient, api_version: str) -> None:
-    response = await client.get(f"/api/{api_version}/hrrr/latest/radar_ptype/frames")
+async def test_frames_latest_cache_control_is_short(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v4/hrrr/latest/radar_ptype/frames")
 
     assert response.status_code == 200
     cache_control = response.headers.get("cache-control", "")
@@ -99,9 +98,8 @@ async def test_frames_latest_cache_control_is_short(client: httpx.AsyncClient, a
     assert response.headers.get("etag")
 
 
-@pytest.mark.parametrize("api_version", ["v3", "v4"])
-async def test_frames_historical_cache_control_is_immutable(client: httpx.AsyncClient, api_version: str) -> None:
-    response = await client.get(f"/api/{api_version}/hrrr/20260224_14z/radar_ptype/frames")
+async def test_frames_historical_cache_control_is_immutable(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v4/hrrr/20260224_14z/radar_ptype/frames")
 
     assert response.status_code == 200
     cache_control = response.headers.get("cache-control", "")
@@ -110,24 +108,14 @@ async def test_frames_historical_cache_control_is_immutable(client: httpx.AsyncC
     assert response.headers.get("etag")
 
 
-@pytest.mark.parametrize("api_version", ["v3", "v4"])
-async def test_frames_incomplete_historical_cache_control_is_short(client: httpx.AsyncClient, api_version: str) -> None:
-    response = await client.get(f"/api/{api_version}/hrrr/20260224_15z/radar_ptype/frames")
+async def test_frames_incomplete_historical_cache_control_is_short(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v4/hrrr/20260224_15z/radar_ptype/frames")
 
     assert response.status_code == 200
     cache_control = response.headers.get("cache-control", "")
     assert "max-age=60" in cache_control
     assert "immutable" not in cache_control
     assert response.headers.get("etag")
-
-
-async def test_frames_v3_v4_payload_parity(client: httpx.AsyncClient) -> None:
-    response_v3 = await client.get("/api/v3/hrrr/latest/radar_ptype/frames")
-    response_v4 = await client.get("/api/v4/hrrr/latest/radar_ptype/frames")
-
-    assert response_v3.status_code == 200
-    assert response_v4.status_code == 200
-    assert response_v3.json() == response_v4.json()
 
 
 async def test_frame_loop_urls_emit_v4_runtime_paths(client: httpx.AsyncClient) -> None:
@@ -145,6 +133,18 @@ async def test_frame_loop_urls_emit_v4_runtime_paths(client: httpx.AsyncClient) 
     assert tier1_row is not None
     assert tier1_row["loop_webp_tier1_url"].startswith("/api/v4/hrrr/")
     assert "/loop.webp?tier=1" in tier1_row["loop_webp_tier1_url"]
+
+
+async def test_v3_runtime_routes_are_retired(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v3/hrrr/latest/radar_ptype/frames")
+    assert response.status_code == 404
+
+
+async def test_v4_health_endpoint(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v4/health")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["ok"] is True
 
 
 async def test_capabilities_invariant_supported_models_matches_catalog(client: httpx.AsyncClient) -> None:

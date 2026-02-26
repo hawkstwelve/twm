@@ -28,7 +28,6 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -741,7 +740,15 @@ def build_frame(
     var_key = resolved_plugin.normalize_var_id(var_id)
     var_spec_model = _resolve_model_var_spec(model, var_key, resolved_plugin)
     var_capability = _resolve_model_var_capability(model, var_key, resolved_plugin)
-    color_map_id = getattr(var_capability, "color_map_id", None) or var_key
+    color_map_id = getattr(var_capability, "color_map_id", None)
+    if not isinstance(color_map_id, str) or not color_map_id.strip():
+        logger.error(
+            "Missing color_map_id in model capability for model=%s var_key=%s; build aborted",
+            model,
+            var_key,
+        )
+        return None
+    color_map_id = color_map_id.strip()
     try:
         var_spec_colormap = get_color_map_spec(color_map_id)
     except KeyError:
@@ -1002,16 +1009,9 @@ def _resolve_model_var_capability(
     capability = plugin.get_var_capability(normalized)
     if capability is not None:
         return capability
-    spec = plugin.get_var(normalized)
-    if spec is None:
-        raise ValueError(f"Variable {normalized!r} not found in {model!r} model plugin")
-    return SimpleNamespace(
-        var_key=normalized,
-        kind=getattr(spec, "kind", None),
-        units=getattr(spec, "units", None),
-        derive_strategy_id=getattr(spec, "derive", None),
-        color_map_id=normalized,
-        conversion=None,
+    raise ValueError(
+        f"Variable capability missing for {model!r}/{normalized!r}; "
+        "plugin capabilities are required for all buildable variables"
     )
 
 
