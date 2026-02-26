@@ -70,7 +70,7 @@ Then restart tile server unit:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl restart twf-v3-tile-server
+sudo systemctl restart twm-tile-server
 ```
 
 ## Notes

@@ -1,13 +1,13 @@
 [Unit]
-Description=TWF V3 Tile Server
+Description=TWM API
 After=network.target
 
 [Service]
 Type=simple
 WorkingDirectory=/opt/twf_v3
-EnvironmentFile=-/etc/twf-v3/tile-server.env
+EnvironmentFile=-/etc/twf-v3/api.env
 Environment=PATH=/opt/twf_v3/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
-ExecStart=/opt/twf_v3/.venv/bin/uvicorn backend.app.services.tile_server:app --host 127.0.0.1 --port 8201 --workers 3
+ExecStart=/opt/twf_v3/.venv/bin/uvicorn backend.app.main:app --host 127.0.0.1 --port 8200
 Restart=on-failure
 RestartSec=2
 

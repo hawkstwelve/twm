@@ -1,5 +1,5 @@
 [Unit]
-Description=TWF V3 Scheduler (HRRR CONUS canonical)
+Description=TWM HRRR Scheduler (CONUS canonical)
 Wants=network-online.target
 After=network-online.target
 

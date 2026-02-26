@@ -156,8 +156,8 @@ npm install && npm run build
 # Install systemd services
 sudo cp /opt/twf_v3/deployment/systemd/*.service /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable twf-v3-hrrr-conus-scheduler twf-v3-gfs-conus-scheduler twf-v3-tile-server twf-v3-api
-sudo systemctl start twf-v3-tile-server twf-v3-api
+sudo systemctl enable twm-hrrr-scheduler twm-gfs-scheduler twm-tile-server twm-api
+sudo systemctl start twm-tile-server twm-api
 # Start schedulers once builder is validated (Phase 1 checkpoint)
 
 # Update nginx
@@ -694,7 +694,7 @@ Adding a new variable becomes:
 - ✅ Nginx routing switched to `/models-v3`, `/api/v4/`, `/tiles/v3/`
 - ✅ V2 endpoints return 410 Gone
 - ✅ Ports migrated (8200 API / 8201 tiles)
-- ✅ systemd services deployed: `twf-v3-api`, `twf-v3-tile-server`
+- ✅ systemd services deployed: `twm-api`, `twm-tile-server`
 - ✅ API health endpoint live (`/api/v4/health`)
 - ✅ Tile server health endpoint live (`/tiles/v3/health`)
 - ✅ Tile server enforces "Hard Rule: No Runtime Transformation" — no colormap logic, no var-branching
@@ -941,7 +941,7 @@ V2 is stopped and removed during Phase 0 consolidation (see "Consolidation proce
 ### Systemd services
 
 ```ini
-# /etc/systemd/system/twf-v3-tile-server.service
+# /etc/systemd/system/twm-tile-server.service
 [Unit]
 Description=TWF V3 Tile Server
 After=network.target
@@ -960,7 +960,7 @@ WantedBy=multi-user.target
 ```
 
 ```ini
-# /etc/systemd/system/twf-v3-api.service
+# /etc/systemd/system/twm-api.service
 [Unit]
 Description=TWF V3 API (Discovery + Sampling)
 After=network.target
@@ -978,7 +978,7 @@ WantedBy=multi-user.target
 ```
 
 ```ini
-# /etc/systemd/system/twf-v3-hrrr-conus-scheduler.service
+# /etc/systemd/system/twm-hrrr-scheduler.service
 [Unit]
 Description=TWF V3 HRRR CONUS Scheduler
 After=network.target
@@ -1044,7 +1044,7 @@ git pull origin main
 # Backend changes
 source .venv/bin/activate
 pip install -r backend/requirements.txt  # only if deps changed
-sudo systemctl restart twf-v3-api twf-v3-tile-server
+sudo systemctl restart twm-api twm-tile-server
 
 # Frontend changes
 cd frontend/models-v3
@@ -1052,7 +1052,7 @@ npm install && npm run build  # only if frontend changed
 # Static files served by nginx — no restart needed
 
 # Scheduler changes
-sudo systemctl restart twf-v3-hrrr-conus-scheduler twf-v3-gfs-conus-scheduler
+sudo systemctl restart twm-hrrr-scheduler twm-gfs-scheduler
 ```
 
 No CI/CD pipeline needed at this stage. Manual `git pull` + restart is appropriate for a single-developer project.
