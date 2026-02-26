@@ -87,6 +87,8 @@ HRRR_VARS: dict[str, VarSpec] = {
             },
         ),
         primary=True,
+        kind="continuous",
+        units="F",
     ),
     "dp2m": VarSpec(
         id="dp2m",

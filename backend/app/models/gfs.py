@@ -114,6 +114,8 @@ GFS_VARS: dict[str, VarSpec] = {
             },
         ),
         primary=True,
+        kind="continuous",
+        units="F",
     ),
     # ── Wind components (fetched separately for wspd10m derivation) ─────────
     "10u": VarSpec(
@@ -287,6 +289,8 @@ GFS_VARS: dict[str, VarSpec] = {
             }
         ),
         primary=True,
+        kind="continuous",
+        units="in",
     ),
 }
 
