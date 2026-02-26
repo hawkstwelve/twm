@@ -135,8 +135,8 @@ async def test_frame_loop_urls_emit_v4_runtime_paths(client: httpx.AsyncClient) 
     assert "/loop.webp?tier=1" in tier1_row["loop_webp_tier1_url"]
 
 
-async def test_v3_runtime_routes_are_retired(client: httpx.AsyncClient) -> None:
-    response = await client.get("/api/v3/hrrr/latest/radar_ptype/frames")
+async def test_legacy_runtime_routes_are_retired(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/legacy/hrrr/latest/radar_ptype/frames")
     assert response.status_code == 404
 
 

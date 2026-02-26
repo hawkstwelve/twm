@@ -74,7 +74,7 @@ HRRR_REGIONS: dict[str, RegionSpec] = {
 HRRR_VARS: dict[str, VarSpec] = {
     "tmp2m": VarSpec(
         id="tmp2m",
-        name="2m Temp",
+        name="Surface Temp",
         selectors=VarSelectors(
             search=[":TMP:2 m above ground:"],
             filter_by_keys={
@@ -92,7 +92,7 @@ HRRR_VARS: dict[str, VarSpec] = {
     ),
     "dp2m": VarSpec(
         id="dp2m",
-        name="2m Dew Point",
+        name="Surface Dew Point",
         selectors=VarSelectors(
             search=[":DPT:2 m above ground:"],
             filter_by_keys={
@@ -144,7 +144,7 @@ HRRR_VARS: dict[str, VarSpec] = {
     ),
     "precip_total": VarSpec(
         id="precip_total",
-        name="Total Precipitation",
+        name="Total Precip",
         selectors=VarSelectors(
             search=[":APCP:surface:"],
             filter_by_keys={
@@ -283,7 +283,7 @@ HRRR_VARS: dict[str, VarSpec] = {
     ),
     "radar_ptype": VarSpec(
         id="radar_ptype",
-        name="Composite Reflectivity + P-Type",
+        name="Composite Reflectivity + Ptype",
         selectors=VarSelectors(
             hints={
                 "display_kind": "radar_ptype",
@@ -322,8 +322,8 @@ HRRR_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
 HRRR_ORDER_BY_VAR_KEY: dict[str, int] = {
     "radar_ptype": 0,
     "tmp2m": 1,
-    "tmp850": 2,
-    "dp2m": 3,
+    "dp2m": 2,
+    "tmp850": 3,
     "precip_total": 4,
     "snowfall_total": 5,
     "wspd10m": 6,
@@ -386,7 +386,7 @@ HRRR_CAPABILITIES = ModelCapabilities(
         "fallback_lag_hours": 2,
     },
     ui_defaults={
-        "default_var_key": "tmp2m",
+        "default_var_key": "radar_ptype",
         "default_run": "latest",
     },
     ui_constraints={

@@ -147,7 +147,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
             className="h-8 border border-border/50 bg-secondary/40 px-2.5 text-xs font-medium text-foreground shadow-sm transition-all duration-150 hover:border-border hover:bg-secondary/60"
           >
             {basemapMode === "dark" ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
-            <span>{basemapMode === "dark" ? "Light" : "Dark"}</span>
+            <span>{basemapMode === "dark" ? "Dark" : "Light"}</span>
           </Button>
         </div>
       </div>

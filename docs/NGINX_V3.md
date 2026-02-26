@@ -29,4 +29,4 @@ V2 paths return `410 Gone`:
 - V2 `/data/*` is not exposed by nginx in current routing.
 - systemd units must use absolute venv paths (no pyenv shims).
 - Loop WebP runtime URLs are emitted as `/api/v4/{model}/{run}/{var}/{fh}/loop.webp?tier=...`.
-- `/api/v3/*` runtime endpoints are retired and should not be proxied for active clients.
+- Previous-version runtime endpoints are retired and should not be proxied for active clients.

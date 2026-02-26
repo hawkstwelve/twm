@@ -2,8 +2,8 @@ import { TILES_BASE } from "@/lib/config";
 import type { FrameRow } from "@/lib/api";
 
 function baseRoot() {
-  // Strip any accidental trailing /api/v3 or /tiles/v3 (or v2) so we can append paths cleanly.
-  return TILES_BASE.replace(/\/?(api\/v3|tiles\/v3|api\/v2|tiles\/v2)\/?$/i, "");
+  // Strip any trailing versioned API/tile suffix so we can append paths cleanly.
+  return TILES_BASE.replace(/\/?(api|tiles)\/v\d+\/?$/i, "");
 }
 
 export function normalizeTemplatePath(template: string): string {

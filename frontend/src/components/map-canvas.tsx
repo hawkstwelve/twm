@@ -882,9 +882,11 @@ export function MapCanvas({
       zoom: view.zoom,
       minZoom: view.minZoom ?? 3,
       maxZoom: view.maxZoom ?? 11,
+      attributionControl: false,
     });
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
     map.on("load", () => {
       setIsLoaded(true);

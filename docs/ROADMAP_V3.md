@@ -15,7 +15,7 @@ This eliminates runtime science logic from the tile-serving path, makes adding v
 - Frontend bootstrap contract: `GET /api/v4/capabilities` (single-call bootstrap).
 - Frontend runtime API calls: `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
 - Tile serving remains `/tiles/v3/*` (unchanged path; separate from API contract versioning).
-- `/api/v3/*` runtime contract is retired.
+- previous-version runtime contract is retired.
 
 ### Why V3 over the current systems
 
@@ -604,7 +604,7 @@ GET /api/v4/sample?model={model}&run={run}&var={var}&fh={fh}&lat={lat}&lon={lon}
 
 ### API v3 (retired)
 
-`/api/v3/*` runtime endpoints are retired and should not be used.
+Previous-version runtime endpoints are retired and should not be used.
 
 ---
 

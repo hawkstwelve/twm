@@ -2276,15 +2276,6 @@ export default function App() {
         const rows = await fetchFrames(model, framesRunKey, variable, { signal: controller.signal });
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setFrameRows(rows);
-        const frameMeta = extractLegendMeta(rows[0] ?? null);
-        const variableDisplayName = frameMeta?.display_name?.trim();
-        if (variableDisplayName && variable !== "precip_ptype") {
-          setVariables((prev) =>
-            prev.map((option) =>
-              option.value === variable ? { ...option, label: makeVariableLabel(option.value, variableDisplayName) } : option
-            )
-          );
-        }
         const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
         setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
         setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));

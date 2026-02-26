@@ -18,7 +18,7 @@ Target outcome:
 This refactor is an explicit API-version transition:
 1. Introduce `/api/v4/*` as the model-agnostic contract.
 2. Migrate frontend and scheduler integrations to `/api/v4/*` in the same refactor window.
-3. Deprecate and remove `/api/v3/*` within the same refactor stream (no long-lived dual-contract maintenance).
+3. Deprecate and remove previous-version runtime endpoints within the same refactor stream (no long-lived dual-contract maintenance).
 
 ## Goals
 1. Eliminate backend model-id branching outside model plugins and registry.
@@ -195,7 +195,7 @@ Notes:
    - source: plugin registry (supported models), not artifact availability.
 2. `GET /api/v4/{model}/{run}/vars`:
    - ordered and labeled using capabilities, intersected with manifest availability.
-3. `/api/v3/*` is deprecated and removed during this refactor sequence after `/api/v4/*` consumers are switched.
+3. Previous-version runtime endpoints are deprecated and removed during this refactor sequence after `/api/v4/*` consumers are switched.
 4. API contract must explicitly separate:
    - supported model existence (`supported_models`, registry) and detailed model metadata (`model_catalog`)
    - published data availability (`published_runs`, `latest_run`, disk/manifests)
@@ -243,7 +243,7 @@ Work:
 2. Keep `GET /api/v4/models/{model}/capabilities` as optional debug-focused endpoint.
 3. Remove hardcoded model names and var order maps in favor of capability lookup.
 4. Make `/vars` return capability labels and order with manifest intersection.
-5. Add `/api/v4/*` route set and remove `/api/v3/*` route usage in active consumers before `/api/v3/*` retirement.
+5. Add `/api/v4/*` route set and remove previous-version route usage in active consumers before retirement.
 6. Ensure response model explicitly separates `supported_models` and `model_catalog` from `availability`.
 7. Enforce invariant: `supported_models == Object.keys(model_catalog)`.
 
@@ -279,11 +279,11 @@ Work:
    - `/api/v4/{model}/{run}/{var}/{fh:int}/loop.webp`
    - `/api/v4/sample`
    - `/api/v4/{model}/{run}/{var}/{fh:int}/contours/{key}`
-2. Migrate frontend runtime calls from `/api/v3/*` to `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
+2. Migrate frontend runtime calls from previous-version endpoints to `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
 3. Keep `/tiles/v3/*` unchanged for this phase (tile contract is out of scope for API-version cutover).
 4. Update edge routing so `api.theweathermodels.com` proxies `/api/v4/*` with the same CORS/header behavior used for runtime APIs.
 5. Run production smoke tests on one model/var/run/FH across all runtime endpoints.
-6. Retire `/api/v3/*` runtime endpoints in the same refactor stream (no long-lived dual runtime contract).
+6. Retire previous-version runtime endpoints in the same refactor stream (no long-lived dual runtime contract).
 
 ## Phase 5: Guardrails and Docs
 Files:
@@ -322,7 +322,7 @@ Work:
 2. `GET /api/v4/capabilities` succeeds from public edge (not just localhost).
 3. One-model runtime checks pass for runs, manifest, vars, frames, sample, and loop-manifest on `/api/v4/*`.
 4. No empty-selector runtime requests are emitted (for example `model=&var=&fh=Infinity`).
-5. `/api/v3/*` runtime paths return 404 and no frontend runtime calls target v3.
+5. Previous-version runtime paths return 404 and no frontend runtime calls target legacy API routes.
 
 ### New model acceptance scenario
 1. Add synthetic plugin with one simple variable.
@@ -346,7 +346,7 @@ Work:
 3. Frontend runtime API calls use `/api/v4/*` (tiles remain `/tiles/v3/*`).
 4. Variable identity is enforced everywhere as `(model_id, var_key)` with no global var lookup paths.
 5. Derive execution uses registered strategy IDs, not inline plugin logic.
-6. `/api/v3/*` is removed or formally retired in the same refactor stream after `/api/v4/*` cutover.
+6. Previous-version runtime API is removed or formally retired in the same refactor stream after `/api/v4/*` cutover.
 7. API explicitly distinguishes supported model existence from published data availability.
 8. `colormaps.py` is palette-focused (`color_map_id` keyed) and variable metadata is model-scoped.
 9. Runtime metadata fallback through `VAR_SPECS` is retired.
@@ -369,11 +369,11 @@ Work:
 9. Add `GET /api/v4/capabilities` bootstrap endpoint plus optional per-model endpoint.
 10. Implement explicit `supported_models`, `model_catalog`, and availability (`published_runs`, `latest_run`) contract.
 11. Add and lock a capabilities schema v1 JSON example in docs.
-12. Migrate frontend bootstrap from `/api/v3` to single-call `/api/v4/capabilities`.
+12. Migrate frontend bootstrap from legacy endpoints to single-call `/api/v4/capabilities`.
 13. Add `/api/v4` runtime endpoint parity for runs, manifest, vars, frames, sample, loops, and contours.
-14. Migrate frontend runtime API calls from `/api/v3` to `/api/v4`.
+14. Migrate frontend runtime API calls from previous-version endpoints to `/api/v4`.
 15. Validate production edge routing for `/api/v4/*` and run v4 runtime smoke tests.
-16. Remove `/api/v3` routes in the same refactor stream.
+16. Remove previous-version routes in the same refactor stream.
 17. Add backend capability, identity, derive-registry, schema, and palette-resolution tests.
 18. Run backend tests and frontend smoke checks.
 19. Update roadmap references.
