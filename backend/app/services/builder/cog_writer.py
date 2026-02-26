@@ -289,9 +289,28 @@ def write_rgba_cog(
 
         if kind == "continuous" and levels:
             # Contract-compliant continuous: split bands, per-band overviews, reassemble
-            cog_path = _build_continuous_rgba_cog(
+            _build_continuous_rgba_cog(
                 rgba, tmp_dir_path, output_path, transform, levels,
             )
+            # Some GDAL builds do not always preserve source overviews through the
+            # VRT->COG path for very small grids. Fall back to a direct path so
+            # Gate 1 still has internal overviews to validate.
+            if not _has_internal_overviews(output_path):
+                logger.warning(
+                    "Continuous RGBA COG missing internal overviews; retrying with direct nearest overviews: %s",
+                    output_path,
+                )
+                tmp_gtiff = tmp_dir_path / "fallback_base.tif"
+                _write_base_gtiff(
+                    data=rgba, path=tmp_gtiff, transform=transform,
+                    count=4, dtype="uint8", nodata=None,
+                )
+                _run_gdal([
+                    _gdal("gdaladdo"), "-r", "nearest",
+                    "--config", "GDAL_TIFF_OVR_BLOCKSIZE", str(COG_BLOCKSIZE),
+                    str(tmp_gtiff), *[str(l) for l in levels],
+                ])
+                _gtiff_to_cog(tmp_gtiff, output_path)
         else:
             # Discrete/indexed or no overviews: simple single-file path
             tmp_gtiff = tmp_dir_path / "base.tif"
@@ -630,6 +649,14 @@ def _build_continuous_rgba_cog(
         "average(RGB) + nearest(alpha), levels=%s", levels,
     )
     return output_path
+
+
+def _has_internal_overviews(path: Path) -> bool:
+    try:
+        with rasterio.open(path) as src:
+            return len(src.overviews(1)) > 0
+    except Exception:
+        return False
 
 
 def _gtiff_to_cog(src_path: Path, dst_path: Path) -> None:
