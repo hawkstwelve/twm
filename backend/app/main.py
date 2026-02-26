@@ -42,7 +42,6 @@ LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
 LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "86"))
 LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
-LOOP_URL_PREFIX = str(os.environ.get("TWF_V3_LOOP_URL_PREFIX", "/loop/v3")).strip() or "/loop/v3"
 SAMPLE_CACHE_TTL_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_CACHE_TTL_SECONDS", "2.0"))
 SAMPLE_INFLIGHT_WAIT_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_INFLIGHT_WAIT_SECONDS", "0.2"))
 SAMPLE_RATE_LIMIT_WINDOW_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_RATE_LIMIT_WINDOW_SECONDS", "1.0"))
@@ -136,26 +135,13 @@ LOOP_MANIFEST_PROJECTION = "EPSG:4326"
 LOOP_MANIFEST_BBOX = [-125.0, 24.0, -66.5, 50.0]
 
 
-def _normalize_loop_url_prefix(prefix: str) -> str:
-    normalized = prefix.strip() or "/loop/v3"
-    if not normalized.startswith("/"):
-        normalized = "/" + normalized
-    normalized = normalized.rstrip("/")
-    return normalized or "/loop/v3"
-
-
-_LOOP_URL_PREFIX_NORMALIZED = _normalize_loop_url_prefix(LOOP_URL_PREFIX)
-
-
 def _loop_webp_url(model: str, run: str, var: str, fh: int, *, tier: int, version_token: str) -> str:
-    tier_segment = f"tier{tier}"
-    base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/{tier_segment}/fh{fh:03d}.loop.webp"
-    return f"{base}?v={version_token}"
+    base = f"/api/v4/{model}/{run}/{var}/{fh}/loop.webp"
+    return f"{base}?tier={tier}&v={version_token}"
 
 
 def _legacy_loop_webp_url(model: str, run: str, var: str, fh: int, *, version_token: str) -> str:
-    base = f"{_LOOP_URL_PREFIX_NORMALIZED}/{model}/{run}/{var}/fh{fh:03d}.loop.webp"
-    return f"{base}?v={version_token}"
+    return _loop_webp_url(model, run, var, fh, tier=0, version_token=version_token)
 
 
 def _resolve_existing_loop_urls(
