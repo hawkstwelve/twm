@@ -26,6 +26,7 @@ from rasterio.enums import Resampling
 from rasterio.windows import Window
 
 from .config.regions import REGION_PRESETS
+from .models.registry import MODEL_REGISTRY, list_model_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -33,26 +34,7 @@ DATA_ROOT = Path(os.environ.get("TWF_V3_DATA_ROOT", "./data/v3"))
 PUBLISHED_ROOT = DATA_ROOT / "published"
 MANIFESTS_ROOT = DATA_ROOT / "manifests"
 LOOP_CACHE_ROOT = Path(os.environ.get("TWF_V3_LOOP_CACHE_ROOT", "/tmp/twf_v3_loop_webp_cache"))
-
-MODEL_NAMES = {
-    "hrrr": "HRRR",
-    "gfs": "GFS",
-    "ecmwf": "ECMWF",
-    "nam": "NAM",
-}
-
-VAR_ORDER_BY_MODEL = {
-    "hrrr": [
-        "tmp2m",
-        "tmp850",
-        "dp2m",
-        "precip_total",
-        "snowfall_total",
-        "wspd10m",
-        "wgst10m",
-        "radar_ptype",
-    ],
-}
+CAPABILITIES_CONTRACT_VERSION = "v1"
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 _JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
@@ -306,6 +288,120 @@ def _scan_manifest_runs(model: str) -> list[str]:
             continue
         runs.append(run_id)
     return sorted(set(runs), reverse=True)
+
+
+def _model_name(model_id: str, capabilities_by_model: dict[str, Any] | None = None) -> str:
+    capabilities = (capabilities_by_model or {}).get(model_id)
+    if capabilities is not None:
+        return str(getattr(capabilities, "name", model_id.upper()))
+    plugin = MODEL_REGISTRY.get(model_id)
+    if plugin is not None:
+        return str(getattr(plugin, "name", model_id.upper()))
+    return model_id.upper()
+
+
+def _serialize_variable_capability(capability: Any) -> dict[str, Any]:
+    constraints = getattr(capability, "constraints", None)
+    constraints_payload = dict(constraints) if isinstance(constraints, dict) else {}
+    return {
+        "var_key": str(getattr(capability, "var_key", "")),
+        "display_name": str(getattr(capability, "name", "")),
+        "kind": getattr(capability, "kind", None),
+        "units": getattr(capability, "units", None),
+        "order": getattr(capability, "order", None),
+        "default_fh": getattr(capability, "default_fh", None),
+        "buildable": bool(getattr(capability, "buildable", False)),
+        "color_map_id": getattr(capability, "color_map_id", None),
+        "constraints": constraints_payload,
+        "derived": bool(getattr(capability, "derived", False)),
+        "derive_strategy_id": getattr(capability, "derive_strategy_id", None),
+    }
+
+
+def _serialize_model_capability(model_id: str, capability: Any) -> dict[str, Any]:
+    variable_catalog = getattr(capability, "variable_catalog", {}) or {}
+    ordered_items = sorted(
+        variable_catalog.items(),
+        key=lambda item: (
+            getattr(item[1], "order", None) is None,
+            getattr(item[1], "order", 0) if getattr(item[1], "order", None) is not None else 0,
+            item[0],
+        ),
+    )
+    variables_payload = {
+        var_key: _serialize_variable_capability(var_capability)
+        for var_key, var_capability in ordered_items
+    }
+
+    defaults = getattr(capability, "ui_defaults", None)
+    constraints = getattr(capability, "ui_constraints", None)
+    run_discovery = getattr(capability, "run_discovery", None)
+    return {
+        "model_id": model_id,
+        "name": str(getattr(capability, "name", model_id.upper())),
+        "product": getattr(capability, "product", None),
+        "canonical_region": getattr(capability, "canonical_region", None),
+        "defaults": dict(defaults) if isinstance(defaults, dict) else {},
+        "constraints": dict(constraints) if isinstance(constraints, dict) else {},
+        "run_discovery": dict(run_discovery) if isinstance(run_discovery, dict) else {},
+        "variables": variables_payload,
+    }
+
+
+def _availability_for_models(model_ids: list[str]) -> dict[str, dict[str, Any]]:
+    availability: dict[str, dict[str, Any]] = {}
+    for model_id in model_ids:
+        published_runs = _scan_manifest_runs(model_id)
+        availability[model_id] = {
+            "latest_run": _resolve_latest_run(model_id),
+            "published_runs": published_runs,
+        }
+    return availability
+
+
+def _build_capabilities_payload() -> dict[str, Any]:
+    capabilities_by_model = list_model_capabilities()
+    model_catalog = {
+        model_id: _serialize_model_capability(model_id, capability)
+        for model_id, capability in sorted(capabilities_by_model.items(), key=lambda item: item[0])
+    }
+    supported_models = sorted(model_catalog.keys())
+    availability = _availability_for_models(supported_models)
+    return {
+        "contract_version": CAPABILITIES_CONTRACT_VERSION,
+        "supported_models": supported_models,
+        "model_catalog": model_catalog,
+        "availability": availability,
+    }
+
+
+def _ordered_manifest_var_keys(model: str, manifest_vars: dict[str, Any]) -> list[str]:
+    if not manifest_vars:
+        return []
+    capability_map = list_model_capabilities().get(model)
+    if capability_map is None:
+        return sorted(manifest_vars.keys())
+
+    variable_catalog = getattr(capability_map, "variable_catalog", {}) or {}
+    known: list[str] = []
+    unknown: list[str] = []
+    for var_key in manifest_vars.keys():
+        if var_key in variable_catalog:
+            known.append(var_key)
+        else:
+            unknown.append(var_key)
+
+    known.sort(
+        key=lambda key: (
+            getattr(variable_catalog[key], "order", None) is None,
+            getattr(variable_catalog[key], "order", 0)
+            if getattr(variable_catalog[key], "order", None) is not None
+            else 0,
+            key,
+        )
+    )
+    unknown.sort()
+    return known + unknown
 
 
 def _resolve_latest_run(model: str) -> str | None:
@@ -593,6 +689,11 @@ def root():
     return {"service": "twf-v3-api", "version": "2.0.0"}
 
 
+@app.get("/api/v4")
+def root_v4():
+    return {"service": "twf-v4-api", "version": "4.0.0", "capabilities_contract": CAPABILITIES_CONTRACT_VERSION}
+
+
 @app.get("/api/regions")
 def list_region_presets(request: Request):
     payload = {"regions": REGION_PRESETS}
@@ -610,6 +711,83 @@ def list_region_presets(request: Request):
     )
 
 
+@app.get("/api/v4/models")
+def list_models_v4(request: Request):
+    capabilities_payload = _build_capabilities_payload()
+    supported_models = capabilities_payload["supported_models"]
+    model_catalog = capabilities_payload["model_catalog"]
+    availability = capabilities_payload["availability"]
+    payload = [
+        {
+            "id": model_id,
+            "name": model_catalog.get(model_id, {}).get("name", model_id.upper()),
+            "latest_run": availability.get(model_id, {}).get("latest_run"),
+            "published_runs": availability.get(model_id, {}).get("published_runs", []),
+        }
+        for model_id in supported_models
+    ]
+    cache_control = "public, max-age=60"
+    etag = _make_etag(payload)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+    return JSONResponse(
+        content=payload,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag,
+        },
+    )
+
+
+@app.get("/api/v4/capabilities")
+def get_capabilities_v4(request: Request):
+    payload = _build_capabilities_payload()
+    cache_control = "public, max-age=60"
+    etag = _make_etag(payload)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+    return JSONResponse(
+        content=payload,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag,
+        },
+    )
+
+
+@app.get("/api/v4/models/{model}/capabilities")
+def get_model_capabilities_v4(request: Request, model: str):
+    model_id = model.strip().lower()
+    payload = _build_capabilities_payload()
+    model_catalog = payload["model_catalog"]
+    if model_id not in model_catalog:
+        raise HTTPException(status_code=404, detail=f"Unknown model: {model_id}")
+
+    model_payload = {
+        "contract_version": payload["contract_version"],
+        "model_id": model_id,
+        "capabilities": model_catalog[model_id],
+        "availability": payload["availability"].get(
+            model_id,
+            {"latest_run": None, "published_runs": []},
+        ),
+    }
+    cache_control = "public, max-age=60"
+    etag = _make_etag(model_payload)
+    r304 = _maybe_304(request, etag=etag, cache_control=cache_control)
+    if r304 is not None:
+        return r304
+    return JSONResponse(
+        content=model_payload,
+        headers={
+            "Cache-Control": cache_control,
+            "ETag": etag,
+        },
+    )
+
+
 @app.get("/api/v3/models")
 def list_models():
     models: set[str] = set()
@@ -617,8 +795,15 @@ def list_models():
         models.update(child.name for child in MANIFESTS_ROOT.iterdir() if child.is_dir())
     if PUBLISHED_ROOT.is_dir():
         models.update(child.name for child in PUBLISHED_ROOT.iterdir() if child.is_dir())
+    capabilities_by_model = list_model_capabilities()
     model_ids = sorted(models)
-    return [{"id": model_id, "name": MODEL_NAMES.get(model_id, model_id.upper())} for model_id in model_ids]
+    return [
+        {
+            "id": model_id,
+            "name": _model_name(model_id, capabilities_by_model),
+        }
+        for model_id in model_ids
+    ]
 
 
 @app.get("/api/v3/{model}/runs")
@@ -663,11 +848,12 @@ def get_manifest(request: Request, model: str, run: str):
 
 @app.get("/api/v3/{model}/{run}/vars")
 def list_vars(model: str, run: str):
-    resolved = _resolve_run(model, run)
+    model_id = model.strip().lower()
+    resolved = _resolve_run(model_id, run)
     if resolved is None:
         return Response(status_code=404, content='{"error": "run not found"}', media_type="application/json")
 
-    manifest = _load_manifest(model, resolved)
+    manifest = _load_manifest(model_id, resolved)
     if manifest is None:
         return Response(status_code=404, content='{"error": "manifest not found"}', media_type="application/json")
 
@@ -675,19 +861,15 @@ def list_vars(model: str, run: str):
     if not isinstance(variables, dict):
         return []
 
-    from .services.colormaps import VAR_SPECS
-
-    priority = VAR_ORDER_BY_MODEL.get(model, [])
-    priority_index = {var_id: idx for idx, var_id in enumerate(priority)}
-    ordered_var_ids = sorted(
-        variables.keys(),
-        key=lambda var_id: (priority_index.get(var_id, len(priority_index)), var_id),
-    )
+    ordered_var_ids = _ordered_manifest_var_keys(model_id, variables)
+    model_capability = list_model_capabilities().get(model_id)
+    variable_catalog = getattr(model_capability, "variable_catalog", {}) if model_capability is not None else {}
 
     result = []
     for var_id in ordered_var_ids:
-        spec = VAR_SPECS.get(var_id, {})
-        result.append({"id": var_id, "display_name": spec.get("display_name", var_id)})
+        capability = variable_catalog.get(var_id) if isinstance(variable_catalog, dict) else None
+        display_name = getattr(capability, "name", None) if capability is not None else None
+        result.append({"id": var_id, "display_name": display_name or var_id})
     return result
 
 
