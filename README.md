@@ -1,4 +1,4 @@
-# TWF Models V3
+# The Weather Models (TWM)
 
 A weather model tile pipeline and interactive map viewer. The system ingests GRIB2 output from NWP models (HRRR, optionally GFS), produces Cloud Optimized GeoTIFF (COG) artifacts, and serves them through a tile API and an animated loop frontend.
 
