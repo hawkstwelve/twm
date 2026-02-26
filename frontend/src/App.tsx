@@ -954,6 +954,11 @@ export default function App() {
     }
     return loopFrameHours.every((fh) => Boolean(loopTier0UrlByHour.get(fh) ?? loopUrlByHour.get(fh)));
   }, [loopFrameHours, loopTier0UrlByHour, loopUrlByHour]);
+  const isHighDetailZoom = useMemo(() => {
+    const effectiveZoom = getEffectiveZoom(mapZoom);
+    const highDetailCutoff = WEBP_RENDER_MODE_THRESHOLDS.tier1Max + WEBP_RENDER_MODE_THRESHOLDS.hysteresis;
+    return effectiveZoom > highDetailCutoff;
+  }, [mapZoom]);
 
   useEffect(() => {
     mapZoomRef.current = mapZoom;
@@ -2544,16 +2549,22 @@ export default function App() {
     }
 
     if (renderMode === "tiles") {
-      setIsPlaying(false);
-      setIsLoopAutoplayBuffering(false);
-      setIsLoopPreloading(false);
-      setIsPreloadingForPlay(false);
-      if (canUseLoopPlayback) {
+      if (canUseLoopPlayback && isHighDetailZoom) {
+        setIsPlaying(false);
+        setIsLoopAutoplayBuffering(false);
+        setIsLoopPreloading(false);
+        setIsPreloadingForPlay(false);
         showTransientFrameStatus("High detail mode — zoom out for smooth loop");
-      } else {
-        showTransientFrameStatus("Loop unavailable for this variable/run — showing tiles");
+        return;
       }
-      return;
+      if (!canUseLoopPlayback) {
+        setIsPlaying(false);
+        setIsLoopAutoplayBuffering(false);
+        setIsLoopPreloading(false);
+        setIsPreloadingForPlay(false);
+        showTransientFrameStatus("Loop unavailable for this variable/run — showing tiles");
+        return;
+      }
     }
 
     if (canUseLoopPlayback && webpDefaultEnabled) {
@@ -2593,6 +2604,7 @@ export default function App() {
     playbackPolicy.minAheadWhilePlaying,
     playbackPolicy.minStartBuffer,
     canUseLoopPlayback,
+    isHighDetailZoom,
     webpDefaultEnabled,
     renderMode,
     showTransientFrameStatus,
@@ -2775,7 +2787,7 @@ export default function App() {
           </div>
         )}
 
-        {renderMode === "tiles" && canUseLoopPlayback && (
+        {renderMode === "tiles" && canUseLoopPlayback && isHighDetailZoom && (
           <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
             <AlertCircle className="h-3.5 w-3.5" />
             High detail mode — zoom out for smooth loop
