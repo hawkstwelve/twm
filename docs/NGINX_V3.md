@@ -30,3 +30,5 @@ V2 paths return `410 Gone`:
 ## Notes
 - V2 `/data/*` is not exposed by nginx in V3 routing.
 - systemd units must use absolute venv paths (no pyenv shims).
+- Loop WebP runtime URLs are emitted as `/api/v4/{model}/{run}/{var}/{fh}/loop.webp?tier=...`.
+- Legacy `/loop/v3/*` static alias blocks can be retained temporarily, then removed after traffic confirms no active usage.

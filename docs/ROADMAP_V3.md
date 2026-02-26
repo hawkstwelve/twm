@@ -10,6 +10,13 @@ Plus a parallel float32 value-grid artifact for hover/sampling.
 
 This eliminates runtime science logic from the tile-serving path, makes adding variables a single-spec change, and enables CONUS-wide zoomable, animatable, hover-for-data weather maps.
 
+### Current Contract Status (Updated February 26, 2026)
+
+- Frontend bootstrap contract: `GET /api/v4/capabilities` (single-call bootstrap).
+- Frontend runtime API calls: `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
+- Tile serving remains `/tiles/v3/*` (unchanged path; separate from API contract versioning).
+- `/api/v3/*` remains available only as transitional compatibility and should be treated as legacy.
+
 ### Why V3 over the current systems
 
 | Problem | V2 (webp offline) | V2 (TiTiler legacy) | V3 |
@@ -206,9 +213,11 @@ python -m backend.app.services.builder.pipeline --model hrrr --region pnw --var 
 **Frontend config for local dev** (`frontend/models-v3/src/lib/config.ts`):
 
 ```typescript
-const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-export const API_BASE = isLocal ? "http://127.0.0.1:8200/api/v3" : "https://api.theweathermodels.com/api/v3";
-export const TILES_BASE = isLocal ? "http://127.0.0.1:8201" : "https://api.theweathermodels.com";
+export const API_V3_BASE = "https://api.theweathermodels.com/api/v3";
+export const API_V4_BASE = API_V3_BASE.replace(/\/api\/v3$/i, "/api/v4");
+export const RUNTIME_API_VERSION = (import.meta.env.VITE_TWF_RUNTIME_API_VERSION ?? "v4").toLowerCase();
+export const RUNTIME_API_BASE = RUNTIME_API_VERSION === "v3" ? API_V3_BASE : API_V4_BASE;
+export const TILES_BASE = "https://api.theweathermodels.com";
 ```
 
 **Cleanup on local machine:**
@@ -573,25 +582,32 @@ Atomic write via `tmp → rename` (same pattern as current V2).
 ### Tiles
 
 ```
-GET /tiles/v3/{model}/{region}/{run}/{var}/{fh}/{z}/{x}/{y}.png
+GET /tiles/v3/{model}/{run}/{var}/{fh}/{z}/{x}/{y}.png
 ```
 
-Same pattern as current V2 tiles — frontend wiring is minimal change.
+Tiles remain on `/tiles/v3/*` during API v4 migration.
 
-### Discovery API
-
-```
-GET /api/v3/models
-GET /api/v3/{model}/regions
-GET /api/v3/{model}/{region}/runs
-GET /api/v3/{model}/{region}/{run}/manifest
-GET /api/v3/{model}/{region}/{run}/{var}/frames
-```
-
-### Sampling API
+### API v4 (current)
 
 ```
-GET /api/v3/sample?model={model}&region={region}&run={run}&var={var}&fh={fh}&lat={lat}&lon={lon}
+GET /api/v4
+GET /api/v4/models
+GET /api/v4/capabilities
+GET /api/v4/models/{model}/capabilities
+GET /api/v4/{model}/runs
+GET /api/v4/{model}/{run}/manifest
+GET /api/v4/{model}/{run}/vars
+GET /api/v4/{model}/{run}/{var}/frames
+GET /api/v4/{model}/{run}/{var}/loop-manifest
+GET /api/v4/{model}/{run}/{var}/{fh}/loop.webp?tier={0|1}
+GET /api/v4/{model}/{run}/{var}/{fh}/contours/{key}
+GET /api/v4/sample?model={model}&run={run}&var={var}&fh={fh}&lat={lat}&lon={lon}
+```
+
+### API v3 (legacy transitional)
+
+```
+`/api/v3/*` is still routable for compatibility but should not be used for new frontend/runtime paths.
 ```
 
 ---
@@ -999,6 +1015,13 @@ location /models-v3/ {
 
 # V3 API (discovery + sampling)
 location /api/v3/ {
+    proxy_pass http://127.0.0.1:8200;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+
+# V4 API (bootstrap + runtime)
+location /api/v4/ {
     proxy_pass http://127.0.0.1:8200;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
