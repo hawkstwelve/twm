@@ -326,7 +326,7 @@ def fetch_variable(
 
 # ---------------------------------------------------------------------------
 # Unit conversions
-# Keyed by (model, var_id) or just var_id for model-agnostic conversions.
+# Keyed by conversion id, (model_id, var_key), or legacy var_key.
 # Each converter takes a float32 array (in-place safe) and returns float32.
 # ---------------------------------------------------------------------------
 
@@ -358,11 +358,17 @@ def _kgm2_to_inches(data: np.ndarray) -> np.ndarray:
     return data * 0.03937007874015748
 
 
-# Registry: var_id → converter function
+# Registry: conversion-key -> converter function.
 # Variables not listed here need no conversion (GRIB units match spec units).
 # NOTE: GDAL's GRIB driver applies GRIB_NORMALIZE_UNITS=YES by default,
 # so temperatures arrive in °C (not K) and wind speeds in m/s.
-UNIT_CONVERTERS: dict[str, Any] = {
+UNIT_CONVERTERS: dict[tuple[str, str] | str, Any] = {
+    # Conversion IDs for capability metadata
+    "c_to_f": _celsius_to_fahrenheit,
+    "ms_to_mph": _ms_to_mph,
+    "m_to_in": _meters_to_inches,
+    "kgm2_to_in": _kgm2_to_inches,
+    # Legacy var-key fallback path
     "tmp2m": _celsius_to_fahrenheit,
     "dp2m": _celsius_to_fahrenheit,
     "wspd10m": _ms_to_mph,
@@ -372,14 +378,34 @@ UNIT_CONVERTERS: dict[str, Any] = {
 }
 
 
-def convert_units(data: np.ndarray, var_id: str) -> np.ndarray:
+def convert_units(
+    data: np.ndarray,
+    var_key: str,
+    *,
+    model_id: str | None = None,
+    var_capability: Any | None = None,
+) -> np.ndarray:
     """Apply unit conversion for a variable if one is registered.
 
     Returns a new array (or the original if no conversion needed).
     """
-    converter = UNIT_CONVERTERS.get(var_id)
+    converter = None
+
+    # Authoritative path: conversion id set in model capability metadata.
+    conversion_id = getattr(var_capability, "conversion", None) if var_capability is not None else None
+    if isinstance(conversion_id, str) and conversion_id:
+        converter = UNIT_CONVERTERS.get(conversion_id)
+
+    # Optional model-specific override fallback.
+    if converter is None and isinstance(model_id, str) and model_id:
+        converter = UNIT_CONVERTERS.get((model_id, var_key))
+
+    # Legacy fallback for existing callers/vars.
+    if converter is None:
+        converter = UNIT_CONVERTERS.get(var_key)
+
     if converter is None:
         return data
     result = converter(data.astype(np.float32, copy=True))
-    logger.debug("Unit conversion applied for %s", var_id)
+    logger.debug("Unit conversion applied for model=%s var=%s", model_id, var_key)
     return result

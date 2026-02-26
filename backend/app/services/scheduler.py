@@ -31,8 +31,6 @@ INCOMPLETE_RUN_POLL_SECONDS = 60
 DEFAULT_PROMOTION_FHS = (0, 1, 2)
 DEFAULT_PROBE_VAR = "tmp2m"
 CANONICAL_COVERAGE = "conus"
-DEFAULT_HRRR_PROBE_ATTEMPTS = 4
-MAX_HRRR_PROBE_ATTEMPTS = 6
 ENV_DEFAULT_VARS = "TWF_V3_SCHEDULER_VARS"
 ENV_DEFAULT_PRIMARY_VARS = "TWF_V3_SCHEDULER_PRIMARY_VARS"
 ENV_DEFAULT_POLL_SECONDS = "TWF_V3_SCHEDULER_POLL_SECONDS"
@@ -140,6 +138,14 @@ def _bool_from_env(env_name: str, fallback: bool) -> bool:
     return fallback
 
 
+def _int_or_default(value: Any, default: int, *, minimum: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
+
+
 def _resolve_model(model_id: str):
     plugin = MODEL_REGISTRY.get(model_id)
     if plugin is None:
@@ -153,6 +159,13 @@ def _resolve_vars_to_schedule(plugin, requested: list[str]) -> list[str]:
     if requested:
         for raw in requested:
             normalized = plugin.normalize_var_id(raw)
+            capability = plugin.get_var_capability(normalized)
+            if capability is not None:
+                if not bool(getattr(capability, "buildable", False)):
+                    logger.info("Skipping non-buildable var: %s", normalized)
+                    continue
+                resolved.append(normalized)
+                continue
             spec = plugin.get_var(normalized)
             if spec is None:
                 logger.warning("Skipping unknown var for model=%s: %s", plugin.id, raw)
@@ -165,6 +178,11 @@ def _resolve_vars_to_schedule(plugin, requested: list[str]) -> list[str]:
 
     for var_id, spec in plugin.vars.items():
         normalized = plugin.normalize_var_id(var_id)
+        capability = plugin.get_var_capability(normalized)
+        if capability is not None:
+            if bool(getattr(capability, "buildable", False)):
+                resolved.append(normalized)
+            continue
         if plugin.get_var(normalized) is None:
             continue
         if bool(getattr(spec, "primary", False)) or bool(getattr(spec, "derived", False)):
@@ -173,16 +191,21 @@ def _resolve_vars_to_schedule(plugin, requested: list[str]) -> list[str]:
 
 
 def _probe_search_pattern(plugin: Any, probe_var: str) -> str:
-    probe_var_id = plugin.normalize_var_id(probe_var)
-    probe_spec = plugin.get_var(probe_var_id)
-    if probe_spec is None:
+    probe_var_key = plugin.normalize_var_id(probe_var)
+    probe_capability = plugin.get_var_capability(probe_var_key)
+    probe_spec = plugin.get_var(probe_var_key)
+    if probe_capability is None and probe_spec is None:
         raise SchedulerConfigError(f"Probe var {probe_var!r} not found for model={plugin.id}")
 
-    selectors = getattr(probe_spec, "selectors", None)
+    selectors = (
+        getattr(probe_capability, "selectors", None)
+        if probe_capability is not None
+        else getattr(probe_spec, "selectors", None)
+    )
     searches = getattr(selectors, "search", None) if selectors is not None else None
     if not searches:
         raise SchedulerConfigError(
-            f"Probe var {probe_var_id!r} has no search pattern and cannot be used for run probing"
+            f"Probe var {probe_var_key!r} has no search pattern and cannot be used for run probing"
         )
     return str(searches[0])
 
@@ -197,7 +220,7 @@ def _probe_run_exists(*, plugin: Any, run_dt: datetime, probe_var: str) -> bool:
         priorities = ["aws", "nomads", "google", "azure", "pando", "pando2"]
 
     herbie_date = run_dt.replace(tzinfo=None) if run_dt.tzinfo else run_dt
-    probe_var_id = plugin.normalize_var_id(probe_var)
+    probe_var_key = plugin.normalize_var_id(probe_var)
     last_exc: Exception | None = None
     for priority in priorities:
         try:
@@ -214,7 +237,7 @@ def _probe_run_exists(*, plugin: Any, run_dt: datetime, probe_var: str) -> bool:
                     "Run probe success: model=%s run=%s probe_var=%s priority=%s",
                     plugin.id,
                     _run_id_from_dt(run_dt),
-                    probe_var_id,
+                    probe_var_key,
                     priority,
                 )
                 return True
@@ -226,39 +249,49 @@ def _probe_run_exists(*, plugin: Any, run_dt: datetime, probe_var: str) -> bool:
         "Run probe miss: model=%s run=%s probe_var=%s priorities=%s (%s)",
         plugin.id,
         _run_id_from_dt(run_dt),
-        probe_var_id,
+        probe_var_key,
         priorities,
         last_exc,
     )
     return False
 
 
-def _resolve_latest_run_dt(model_id: str, *, plugin: Any, probe_var: str) -> datetime:
+def _align_to_cycle_hour(run_dt: datetime, cadence_hours: int) -> datetime:
+    cadence = max(1, int(cadence_hours))
+    aligned_hour = (run_dt.hour // cadence) * cadence
+    return run_dt.replace(hour=aligned_hour, minute=0, second=0, microsecond=0)
+
+
+def _resolve_latest_run_dt(*, plugin: Any, probe_var: str | None) -> datetime:
     now = datetime.now(timezone.utc)
-    if model_id == "hrrr":
-        base = now.replace(minute=0, second=0, microsecond=0)
-        attempts = min(max(DEFAULT_HRRR_PROBE_ATTEMPTS, 1), MAX_HRRR_PROBE_ATTEMPTS)
-        for offset in range(attempts):
-            candidate = base - timedelta(hours=offset)
+    run_discovery = plugin.run_discovery_config()
+    cadence_hours = _int_or_default(run_discovery.get("cycle_cadence_hours"), 1, minimum=1)
+    probe_enabled = bool(run_discovery.get("probe_enabled", False))
+    probe_attempts = _int_or_default(run_discovery.get("probe_attempts"), 1, minimum=1)
+    fallback_lag_hours = _int_or_default(run_discovery.get("fallback_lag_hours"), 3, minimum=0)
+
+    if probe_enabled and probe_var:
+        base = _align_to_cycle_hour(now, cadence_hours)
+        for offset in range(probe_attempts):
+            candidate = base - timedelta(hours=offset * cadence_hours)
             if _probe_run_exists(plugin=plugin, run_dt=candidate, probe_var=probe_var):
                 return candidate
-        target = now - timedelta(hours=2)
-        fallback = target.replace(minute=0, second=0, microsecond=0)
+        fallback = _align_to_cycle_hour(now - timedelta(hours=fallback_lag_hours), cadence_hours)
         logger.warning(
-            "HRRR probe failed after %d attempts; falling back to heuristic run=%s",
-            attempts,
+            "Run probe failed after %d attempts for model=%s; falling back to run=%s",
+            probe_attempts,
+            plugin.id,
             _run_id_from_dt(fallback),
         )
         return fallback
-    if model_id == "gfs":
-        target = now - timedelta(hours=5)
-        cycle_hour = (target.hour // 6) * 6
-        return target.replace(hour=cycle_hour, minute=0, second=0, microsecond=0)
-    target = now - timedelta(hours=3)
-    return target.replace(minute=0, second=0, microsecond=0)
+
+    if probe_enabled and not probe_var:
+        logger.warning("Run probe requested for model=%s but no probe var resolved; using heuristic", plugin.id)
+    target = now - timedelta(hours=fallback_lag_hours)
+    return _align_to_cycle_hour(target, cadence_hours)
 
 
-def _resolve_run_dt(run_arg: str | None, model_id: str, *, plugin: Any, probe_var: str) -> datetime:
+def _resolve_run_dt(run_arg: str | None, *, plugin: Any, probe_var: str | None) -> datetime:
     if run_arg:
         parsed = _parse_run_id_datetime(run_arg)
         if parsed is None:
@@ -266,17 +299,18 @@ def _resolve_run_dt(run_arg: str | None, model_id: str, *, plugin: Any, probe_va
                 f"Invalid --run value {run_arg!r}. Expected YYYYMMDD_HHz (e.g. 20260217_06z)."
             )
         return parsed
-    return _resolve_latest_run_dt(model_id, plugin=plugin, probe_var=probe_var)
+    return _resolve_latest_run_dt(plugin=plugin, probe_var=probe_var)
 
 
 def _scheduled_targets_for_cycle(plugin, vars_to_build: list[str], cycle_hour: int) -> list[tuple[str, int]]:
-    fhs = list(plugin.target_fhs(cycle_hour))
     targets: list[tuple[str, int]] = []
     for var_id in vars_to_build:
-        min_fh = 6 if plugin.id == "gfs" and var_id == "qpf6h" else 0
+        fhs = (
+            list(plugin.scheduled_fhs_for_var(var_id, cycle_hour))
+            if hasattr(plugin, "scheduled_fhs_for_var")
+            else [int(fh) for fh in plugin.target_fhs(cycle_hour)]
+        )
         for fh in fhs:
-            if fh < min_fh:
-                continue
             targets.append((var_id, int(fh)))
     return targets
 
@@ -711,7 +745,7 @@ def run_scheduler(
     poll_seconds: int,
     run_arg: str | None,
     once: bool,
-    probe_var: str,
+    probe_var: str | None,
     loop_pregenerate_enabled: bool,
     loop_cache_root: Path,
     loop_workers: int,
@@ -733,6 +767,11 @@ def run_scheduler(
     resolved_primary: list[str] = []
     for item in primary_vars:
         normalized = plugin.normalize_var_id(item)
+        capability = plugin.get_var_capability(normalized)
+        if capability is not None:
+            if bool(getattr(capability, "buildable", False)):
+                resolved_primary.append(normalized)
+            continue
         if plugin.get_var(normalized) is not None:
             resolved_primary.append(normalized)
     resolved_primary = _dedupe_preserve_order(resolved_primary)
@@ -743,13 +782,17 @@ def run_scheduler(
         else:
             resolved_primary = [normalized_vars[0]]
 
+    resolved_probe_var = plugin.resolve_probe_var_key(probe_var)
+    if resolved_probe_var is None:
+        resolved_probe_var = plugin.resolve_probe_var_key(DEFAULT_PROBE_VAR)
+
     logger.info(
         "Scheduler starting model=%s coverage=%s vars=%s primary=%s probe_var=%s data_root=%s workers=%d poll_incomplete=%ds poll_complete=%ds",
         model,
         CANONICAL_COVERAGE,
         normalized_vars,
         resolved_primary,
-        plugin.normalize_var_id(probe_var),
+        resolved_probe_var or "none",
         data_root,
         workers,
         INCOMPLETE_RUN_POLL_SECONDS,
@@ -760,7 +803,7 @@ def run_scheduler(
     last_run_available: int = 0
     last_run_total: int = 0
     while True:
-        run_dt = _resolve_run_dt(run_arg, model, plugin=plugin, probe_var=probe_var)
+        run_dt = _resolve_run_dt(run_arg, plugin=plugin, probe_var=resolved_probe_var)
         run_id = _run_id_from_dt(run_dt)
 
         run_complete = last_run_total > 0 and last_run_available >= last_run_total
@@ -814,7 +857,7 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=None, help="Parallel frame workers")
     parser.add_argument("--keep-runs", type=int, default=None, help="Retention count for staging/published runs")
     parser.add_argument("--poll-seconds", type=int, default=None, help="Poll interval in loop mode")
-    parser.add_argument("--probe-var", default=None, help="Var id used to probe run availability (default: tmp2m)")
+    parser.add_argument("--probe-var", default=None, help="Var key used to probe run availability")
     parser.add_argument("--run", default=None, help="Explicit run id YYYYMMDD_HHz; implies one-shot")
     parser.add_argument("--once", action="store_true", help="Build one cycle then exit")
     return parser.parse_args(argv)
@@ -842,11 +885,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.keep_runs is not None
         else _int_from_env(ENV_DEFAULT_KEEP_RUNS, 2, min_value=1)
     )
-    probe_var = (
-        args.probe_var
-        if isinstance(args.probe_var, str) and args.probe_var.strip()
-        else os.getenv(ENV_PROBE_VAR, DEFAULT_PROBE_VAR)
-    )
+    probe_var = None
+    if isinstance(args.probe_var, str) and args.probe_var.strip():
+        probe_var = args.probe_var
+    else:
+        probe_var_env = os.getenv(ENV_PROBE_VAR, "").strip()
+        if probe_var_env:
+            probe_var = probe_var_env
     loop_pregenerate_enabled = _bool_from_env(ENV_LOOP_PREGENERATE_ENABLED, DEFAULT_LOOP_PREGENERATE_ENABLED)
     loop_cache_root = Path(os.getenv(ENV_LOOP_CACHE_ROOT, str(DEFAULT_LOOP_CACHE_ROOT))).resolve()
     loop_workers = _int_from_env(

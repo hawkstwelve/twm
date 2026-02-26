@@ -28,6 +28,7 @@ import subprocess
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -48,7 +49,7 @@ from app.services.builder.fetch import (
     convert_units,
     fetch_variable,
 )
-from app.services.colormaps import VAR_SPECS
+from app.services.colormaps import get_color_map_spec
 
 logger = logging.getLogger(__name__)
 
@@ -736,21 +737,28 @@ def build_frame(
     logger.info("Building frame: %s/%s/%s/%s (coverage=%s)", model, run_id, var_id, fh_str, region)
 
     # --- Resolve specs ---
-    var_spec_colormap = VAR_SPECS.get(var_id)
-    if var_spec_colormap is None:
-        logger.error("No colormap spec (VAR_SPECS) for var_id=%r", var_id)
+    resolved_plugin = model_plugin or _resolve_model_plugin(model)
+    var_key = resolved_plugin.normalize_var_id(var_id)
+    var_spec_model = _resolve_model_var_spec(model, var_key, resolved_plugin)
+    var_capability = _resolve_model_var_capability(model, var_key, resolved_plugin)
+    color_map_id = getattr(var_capability, "color_map_id", None) or var_key
+    try:
+        var_spec_colormap = get_color_map_spec(color_map_id)
+    except KeyError:
+        logger.error("No colormap spec for model=%s var_key=%s color_map_id=%s", model, var_key, color_map_id)
         return None
 
-    # Get GRIB search pattern from model plugin
-    resolved_plugin = model_plugin or _resolve_model_plugin(model)
-    var_spec_model = _resolve_model_var_spec(model, var_id, resolved_plugin)
-    kind = getattr(var_spec_model, "kind", None) or var_spec_colormap.get("type", "continuous")
+    kind = (
+        getattr(var_capability, "kind", None)
+        or getattr(var_spec_model, "kind", None)
+        or var_spec_colormap.get("type", "continuous")
+    )
     kind_normalized = str(kind).strip().lower() or "continuous"
     warp_resampling = _warp_resampling_for_kind(kind_normalized)
     search_pattern = None if getattr(var_spec_model, "derived", False) else _get_search_pattern(var_spec_model)
 
     # --- Staging directory ---
-    staging_dir = data_root / "staging" / model / run_id / var_id
+    staging_dir = data_root / "staging" / model / run_id / var_key
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     rgba_path = staging_dir / f"{fh_str}.rgba.cog.tif"
@@ -765,10 +773,12 @@ def build_frame(
             logger.info("Step 1/6: Deriving variable components")
             converted_data, src_crs, src_transform = derive_variable(
                 model_id=model,
+                var_key=var_key,
                 product=product,
                 run_date=run_date,
                 fh=fh,
                 var_spec_model=var_spec_model,
+                var_capability=var_capability,
                 model_plugin=resolved_plugin,
             )
         else:
@@ -779,16 +789,21 @@ def build_frame(
                     f"No search pattern resolved for non-derived var {var_id!r}"
                 )
             raw_data, src_crs, src_transform = fetch_variable(
-                model_id=model,
-                product=product,
-                search_pattern=search_pattern,
-                run_date=run_date,
-                fh=fh,
-            )
+                    model_id=model,
+                    product=product,
+                    search_pattern=search_pattern,
+                    run_date=run_date,
+                    fh=fh,
+                )
 
             # --- Step 2: Unit conversion ---
             logger.info("Step 2/6: Unit conversion")
-            converted_data = convert_units(raw_data, var_id)
+            converted_data = convert_units(
+                raw_data,
+                var_key=var_key,
+                model_id=model,
+                var_capability=var_capability,
+            )
 
         # --- Step 3: Warp to target grid ---
         logger.info("Step 3/6: Warping to target grid (resampling=%s)", warp_resampling)
@@ -806,7 +821,11 @@ def build_frame(
         # --- Step 4: Colorize ---
         logger.info("Step 4/6: Colorizing")
         display_data = _prepare_display_data_for_colorize(warped_data, var_spec_colormap)
-        rgba, colorize_meta = float_to_rgba(display_data, var_id)
+        rgba, colorize_meta = float_to_rgba(
+            display_data,
+            color_map_id,
+            meta_var_key=var_key,
+        )
 
         # --- Step 5: Write COGs ---
         logger.info("Step 5/6: Writing COGs")
@@ -821,7 +840,7 @@ def build_frame(
         )
 
         # --- Step 5b: Optional contour extraction (tmp2m only) ---
-        if var_id == "tmp2m":
+        if var_key == "tmp2m":
             contour_rel_path = f"contours/{fh_str}.iso32.geojson"
             contour_geojson_path = staging_dir / contour_rel_path
             try:
@@ -845,7 +864,7 @@ def build_frame(
                     model,
                     region,
                     run_id,
-                    var_id,
+                    var_key,
                     fh_str,
                     contour_geojson_path,
                 )
@@ -857,7 +876,7 @@ def build_frame(
                     model,
                     region,
                     run_id,
-                    var_id,
+                    var_key,
                     fh_str,
                     contour_geojson_path,
                     exc,
@@ -909,7 +928,7 @@ def build_frame(
         sidecar = build_sidecar_json(
             model=model,
             run_id=run_id,
-            var_id=var_id,
+            var_id=var_key,
             fh=fh,
             run_date=run_date,
             colorize_meta=colorize_meta,
@@ -923,7 +942,7 @@ def build_frame(
         logger.info(
             "Frame complete: %s/%s/%s/%s/%s "
             "(RGBA: %s, Val: %s, JSON: %s)",
-            model, region, run_id, var_id, fh_str,
+            model, region, run_id, var_key, fh_str,
             _file_size_str(rgba_path),
             _file_size_str(val_path),
             _file_size_str(sidecar_path),
@@ -936,7 +955,7 @@ def build_frame(
             model,
             region,
             run_id,
-            var_id,
+            var_key,
             fh_str,
             exc,
         )
@@ -946,7 +965,7 @@ def build_frame(
     except Exception:
         logger.exception(
             "Build failed for %s/%s/%s/%s/%s",
-            model, region, run_id, var_id, fh_str,
+            model, region, run_id, var_key, fh_str,
         )
         _cleanup_artifacts(rgba_path, val_path, sidecar_path, contour_geojson_path)
         return None
@@ -959,25 +978,45 @@ def build_frame(
 
 def _resolve_model_var_spec(
     model: str,
-    var_id: str,
+    var_key: str,
     model_plugin: Any = None,
 ) -> Any:
     """Resolve the VarSpec from model plugin or registry."""
     plugin = model_plugin or _resolve_model_plugin(model)
-    spec = plugin.get_var(var_id)
+    normalized = plugin.normalize_var_id(var_key)
+    spec = plugin.get_var(normalized)
     if spec is None:
         raise ValueError(
-            f"Variable {var_id!r} not found in {model!r} model plugin"
+            f"Variable {normalized!r} not found in {model!r} model plugin"
         )
     return spec
 
 
+def _resolve_model_var_capability(
+    model: str,
+    var_key: str,
+    model_plugin: Any = None,
+) -> Any:
+    plugin = model_plugin or _resolve_model_plugin(model)
+    normalized = plugin.normalize_var_id(var_key)
+    capability = plugin.get_var_capability(normalized)
+    if capability is not None:
+        return capability
+    spec = plugin.get_var(normalized)
+    if spec is None:
+        raise ValueError(f"Variable {normalized!r} not found in {model!r} model plugin")
+    return SimpleNamespace(
+        var_key=normalized,
+        kind=getattr(spec, "kind", None),
+        units=getattr(spec, "units", None),
+        derive_strategy_id=getattr(spec, "derive", None),
+        color_map_id=normalized,
+        conversion=None,
+    )
+
+
 def _resolve_model_plugin(model: str) -> Any:
     """Resolve a model plugin by id."""
-    if model == "hrrr":
-        from app.models.hrrr import HRRR_MODEL
-
-        return HRRR_MODEL
     from app.models.registry import MODEL_REGISTRY
 
     plugin = MODEL_REGISTRY.get(model)
@@ -1112,20 +1151,22 @@ def _latest_run_date(model: str) -> datetime:
     GFS:  6-hourly cycles (round back to last 00/06/12/18, minus 4 hours)
     """
     now = datetime.now(timezone.utc)
+    plugin = _resolve_model_plugin(model)
+    run_discovery = plugin.run_discovery_config() if hasattr(plugin, "run_discovery_config") else {}
+    fallback_lag_hours = 3
+    cadence_hours = 1
+    try:
+        fallback_lag_hours = max(0, int(run_discovery.get("fallback_lag_hours", fallback_lag_hours)))
+    except (TypeError, ValueError):
+        fallback_lag_hours = 3
+    try:
+        cadence_hours = max(1, int(run_discovery.get("cycle_cadence_hours", cadence_hours)))
+    except (TypeError, ValueError):
+        cadence_hours = 1
 
-    if model == "hrrr":
-        # HRRR runs hourly; use 2 hours ago for safety
-        target = now - timedelta(hours=2)
-        return target.replace(minute=0, second=0, microsecond=0)
-    elif model == "gfs":
-        # GFS runs at 00/06/12/18z; use 5 hours ago, round to 6h
-        target = now - timedelta(hours=5)
-        cycle_hour = (target.hour // 6) * 6
-        return target.replace(hour=cycle_hour, minute=0, second=0, microsecond=0)
-    else:
-        # Default: 3 hours ago, on the hour
-        target = now - timedelta(hours=3)
-        return target.replace(minute=0, second=0, microsecond=0)
+    target = now - timedelta(hours=fallback_lag_hours)
+    aligned_hour = (target.hour // cadence_hours) * cadence_hours
+    return target.replace(hour=aligned_hour, minute=0, second=0, microsecond=0)
 
 
 if __name__ == "__main__":

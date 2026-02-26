@@ -144,6 +144,15 @@ class ModelPlugin(Protocol):
     def get_var_capability(self, var_key: str) -> VariableCapability | None:
         ...
 
+    def run_discovery_config(self) -> dict[str, Any]:
+        ...
+
+    def scheduled_fhs_for_var(self, var_key: str, cycle_hour: int) -> list[int]:
+        ...
+
+    def resolve_probe_var_key(self, requested_probe_var: str | None) -> str | None:
+        ...
+
     def target_fhs(self, cycle_hour: int) -> list[int]:
         ...
 
@@ -182,6 +191,56 @@ class BaseModelPlugin:
         if self.capabilities is None:
             return None
         return self.capabilities.variable_catalog.get(var_key)
+
+    def run_discovery_config(self) -> dict[str, Any]:
+        if self.capabilities is None:
+            return {}
+        return dict(self.capabilities.run_discovery)
+
+    def resolve_probe_var_key(self, requested_probe_var: str | None) -> str | None:
+        if isinstance(requested_probe_var, str) and requested_probe_var.strip():
+            normalized = self.normalize_var_id(requested_probe_var.strip().lower())
+            if self.get_var(normalized) is not None:
+                return normalized
+        configured = self.run_discovery_config().get("probe_var_key")
+        if isinstance(configured, str) and configured.strip():
+            normalized = self.normalize_var_id(configured.strip().lower())
+            if self.get_var(normalized) is not None:
+                return normalized
+        return None
+
+    def _var_constraints(self, var_key: str) -> dict[str, Any]:
+        capability = self.get_var_capability(var_key)
+        if capability is None:
+            return {}
+        constraints = getattr(capability, "constraints", None)
+        if isinstance(constraints, dict):
+            return constraints
+        return {}
+
+    def scheduled_fhs_for_var(self, var_key: str, cycle_hour: int) -> list[int]:
+        fhs = [int(fh) for fh in self.target_fhs(cycle_hour)]
+        constraints = self._var_constraints(var_key)
+
+        min_fh = constraints.get("min_fh")
+        max_fh = constraints.get("max_fh")
+        try:
+            min_fh_value = int(min_fh) if min_fh is not None else None
+        except (TypeError, ValueError):
+            min_fh_value = None
+        try:
+            max_fh_value = int(max_fh) if max_fh is not None else None
+        except (TypeError, ValueError):
+            max_fh_value = None
+
+        filtered: list[int] = []
+        for fh in fhs:
+            if min_fh_value is not None and fh < min_fh_value:
+                continue
+            if max_fh_value is not None and fh > max_fh_value:
+                continue
+            filtered.append(fh)
+        return filtered
 
     def target_fhs(self, cycle_hour: int) -> list[int]:
         raise NotImplementedError("target_fhs is not implemented for this model")

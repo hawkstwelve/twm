@@ -15,17 +15,18 @@ from typing import Any
 import numpy as np
 
 from app.services.colormaps import (
-    VAR_SPECS,
     build_continuous_lut,
     build_continuous_lut_from_stops,
     build_discrete_lut,
+    get_color_map_spec,
 )
 
 
 def float_to_rgba(
     data: np.ndarray,
-    var_key: str,
+    color_map_id: str,
     *,
+    meta_var_key: str | None = None,
     spec_override: dict[str, Any] | None = None,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Convert a 2-D float32 array to a 4-band RGBA uint8 array.
@@ -34,11 +35,14 @@ def float_to_rgba(
     ----------
     data : np.ndarray
         2-D array (H, W) of float values.  NaN = nodata.
-    var_key : str
-        Key into VAR_SPECS for color/range/level definitions.
+    color_map_id : str
+        Palette identifier used to resolve color/range/level definitions.
+        Transitional path still supports legacy var-keyed palette IDs.
+    meta_var_key : str, optional
+        Variable key to emit in sidecar metadata. Defaults to color_map_id.
     spec_override : dict, optional
-        If provided, used instead of VAR_SPECS[var_key].  Useful for testing
-        or for variables whose spec hasn't been registered yet.
+        If provided, used instead of the resolved palette spec. Useful for
+        testing or for variables whose spec hasn't been registered yet.
 
     Returns
     -------
@@ -51,9 +55,10 @@ def float_to_rgba(
     if data.ndim != 2:
         raise ValueError(f"data must be 2-D, got shape {data.shape}")
 
-    spec = spec_override if spec_override is not None else VAR_SPECS.get(var_key)
+    var_key = meta_var_key or color_map_id
+    spec = spec_override if spec_override is not None else get_color_map_spec(color_map_id)
     if spec is None:
-        raise KeyError(f"Unknown var_key: {var_key!r}")
+        raise KeyError(f"Unknown color_map_id: {color_map_id!r}")
 
     kind = spec.get("type")
     if kind == "continuous":

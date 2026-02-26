@@ -321,6 +321,9 @@ TMP850_COLOR_ANCHORS = [
 ]
 TMP850_RANGE = (-40.0, 40.0)
 
+# Legacy transitional var-keyed palette specs.
+# Plugin capabilities are authoritative for variable metadata; this file remains
+# the palette/LUT store keyed by color_map_id.
 VAR_SPECS = {
     "precip_rain": {
         "type": "discrete",
@@ -460,6 +463,23 @@ VAR_SPECS = {
     },
 }
 
+# Transitional color-map catalog. Existing entries are still var-keyed; aliases
+# allow plugins to emit explicit color_map_id values without immediate churn.
+COLOR_MAP_SPECS: dict[str, dict] = dict(VAR_SPECS)
+COLOR_MAP_ALIASES: dict[str, str] = {
+    "temp_f_-60_120_tmp2m": "tmp2m",
+    "wind_mph_0_100": "wspd10m",
+    "radar_ptype_v1": "radar_ptype",
+}
+
+
+def get_color_map_spec(color_map_id: str) -> dict:
+    mapped_id = COLOR_MAP_ALIASES.get(color_map_id, color_map_id)
+    spec = COLOR_MAP_SPECS.get(mapped_id)
+    if spec is None:
+        raise KeyError(f"Unknown color_map_id: {color_map_id!r}")
+    return spec
+
 _LUT_CACHE: dict[str, np.ndarray] = {}
 
 
@@ -555,9 +575,7 @@ def get_lut(var_key: str) -> np.ndarray:
     """
     if var_key in _LUT_CACHE:
         return _LUT_CACHE[var_key]
-    spec = VAR_SPECS.get(var_key)
-    if not spec:
-        raise KeyError(f"Unknown var_key: {var_key}")
+    spec = get_color_map_spec(var_key)
     _fail_if_legacy_builder_with_anchors(var_key, spec, caller="get_lut")
     colors = spec["colors"]
     if spec["type"] == "discrete":
@@ -573,9 +591,7 @@ def encode_to_byte_and_alpha(
     values: np.ndarray,
     var_key: str,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
-    spec = VAR_SPECS.get(var_key)
-    if not spec:
-        raise KeyError(f"Unknown var_key: {var_key}")
+    spec = get_color_map_spec(var_key)
     _fail_if_legacy_builder_with_anchors(var_key, spec, caller="encode_to_byte_and_alpha")
     kind = spec.get("type")
     if kind not in {"discrete", "continuous"}:

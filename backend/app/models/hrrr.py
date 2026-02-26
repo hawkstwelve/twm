@@ -328,6 +328,17 @@ HRRR_ORDER_BY_VAR_KEY: dict[str, int] = {
     "wgst10m": 7,
 }
 
+HRRR_CONVERSION_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "c_to_f",
+    "dp2m": "c_to_f",
+    "wspd10m": "ms_to_mph",
+    "wgst10m": "ms_to_mph",
+    "snowfall_total": "m_to_in",
+    "precip_total": "kgm2_to_in",
+}
+
+HRRR_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {}
+
 
 def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapability:
     is_buildable = bool(var_spec.primary or var_spec.derived)
@@ -346,6 +357,8 @@ def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapabi
         default_fh=HRRR_DEFAULT_FH_BY_VAR_KEY.get(var_key),
         buildable=is_buildable,
         order=HRRR_ORDER_BY_VAR_KEY.get(var_key),
+        conversion=HRRR_CONVERSION_BY_VAR_KEY.get(var_key),
+        constraints=dict(HRRR_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
     )
 
 
@@ -365,8 +378,10 @@ HRRR_CAPABILITIES = ModelCapabilities(
     },
     run_discovery={
         "probe_var_key": "tmp2m",
-        "cycle_cadence": "hourly",
-        "lookback_hours": 6,
+        "probe_enabled": True,
+        "cycle_cadence_hours": 1,
+        "probe_attempts": 4,
+        "fallback_lag_hours": 2,
     },
     ui_defaults={
         "default_var_key": "tmp2m",

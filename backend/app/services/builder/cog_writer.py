@@ -61,6 +61,8 @@ REGION_BBOX_4326: dict[str, tuple[float, float, float, float]] = {
 # All variables for a given model/region share an identical pixel grid.
 # ---------------------------------------------------------------------------
 
+# Legacy fallback only. Authoritative grid ownership is model capabilities
+# (`ModelCapabilities.grid_meters_by_region`).
 TARGET_GRID_METERS: dict[str, dict[str, float]] = {
     "hrrr": {
         "conus": 3_000.0,
@@ -144,13 +146,35 @@ def get_grid_params(
     bbox = REGION_BBOX_3857.get(region)
     if bbox is None:
         raise KeyError(f"Unknown region: {region!r}")
-    model_grids = TARGET_GRID_METERS.get(model)
-    if model_grids is None:
-        raise KeyError(f"Unknown model: {model!r}")
-    grid_m = model_grids.get(region)
+    grid_m = _grid_meters_from_capabilities(model, region)
+    if grid_m is None:
+        model_grids = TARGET_GRID_METERS.get(model)
+        if model_grids is None:
+            raise KeyError(f"Unknown model: {model!r}")
+        grid_m = model_grids.get(region)
     if grid_m is None:
         raise KeyError(f"No grid resolution defined for {model!r}/{region!r}")
     return bbox, grid_m
+
+
+def _grid_meters_from_capabilities(model: str, region: str) -> float | None:
+    try:
+        from app.models.registry import MODEL_REGISTRY
+    except Exception:
+        return None
+    plugin = MODEL_REGISTRY.get(model)
+    if plugin is None:
+        return None
+    capabilities = getattr(plugin, "capabilities", None)
+    if capabilities is None:
+        return None
+    grid_map = getattr(capabilities, "grid_meters_by_region", None)
+    if not isinstance(grid_map, dict):
+        return None
+    value = grid_map.get(region)
+    if value is None:
+        return None
+    return float(value)
 
 
 def compute_transform_and_shape(

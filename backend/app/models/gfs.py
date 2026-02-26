@@ -311,6 +311,18 @@ GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
     "qpf6h": 4,
 }
 
+GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "c_to_f",
+    "wspd10m": "ms_to_mph",
+    "qpf6h": "kgm2_to_in",
+}
+
+GFS_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {
+    "qpf6h": {
+        "min_fh": 6,
+    },
+}
+
 
 def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapability:
     is_buildable = bool(var_spec.primary or var_spec.derived)
@@ -329,6 +341,8 @@ def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapabi
         default_fh=GFS_DEFAULT_FH_BY_VAR_KEY.get(var_key),
         buildable=is_buildable,
         order=GFS_ORDER_BY_VAR_KEY.get(var_key),
+        conversion=GFS_CONVERSION_BY_VAR_KEY.get(var_key),
+        constraints=dict(GFS_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
     )
 
 
@@ -348,8 +362,9 @@ GFS_CAPABILITIES = ModelCapabilities(
     },
     run_discovery={
         "probe_var_key": "tmp2m",
-        "cycle_cadence": "6-hourly",
-        "lookback_hours": 12,
+        "probe_enabled": False,
+        "cycle_cadence_hours": 6,
+        "fallback_lag_hours": 5,
     },
     ui_defaults={
         "default_var_key": "tmp2m",
