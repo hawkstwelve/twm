@@ -83,6 +83,15 @@ export type SampleContext = {
   fh: number;
 };
 
+function hasValidSampleContext(ctx: SampleContext): boolean {
+  return Boolean(
+    ctx.model.trim() &&
+    ctx.run.trim() &&
+    ctx.varId.trim() &&
+    Number.isFinite(ctx.fh)
+  );
+}
+
 export function useSampleTooltip(ctx: SampleContext) {
   const [tooltip, setTooltip] = useState<SampleTooltipState>(null);
   const genRef = useRef(0);
@@ -91,6 +100,7 @@ export function useSampleTooltip(ctx: SampleContext) {
   const latencySamplesRef = useRef<number[]>([]);
   const cacheRef = useRef(new LRUCache());
   const prevCtxRef = useRef<string>("");
+  const canSample = hasValidSampleContext(ctx);
 
   // Clear cache when model/run/var change
   const ctxFingerprint = `${ctx.model}/${ctx.run}/${ctx.varId}`;
@@ -124,6 +134,10 @@ export function useSampleTooltip(ctx: SampleContext) {
 
   const onHover = useCallback(
     (lat: number, lon: number, x: number, y: number) => {
+      if (!canSample) {
+        setTooltip(null);
+        return;
+      }
       // Cancel any pending debounce
       if (timerRef.current !== null) {
         window.clearTimeout(timerRef.current);
@@ -186,7 +200,7 @@ export function useSampleTooltip(ctx: SampleContext) {
           });
       }, DEBOUNCE_MS);
     },
-    [ctx.model, ctx.run, ctx.varId, ctx.fh]
+    [canSample, ctx.model, ctx.run, ctx.varId, ctx.fh]
   );
 
   const onHoverEnd = useCallback(() => {
