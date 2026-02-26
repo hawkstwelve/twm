@@ -150,7 +150,7 @@ source .venv/bin/activate
 pip install -r backend/requirements.txt
 
 # Frontend build
-cd /opt/twf_v3/frontend/models-v3
+cd /opt/twf_v3/frontend
 npm install && npm run build
 
 # Install systemd services
@@ -182,7 +182,7 @@ pip install -r backend/requirements.txt
 pip install -r backend/requirements-dev.txt   # pytest, ruff, etc.
 
 # Frontend
-cd frontend/models-v3
+cd frontend
 npm install
 
 # Local data directory (gitignored)
@@ -202,7 +202,7 @@ TWF_V3_DATA_ROOT=./data/v3 uvicorn backend.app.main:app --reload --port 8200
 TWF_V3_DATA_ROOT=./data/v3 uvicorn backend.app.services.tile_server:app --reload --port 8201
 
 # Terminal 3: Frontend dev server
-cd frontend/models-v3
+cd frontend
 npm run dev   # Vite on localhost:5173
 
 # Terminal 4: Run a test build (one frame)
@@ -210,7 +210,7 @@ source .venv/bin/activate
 python -m backend.app.services.builder.pipeline --model hrrr --region pnw --var tmp2m --fh 0 --data-root ./data/v3
 ```
 
-**Frontend config for local dev** (`frontend/models-v3/src/lib/config.ts`):
+**Frontend config for local dev** (`frontend/src/lib/config.ts`):
 
 ```typescript
 export const API_ORIGIN = "https://api.theweathermodels.com";
@@ -838,9 +838,9 @@ Estimates use deflate-compressed COG sizes from the grid dimensions table. Per-f
 | Scheduler + run promotion + retention | `services/model_scheduler_v2.py` | `backend/app/services/scheduler.py` |
 | LATEST.json atomic write | `services/model_scheduler_v2.py` | `backend/app/services/scheduler.py` |
 | Grid detection + normalization | `services/grid.py` | `backend/app/services/builder/cog_writer.py` |
-| Frontend double-buffer animation | `components/map-canvas.tsx` | `frontend/models-v3/src/components/map-canvas.tsx` |
-| Frontend discovery chain | `lib/api.ts` | `frontend/models-v3/src/lib/api.ts` |
-| Frontend legend component | `components/map-legend.tsx` | `frontend/models-v3/src/components/map-legend.tsx` |
+| Frontend double-buffer animation | `components/map-canvas.tsx` | `frontend/src/components/map-canvas.tsx` |
+| Frontend discovery chain | `lib/api.ts` | `frontend/src/lib/api.ts` |
+| Frontend legend component | `components/map-legend.tsx` | `frontend/src/components/map-legend.tsx` |
 
 ### Deleted / not carried forward
 
@@ -1005,7 +1005,7 @@ Replace all V2 location blocks with:
 ```nginx
 # V3 frontend
 location /models-v3/ {
-    alias /opt/twf_v3/frontend/models-v3/dist/;
+    alias /opt/twf_v3/frontend/dist/;
     try_files $uri $uri/ /models-v3/index.html;
 }
 
@@ -1047,7 +1047,7 @@ pip install -r backend/requirements.txt  # only if deps changed
 sudo systemctl restart twm-api twm-tile-server
 
 # Frontend changes
-cd frontend/models-v3
+cd frontend
 npm install && npm run build  # only if frontend changed
 # Static files served by nginx — no restart needed
 

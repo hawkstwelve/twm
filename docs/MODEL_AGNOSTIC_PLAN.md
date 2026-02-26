@@ -249,10 +249,10 @@ Work:
 
 ## Phase 4: Frontend Migration
 Files:
-- `frontend/models-v3/src/lib/api.ts`
-- `frontend/models-v3/src/lib/config.ts`
-- `frontend/models-v3/src/App.tsx`
-- `frontend/models-v3/src/components/map-canvas.tsx`
+- `frontend/src/lib/api.ts`
+- `frontend/src/lib/config.ts`
+- `frontend/src/App.tsx`
+- `frontend/src/components/map-canvas.tsx`
 
 Work:
 1. Add capabilities API client for `GET /api/v4/capabilities`.
@@ -264,9 +264,9 @@ Work:
 ## Phase 4.5: Runtime API Cutover
 Files:
 - `backend/app/main.py`
-- `frontend/models-v3/src/lib/api.ts`
-- `frontend/models-v3/src/App.tsx`
-- `frontend/models-v3/src/lib/use-sample-tooltip.ts`
+- `frontend/src/lib/api.ts`
+- `frontend/src/App.tsx`
+- `frontend/src/lib/use-sample-tooltip.ts`
 - `docs/NGINX_V3.md`
 
 Work:

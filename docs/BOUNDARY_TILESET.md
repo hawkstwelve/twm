@@ -11,7 +11,7 @@ Served by `backend/app/services/tile_server.py`:
 
 ## Frontend source model
 
-`frontend/models-v3/src/components/map-canvas.tsx` now uses one vector source:
+`frontend/src/components/map-canvas.tsx` now uses one vector source:
 
 - `https://api.theweathermodels.com/tiles/v3/boundaries/v1/tilejson.json`
 

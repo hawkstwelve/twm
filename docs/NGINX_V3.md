@@ -6,7 +6,7 @@
 
 ## Active routes on api.theweathermodels.com
 - `/models-v3/` → static frontend build output
-  - filesystem: `/opt/twf_v3/frontend/models-v3/dist/`
+  - filesystem: `/opt/twf_v3/frontend/dist/`
 - `/api/v4/` → V4 API upstream
   - upstream: `http://127.0.0.1:8200`
 - `/tiles/v3/` → V3 tile server upstream
