@@ -807,6 +807,7 @@ def list_models():
 
 
 @app.get("/api/v3/{model}/runs")
+@app.get("/api/v4/{model}/runs")
 def list_runs(request: Request, model: str):
     runs = _scan_manifest_runs(model)
     cache_control = "public, max-age=60"
@@ -824,6 +825,7 @@ def list_runs(request: Request, model: str):
 
 
 @app.get("/api/v3/{model}/{run}/manifest")
+@app.get("/api/v4/{model}/{run}/manifest")
 def get_manifest(request: Request, model: str, run: str):
     resolved = _resolve_run(model, run)
     if resolved is None:
@@ -847,6 +849,7 @@ def get_manifest(request: Request, model: str, run: str):
 
 
 @app.get("/api/v3/{model}/{run}/vars")
+@app.get("/api/v4/{model}/{run}/vars")
 def list_vars(model: str, run: str):
     model_id = model.strip().lower()
     resolved = _resolve_run(model_id, run)
@@ -874,6 +877,7 @@ def list_vars(model: str, run: str):
 
 
 @app.get("/api/v3/{model}/{run}/{var}/frames")
+@app.get("/api/v4/{model}/{run}/{var}/frames")
 def list_frames(request: Request, model: str, run: str, var: str):
     resolved = _resolve_run(model, run)
     if resolved is None:
@@ -944,6 +948,7 @@ def list_frames(request: Request, model: str, run: str, var: str):
 
 
 @app.get("/api/v3/{model}/{run}/{var}/loop-manifest")
+@app.get("/api/v4/{model}/{run}/{var}/loop-manifest")
 def get_loop_manifest(request: Request, model: str, run: str, var: str):
     resolved = _resolve_run(model, run)
     if resolved is None:
@@ -1028,6 +1033,7 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
 
 
 @app.get("/api/v3/{model}/{run}/{var}/{fh:int}/loop.webp")
+@app.get("/api/v4/{model}/{run}/{var}/{fh:int}/loop.webp")
 def get_loop_webp(
     model: str,
     run: str,
@@ -1095,6 +1101,7 @@ def get_loop_webp(
 
 
 @app.get("/api/v3/sample")
+@app.get("/api/v4/sample")
 def sample(
     request: Request,
     model: str = Query(..., description="Model ID (e.g. hrrr)"),
@@ -1219,6 +1226,7 @@ def sample(
 
 
 @app.get("/api/v3/{model}/{run}/{var}/{fh:int}/contours/{key}")
+@app.get("/api/v4/{model}/{run}/{var}/{fh:int}/contours/{key}")
 def get_contour_geojson(
     model: str,
     run: str,

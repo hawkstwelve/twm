@@ -1,4 +1,4 @@
-import { API_BASE, API_V4_BASE } from "@/lib/config";
+import { API_ORIGIN, API_V4_BASE, RUNTIME_API_BASE } from "@/lib/config";
 
 export type ModelOption = {
   id: string;
@@ -206,7 +206,7 @@ export async function fetchRegionPresets(options?: FetchOptions): Promise<Record
     headers["If-None-Match"] = etag;
   }
 
-  const response = await fetch(API_BASE.replace(/\/api\/v3$/, "") + "/api/regions", {
+  const response = await fetch(`${API_ORIGIN}/api/regions`, {
     credentials: "omit",
     headers,
     signal: options?.signal,
@@ -258,7 +258,7 @@ export async function fetchRegions(model: string, options?: FetchOptions): Promi
 
 export async function fetchRuns(model: string, options?: FetchOptions): Promise<string[]> {
   return fetchJson<string[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/runs`,
+    `${RUNTIME_API_BASE}/${encodeURIComponent(model)}/runs`,
     options
   );
 }
@@ -266,7 +266,7 @@ export async function fetchRuns(model: string, options?: FetchOptions): Promise<
 export async function fetchVars(model: string, run: string, options?: FetchOptions): Promise<VarRow[]> {
   const runKey = run || "latest";
   return fetchJson<VarRow[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`,
+    `${RUNTIME_API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/vars`,
     options
   );
 }
@@ -278,7 +278,7 @@ export async function fetchManifest(
 ): Promise<RunManifestResponse> {
   const runKey = run || "latest";
   const payload = await fetchJson<unknown>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/manifest`,
+    `${RUNTIME_API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/manifest`,
     options
   );
   if (!isRunManifestResponse(payload)) {
@@ -295,7 +295,7 @@ export async function fetchFrames(
 ): Promise<FrameRow[]> {
   const runKey = run || "latest";
   const response = await fetchJson<FrameRow[]>(
-    `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`,
+    `${RUNTIME_API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/frames`,
     options
   );
   if (!Array.isArray(response)) {
@@ -315,7 +315,7 @@ export async function fetchLoopManifest(
   const runKey = run || "latest";
   try {
     const response = await fetchJson<LoopManifestResponse>(
-      `${API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/loop-manifest`,
+      `${RUNTIME_API_BASE}/${encodeURIComponent(model)}/${encodeURIComponent(runKey)}/${encodeURIComponent(varKey)}/loop-manifest`,
       options
     );
     if (!response || !Array.isArray(response.loop_tiers)) {
@@ -361,7 +361,7 @@ export async function fetchSample(params: {
     lat: String(params.lat),
     lon: String(params.lon),
   });
-  const response = await fetch(`${API_BASE}/sample?${qs}`, { credentials: "omit", signal: params.signal });
+  const response = await fetch(`${RUNTIME_API_BASE}/sample?${qs}`, { credentials: "omit", signal: params.signal });
   if (response.status === 404) {
     return null;
   }
@@ -386,5 +386,5 @@ export function buildContourUrl(params: {
   key: string;
 }): string {
   const enc = encodeURIComponent;
-  return `${API_BASE}/${enc(params.model)}/${enc(params.run)}/${enc(params.varKey)}/${enc(params.fh)}/contours/${enc(params.key)}`;
+  return `${RUNTIME_API_BASE}/${enc(params.model)}/${enc(params.run)}/${enc(params.varKey)}/${enc(params.fh)}/contours/${enc(params.key)}`;
 }

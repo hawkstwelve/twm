@@ -23,7 +23,7 @@ import {
   fetchRuns,
 } from "@/lib/api";
 import {
-  API_BASE,
+  API_ORIGIN,
   getPlaybackBufferPolicy,
   isAnimationDebugEnabled,
   isWebpDefaultRenderEnabled,
@@ -729,7 +729,7 @@ export default function App() {
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
   const latestRunId = runs[0] ?? frameRows[0]?.run ?? null;
   const resolvedRunForRequests = run === "latest" ? (latestRunId ?? "latest") : run;
-  const apiRoot = API_BASE.replace(/\/api\/v3$/i, "").replace(/\/$/, "");
+  const apiRoot = API_ORIGIN.replace(/\/$/, "");
 
   const runOptions = useMemo<Option[]>(() => {
     return buildRunOptions(runs, latestRunId);

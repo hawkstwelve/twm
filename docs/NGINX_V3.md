@@ -9,6 +9,8 @@
   - filesystem: `/opt/twf_v3/frontend/models-v3/dist/`
 - `/api/v3/` → V3 API upstream
   - upstream: `http://127.0.0.1:8200`
+- `/api/v4/` → V4 API upstream
+  - upstream: `http://127.0.0.1:8200`
 - `/tiles/v3/` → V3 tile server upstream
   - upstream: `http://127.0.0.1:8201`
   - includes vector boundary endpoints:

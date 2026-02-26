@@ -263,6 +263,32 @@ Work:
 4. Avoid per-model capability fetch at startup; use per-model endpoint only for diagnostics.
 5. Replace model-specific render branching with frontend-owned logic constrained by capability defaults and constraints.
 
+## Phase 4.5: Runtime API Cutover
+Files:
+- `backend/app/main.py`
+- `frontend/models-v3/src/lib/api.ts`
+- `frontend/models-v3/src/App.tsx`
+- `frontend/models-v3/src/lib/use-sample-tooltip.ts`
+- `docs/NGINX_V3.md`
+
+Work:
+1. Add `/api/v4/*` runtime endpoints for parity with active `/api/v3/*` runtime calls:
+   - `/api/v4/{model}/runs`
+   - `/api/v4/{model}/{run}/manifest`
+   - `/api/v4/{model}/{run}/vars`
+   - `/api/v4/{model}/{run}/{var}/frames`
+   - `/api/v4/{model}/{run}/{var}/loop-manifest`
+   - `/api/v4/{model}/{run}/{var}/{fh:int}/loop.webp`
+   - `/api/v4/sample`
+   - `/api/v4/{model}/{run}/{var}/{fh:int}/contours/{key}`
+2. Migrate frontend runtime calls from `/api/v3/*` to `/api/v4/*` for runs, manifests, vars, frames, sample, loop-manifest, loop-webp, and contours.
+3. Keep `/tiles/v3/*` unchanged for this phase (tile contract is out of scope for API-version cutover).
+4. Introduce a temporary frontend runtime fallback flag (`v4` default, `v3` emergency rollback) for one release window only.
+5. Update edge routing so `api.theweathermodels.com` proxies `/api/v4/*` with the same CORS/header behavior as `/api/v3/*`.
+6. Run parity smoke tests on production for one model, one var, one run, one FH and verify v3/v4 response-equivalent behavior.
+7. Mark `/api/v3/*` runtime endpoints as deprecated with a defined retirement gate.
+8. Remove fallback and retire `/api/v3/*` after parity signoff and one stable release window.
+
 ## Phase 5: Guardrails and Docs
 Files:
 - `backend/tests/*`
@@ -295,6 +321,13 @@ Work:
 4. No N+1 per-model capability requests occur during initial app bootstrap.
 5. Existing frame loading and loop playback still work.
 
+### Runtime cutover smoke (Phase 4.5 gate)
+1. Frontend runtime network calls resolve via `/api/v4/*` (except `/tiles/v3/*`).
+2. `GET /api/v4/capabilities` succeeds from public edge (not just localhost).
+3. One-model parity checks pass for runs, manifest, vars, frames, sample, and loop-manifest between v3 and v4.
+4. No empty-selector runtime requests are emitted (for example `model=&var=&fh=Infinity`).
+5. Temporary fallback flag can force v3 runtime successfully, then return to v4.
+
 ### New model acceptance scenario
 1. Add synthetic plugin with one simple variable.
 2. No frontend code edits.
@@ -314,13 +347,14 @@ Work:
 ## Acceptance Criteria
 1. No model-specific branch logic remains in scheduler, API, or frontend bootstrap paths.
 2. Frontend bootstrap is driven by `GET /api/v4/capabilities` in one request.
-3. Variable identity is enforced everywhere as `(model_id, var_key)` with no global var lookup paths.
-4. Derive execution uses registered strategy IDs, not inline plugin logic.
-5. `/api/v3/*` is removed or formally retired in the same refactor stream after `/api/v4/*` cutover.
-6. API explicitly distinguishes supported model existence from published data availability.
-7. `colormaps.py` is palette-focused (`color_map_id` keyed) and variable metadata is model-scoped.
-8. `VAR_SPECS` is explicitly documented and treated as legacy transitional until fully retired.
-9. Existing HRRR and GFS behavior remains functionally equivalent for data loading and rendering.
+3. Frontend runtime API calls use `/api/v4/*` (tiles remain `/tiles/v3/*`).
+4. Variable identity is enforced everywhere as `(model_id, var_key)` with no global var lookup paths.
+5. Derive execution uses registered strategy IDs, not inline plugin logic.
+6. `/api/v3/*` is removed or formally retired in the same refactor stream after `/api/v4/*` cutover.
+7. API explicitly distinguishes supported model existence from published data availability.
+8. `colormaps.py` is palette-focused (`color_map_id` keyed) and variable metadata is model-scoped.
+9. `VAR_SPECS` is explicitly documented and treated as legacy transitional until fully retired.
+10. Existing HRRR and GFS behavior remains functionally equivalent for data loading and rendering.
 
 ## Assumptions
 1. Canonical coverage remains `conus`.
@@ -340,7 +374,10 @@ Work:
 10. Implement explicit `supported_models`, `model_catalog`, and availability (`published_runs`, `latest_run`) contract.
 11. Add and lock a capabilities schema v1 JSON example in docs.
 12. Migrate frontend bootstrap from `/api/v3` to single-call `/api/v4/capabilities`.
-13. Deprecate and remove `/api/v3` routes in the same refactor stream.
-14. Add backend capability, identity, derive-registry, schema, and palette-resolution tests.
-15. Run backend tests and frontend smoke checks.
-16. Update roadmap references.
+13. Add `/api/v4` runtime endpoint parity for runs, manifest, vars, frames, sample, loops, and contours.
+14. Migrate frontend runtime API calls from `/api/v3` to `/api/v4` with temporary rollback flag.
+15. Validate production edge routing for `/api/v4/*` and run v3/v4 parity smoke tests.
+16. Deprecate and remove `/api/v3` routes in the same refactor stream.
+17. Add backend capability, identity, derive-registry, schema, and palette-resolution tests.
+18. Run backend tests and frontend smoke checks.
+19. Update roadmap references.
