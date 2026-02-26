@@ -401,7 +401,7 @@ def get_tile(
         )
 
     try:
-        with Reader(str(cog_path)) as cog:
+        with Reader(input=str(cog_path)) as cog:
             tile = _read_tile_compat(
                 cog,
                 x=x,

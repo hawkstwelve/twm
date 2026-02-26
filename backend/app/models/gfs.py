@@ -12,7 +12,14 @@ Derivation dispatch happens in builder/derive.py (Phase 2).
 
 from __future__ import annotations
 
-from .base import BaseModelPlugin, RegionSpec, VarSelectors, VarSpec
+from .base import (
+    BaseModelPlugin,
+    ModelCapabilities,
+    RegionSpec,
+    VarSelectors,
+    VarSpec,
+    VariableCapability,
+)
 
 
 class GFSPlugin(BaseModelPlugin):
@@ -283,6 +290,77 @@ GFS_VARS: dict[str, VarSpec] = {
     ),
 }
 
+GFS_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "tmp2m",
+    "wspd10m": "wspd10m",
+    "refc": "refc",
+    "precip_ptype": "precip_ptype",
+    "qpf6h": "qpf6h",
+}
+
+GFS_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
+    "precip_ptype": 1,
+    "qpf6h": 6,
+}
+
+GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
+    "tmp2m": 0,
+    "refc": 1,
+    "wspd10m": 2,
+    "precip_ptype": 3,
+    "qpf6h": 4,
+}
+
+
+def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapability:
+    is_buildable = bool(var_spec.primary or var_spec.derived)
+    return VariableCapability(
+        var_key=var_key,
+        name=var_spec.name,
+        selectors=var_spec.selectors,
+        primary=var_spec.primary,
+        derived=var_spec.derived,
+        derive_strategy_id=var_spec.derive,
+        kind=var_spec.kind,
+        units=var_spec.units,
+        normalize_units=var_spec.normalize_units,
+        scale=var_spec.scale,
+        color_map_id=GFS_COLOR_MAP_BY_VAR_KEY.get(var_key),
+        default_fh=GFS_DEFAULT_FH_BY_VAR_KEY.get(var_key),
+        buildable=is_buildable,
+        order=GFS_ORDER_BY_VAR_KEY.get(var_key),
+    )
+
+
+GFS_VARIABLE_CATALOG: dict[str, VariableCapability] = {
+    var_key: _capability_from_var_spec(var_key, var_spec)
+    for var_key, var_spec in GFS_VARS.items()
+}
+
+GFS_CAPABILITIES = ModelCapabilities(
+    model_id="gfs",
+    name="GFS",
+    product="pgrb2.0p25",
+    canonical_region="conus",
+    grid_meters_by_region={
+        "conus": 25_000.0,
+        "pnw": 25_000.0,
+    },
+    run_discovery={
+        "probe_var_key": "tmp2m",
+        "cycle_cadence": "6-hourly",
+        "lookback_hours": 12,
+    },
+    ui_defaults={
+        "default_var_key": "tmp2m",
+        "default_run": "latest",
+    },
+    ui_constraints={
+        "canonical_region": "conus",
+    },
+    variable_catalog=GFS_VARIABLE_CATALOG,
+)
+
 # ---------------------------------------------------------------------------
 # Plugin instance — imported by the model registry
 # ---------------------------------------------------------------------------
@@ -293,4 +371,5 @@ GFS_MODEL = GFSPlugin(
     regions=GFS_REGIONS,
     vars=GFS_VARS,
     product="pgrb2.0p25",
+    capabilities=GFS_CAPABILITIES,
 )

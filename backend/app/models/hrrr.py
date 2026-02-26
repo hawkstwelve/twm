@@ -2,7 +2,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from .base import BaseModelPlugin, RegionSpec, VarSelectors, VarSpec
+from .base import (
+    BaseModelPlugin,
+    ModelCapabilities,
+    RegionSpec,
+    VarSelectors,
+    VarSpec,
+    VariableCapability,
+)
 
 
 class HRRRPlugin(BaseModelPlugin):
@@ -292,6 +299,85 @@ HRRR_VARS: dict[str, VarSpec] = {
     ),
 }
 
+HRRR_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "tmp2m",
+    "dp2m": "dp2m",
+    "tmp850": "tmp850",
+    "snowfall_total": "snowfall_total",
+    "precip_total": "precip_total",
+    "wspd10m": "wspd10m",
+    "wgst10m": "wgst10m",
+    "refc": "refc",
+    "radar_ptype": "radar_ptype",
+}
+
+HRRR_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
+    "radar_ptype": 1,
+    "precip_total": 1,
+    "snowfall_total": 1,
+}
+
+HRRR_ORDER_BY_VAR_KEY: dict[str, int] = {
+    "radar_ptype": 0,
+    "tmp2m": 1,
+    "tmp850": 2,
+    "dp2m": 3,
+    "precip_total": 4,
+    "snowfall_total": 5,
+    "wspd10m": 6,
+    "wgst10m": 7,
+}
+
+
+def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapability:
+    is_buildable = bool(var_spec.primary or var_spec.derived)
+    return VariableCapability(
+        var_key=var_key,
+        name=var_spec.name,
+        selectors=var_spec.selectors,
+        primary=var_spec.primary,
+        derived=var_spec.derived,
+        derive_strategy_id=var_spec.derive,
+        kind=var_spec.kind,
+        units=var_spec.units,
+        normalize_units=var_spec.normalize_units,
+        scale=var_spec.scale,
+        color_map_id=HRRR_COLOR_MAP_BY_VAR_KEY.get(var_key),
+        default_fh=HRRR_DEFAULT_FH_BY_VAR_KEY.get(var_key),
+        buildable=is_buildable,
+        order=HRRR_ORDER_BY_VAR_KEY.get(var_key),
+    )
+
+
+HRRR_VARIABLE_CATALOG: dict[str, VariableCapability] = {
+    var_key: _capability_from_var_spec(var_key, var_spec)
+    for var_key, var_spec in HRRR_VARS.items()
+}
+
+HRRR_CAPABILITIES = ModelCapabilities(
+    model_id="hrrr",
+    name="HRRR",
+    product="sfc",
+    canonical_region="conus",
+    grid_meters_by_region={
+        "conus": 3_000.0,
+        "pnw": 3_000.0,
+    },
+    run_discovery={
+        "probe_var_key": "tmp2m",
+        "cycle_cadence": "hourly",
+        "lookback_hours": 6,
+    },
+    ui_defaults={
+        "default_var_key": "tmp2m",
+        "default_run": "latest",
+    },
+    ui_constraints={
+        "canonical_region": "conus",
+    },
+    variable_catalog=HRRR_VARIABLE_CATALOG,
+)
+
 
 HRRR_MODEL = HRRRPlugin(
     id="hrrr",
@@ -299,4 +385,5 @@ HRRR_MODEL = HRRRPlugin(
     regions=HRRR_REGIONS,
     vars=HRRR_VARS,
     product="sfc",
+    capabilities=HRRR_CAPABILITIES,
 )

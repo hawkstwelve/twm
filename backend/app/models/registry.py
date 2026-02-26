@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Mapping
 
 from fastapi import HTTPException
 
-from .base import ModelPlugin
+from .base import ModelCapabilities, ModelPlugin
 from .hrrr import HRRR_MODEL
 
 logger = logging.getLogger(__name__)
@@ -26,3 +25,23 @@ def get_model(model_id: str) -> ModelPlugin:
     if model is None:
         raise HTTPException(status_code=404, detail=f"Unknown model: {model_id}")
     return model
+
+
+def get_model_capabilities(model_id: str) -> ModelCapabilities:
+    model = get_model(model_id)
+    capabilities = getattr(model, "capabilities", None)
+    if capabilities is None:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Capabilities unavailable for model: {model_id}",
+        )
+    return capabilities
+
+
+def list_model_capabilities() -> dict[str, ModelCapabilities]:
+    capabilities_by_model: dict[str, ModelCapabilities] = {}
+    for model_id, model in MODEL_REGISTRY.items():
+        capabilities = getattr(model, "capabilities", None)
+        if capabilities is not None:
+            capabilities_by_model[model_id] = capabilities
+    return capabilities_by_model
