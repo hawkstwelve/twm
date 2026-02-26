@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Cloud, Clock, Globe, Moon, Sun } from "lucide-react";
+import { MapPin, Moon, Sun, Layers, CalendarClock, Boxes } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -94,7 +94,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
       <div className="flex flex-wrap items-end gap-2.5 px-4 py-2.5">
         <ToolbarSelect
           label="Region"
-          icon={Globe}
+          icon={MapPin}
           value={region}
           onValueChange={onRegionChange}
           options={regions}
@@ -104,7 +104,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
 
         <ToolbarSelect
           label="Model"
-          icon={Cloud}
+          icon={Boxes}
           value={model}
           onValueChange={onModelChange}
           options={models}
@@ -114,7 +114,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
 
         <ToolbarSelect
           label="Run"
-          icon={Clock}
+          icon={CalendarClock}
           value={run}
           onValueChange={onRunChange}
           options={runs}
@@ -124,7 +124,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
 
         <ToolbarSelect
           label="Variable"
-          icon={Cloud}
+          icon={Layers}
           value={variable}
           onValueChange={onVariableChange}
           options={variables}
