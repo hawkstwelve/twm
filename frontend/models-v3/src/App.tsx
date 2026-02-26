@@ -53,6 +53,7 @@ const LOOP_MIN_PLAYABLE_AHEAD = 2;
 const MAX_CONCURRENT_DECODES = 1;
 const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
+const EMPTY_TILE_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
 
 type RenderModeState = "webp_tier0" | "webp_tier1" | "tiles";
 
@@ -678,6 +679,7 @@ export default function App() {
     }
     return map;
   }, [selectedCapabilityVars]);
+  const hasRenderableSelection = Boolean(model && variable && selectedCapabilityVarMap.has(variable));
   const selectedVariableDefaultFh = selectedCapabilityVarMap.get(variable)?.defaultFh ?? null;
   const selectedModelConstraints = (selectedModelCapability?.constraints ?? {}) as Record<string, unknown>;
   const zoomHintMinZoom = toNumberOrNull(selectedModelConstraints.zoom_hint_min);
@@ -1138,6 +1140,9 @@ export default function App() {
 
   const tileUrlForHour = useCallback(
     (fh: number): string => {
+      if (!hasRenderableSelection) {
+        return EMPTY_TILE_DATA_URL;
+      }
       const fallbackFh = frameHours[0] ?? 0;
       const resolvedFh = Number.isFinite(fh) ? fh : fallbackFh;
       return buildTileUrlFromFrame({
@@ -1148,7 +1153,7 @@ export default function App() {
         frameRow: frameByHour.get(resolvedFh) ?? frameRows[0] ?? null,
       });
     },
-    [model, resolvedRunForRequests, variable, frameHours, frameByHour, frameRows]
+    [hasRenderableSelection, model, resolvedRunForRequests, variable, frameHours, frameByHour, frameRows]
   );
 
   const tileUrl = useMemo(() => {
@@ -1291,7 +1296,7 @@ export default function App() {
   }, [frameHours, forecastHour, debugLog]);
 
   const contourGeoJsonUrl = useMemo(() => {
-    if (variable !== "tmp2m") {
+    if (!hasRenderableSelection || variable !== "tmp2m") {
       return null;
     }
     const frameMeta = extractLegendMeta(currentFrame);
@@ -1306,7 +1311,7 @@ export default function App() {
       fh: mapForecastHour,
       key: "iso32f",
     });
-  }, [currentFrame, model, resolvedRunForRequests, variable, mapForecastHour]);
+  }, [currentFrame, hasRenderableSelection, model, resolvedRunForRequests, variable, mapForecastHour]);
 
   const legend = useMemo(() => {
     const normalizedMeta = extractLegendMeta(currentFrame) ?? extractLegendMeta(frameRows[0] ?? null);
@@ -1314,7 +1319,7 @@ export default function App() {
   }, [currentFrame, frameRows, opacity]);
 
   const prefetchHours = useMemo(() => {
-    if (isLoopDisplayActive || frameHours.length === 0) {
+    if (!hasRenderableSelection || isLoopDisplayActive || frameHours.length === 0) {
       return [] as number[];
     }
 
@@ -1389,6 +1394,7 @@ export default function App() {
     isScrubbing,
     scrubRequestedHour,
     isLoopDisplayActive,
+    hasRenderableSelection,
   ]);
 
   const prefetchTileUrls = useMemo(() => {
@@ -2274,7 +2280,7 @@ export default function App() {
   }, [model, run, variable]);
 
   useEffect(() => {
-    if (!model || !variable) {
+    if (!model || !variable || !hasRenderableSelection) {
       setLoopManifest(null);
       return;
     }
@@ -2299,10 +2305,10 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [model, variable, resolvedRunForRequests]);
+  }, [model, variable, resolvedRunForRequests, hasRenderableSelection]);
 
   useEffect(() => {
-    if (!model || !variable) return;
+    if (!model || !variable || !hasRenderableSelection) return;
     const controller = new AbortController();
     const generation = requestGenerationRef.current;
 
@@ -2354,7 +2360,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, [model, run, variable, resolvedRunForRequests, runManifest, selectedVariableDefaultFh]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest, selectedVariableDefaultFh, hasRenderableSelection]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -2368,7 +2374,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!model || !variable || run !== "latest" || !isPageVisible) {
+    if (!model || !variable || !hasRenderableSelection || run !== "latest" || !isPageVisible) {
       return;
     }
 
@@ -2444,7 +2450,7 @@ export default function App() {
       tickController?.abort();
       window.clearInterval(interval);
     };
-  }, [model, run, variable, resolvedRunForRequests, runManifest, isPageVisible, selectedCapabilityVars, selectedModelCapability, selectedVariableDefaultFh]);
+  }, [model, run, variable, resolvedRunForRequests, runManifest, isPageVisible, selectedCapabilityVars, selectedModelCapability, selectedVariableDefaultFh, hasRenderableSelection]);
 
   useEffect(() => {
     if (!isPlaying || renderMode !== "tiles" || frameHours.length === 0) return;
