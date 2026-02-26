@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { MapPin, Moon, Sun, Layers, CalendarClock, Boxes } from "lucide-react";
+import { Map as MapIcon, MapPin, Moon, Sun, Layers, CalendarClock, Boxes } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -133,7 +133,10 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
         />
 
         <div className="ml-auto flex flex-col gap-1">
-          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">Basemap</span>
+          <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+            <MapIcon className="h-3 w-3 opacity-70" />
+            Basemap
+          </span>
           <Button
             type="button"
             variant="secondary"
