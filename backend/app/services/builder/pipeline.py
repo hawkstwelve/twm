@@ -119,9 +119,20 @@ def _warp_resampling_for_kind(kind: str | None) -> str:
 def _prepare_display_data_for_colorize(
     warped_data: np.ndarray,
     var_spec: dict[str, Any],
+    *,
+    model_id: str | None = None,
+    var_key: str | None = None,
 ) -> np.ndarray:
     kind = str(var_spec.get("type") or "").strip().lower()
     if kind in {"discrete", "indexed", "categorical"}:
+        return warped_data
+
+    # Step 1 visual-fidelity guardrail:
+    # For selected low-resolution GFS continuous products, avoid adding
+    # post-warp Gaussian smoothing so warp resampling is the only blur source.
+    model_norm = str(model_id or "").strip().lower()
+    var_norm = str(var_key or "").strip().lower()
+    if model_norm == "gfs" and var_norm in {"tmp2m", "wspd10m", "precip_total", "qpf6h"}:
         return warped_data
 
     sigma_raw = var_spec.get("display_smoothing_sigma")
@@ -828,7 +839,12 @@ def build_frame(
 
         # --- Step 4: Colorize ---
         logger.info("Step 4/6: Colorizing")
-        display_data = _prepare_display_data_for_colorize(warped_data, var_spec_colormap)
+        display_data = _prepare_display_data_for_colorize(
+            warped_data,
+            var_spec_colormap,
+            model_id=model,
+            var_key=var_key,
+        )
         rgba, colorize_meta = float_to_rgba(
             display_data,
             color_map_id,
