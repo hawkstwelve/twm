@@ -82,7 +82,17 @@ type VariableEntry = {
   buildable?: boolean;
 };
 
+type ModelEntry = {
+  id: string;
+  displayName?: string;
+  order?: number | null;
+};
+
 const BASEMAP_MODE_STORAGE_KEY = "twf.map.basemap_mode";
+const MODEL_ORDER_BY_ID: Record<string, number> = {
+  hrrr: 0,
+  gfs: 1,
+};
 
 function readBasemapModePreference(): BasemapMode {
   if (typeof window === "undefined") {
@@ -140,6 +150,43 @@ function variableDefaultFh(entry?: CapabilityVariable | null): number | null {
     return minFh;
   }
   return null;
+}
+
+function modelOrderById(id: string): number | null {
+  const normalized = id.trim().toLowerCase();
+  return Number.isFinite(MODEL_ORDER_BY_ID[normalized]) ? MODEL_ORDER_BY_ID[normalized] : null;
+}
+
+function normalizeModelRows(
+  capabilities: CapabilitiesResponse | null | undefined,
+  modelIds: string[]
+): ModelEntry[] {
+  if (!capabilities?.model_catalog || modelIds.length === 0) {
+    return [];
+  }
+
+  const normalized: ModelEntry[] = [];
+  for (const id of modelIds) {
+    const normalizedId = String(id).trim();
+    const capability = capabilities.model_catalog[normalizedId];
+    if (!normalizedId || !capability) {
+      continue;
+    }
+    normalized.push({
+      id: normalizedId,
+      displayName: capability.name?.trim() || undefined,
+      order: modelOrderById(normalizedId),
+    });
+  }
+
+  return normalized.sort((a, b) => {
+    const aOrder = Number.isFinite(a.order) ? Number(a.order) : Number.POSITIVE_INFINITY;
+    const bOrder = Number.isFinite(b.order) ? Number(b.order) : Number.POSITIVE_INFINITY;
+    if (aOrder !== bOrder) {
+      return aOrder - bOrder;
+    }
+    return a.id.localeCompare(b.id);
+  });
 }
 
 function normalizeCapabilityVarRows(modelCapability: CapabilityModel | null | undefined): VariableEntry[] {
@@ -2110,15 +2157,17 @@ export default function App() {
           return availability?.latest_run_ready === true;
         });
         const visibleModelIds = readyModelIds.length > 0 ? readyModelIds : supportedModelIds;
-        const preferredDefaultModel = visibleModelIds.includes("hrrr") ? "hrrr" : "";
-        const availableModelId = visibleModelIds.find((modelId) => {
+        const modelRows = normalizeModelRows(capabilitiesData, visibleModelIds);
+        const orderedVisibleModelIds = modelRows.map((entry) => entry.id);
+        const preferredDefaultModel = orderedVisibleModelIds.includes("hrrr") ? "hrrr" : "";
+        const availableModelId = orderedVisibleModelIds.find((modelId) => {
           const availability = capabilitiesData.availability?.[modelId];
           return Boolean(availability?.latest_run);
         });
-        const nextModel = preferredDefaultModel || availableModelId || visibleModelIds[0] || "";
-        const modelOptions = visibleModelIds.map((modelId) => ({
-          value: modelId,
-          label: capabilitiesData.model_catalog[modelId]?.name || modelId,
+        const nextModel = preferredDefaultModel || availableModelId || orderedVisibleModelIds[0] || "";
+        const modelOptions = modelRows.map((entry) => ({
+          value: entry.id,
+          label: entry.displayName || entry.id,
         }));
         setModels(modelOptions);
         setModel(nextModel);
