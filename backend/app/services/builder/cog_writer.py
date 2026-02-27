@@ -291,6 +291,30 @@ def write_rgba_cog(
             _build_continuous_rgba_cog(
                 rgba, tmp_dir_path, output_path, transform, levels,
             )
+            if not _cog_has_overviews(output_path):
+                # Some GDAL builds do not propagate source overviews from a VRT
+                # into the final COG with COPY_SRC_OVERVIEWS=YES. Fall back to a
+                # single-file nearest-overview path so Gate 1 can pass reliably.
+                logger.warning(
+                    "Continuous RGBA COG missing overviews after VRT copy; "
+                    "falling back to nearest overview build: %s",
+                    output_path,
+                )
+                tmp_gtiff = tmp_dir_path / "fallback_base.tif"
+                _write_base_gtiff(
+                    data=rgba,
+                    path=tmp_gtiff,
+                    transform=transform,
+                    count=4,
+                    dtype="uint8",
+                    nodata=None,
+                )
+                _run_gdal([
+                    _gdal("gdaladdo"), "-r", "nearest",
+                    "--config", "GDAL_TIFF_OVR_BLOCKSIZE", str(COG_BLOCKSIZE),
+                    str(tmp_gtiff), *[str(l) for l in levels],
+                ])
+                _gtiff_to_cog(tmp_gtiff, output_path)
         else:
             # Discrete/indexed or no overviews: simple single-file path
             tmp_gtiff = tmp_dir_path / "base.tif"
@@ -662,3 +686,12 @@ def _gtiff_to_cog(src_path: Path, dst_path: Path) -> None:
         str(src_path),
         str(dst_path),
     ])
+
+
+def _cog_has_overviews(path: Path) -> bool:
+    """Return True when the first band advertises one or more overviews."""
+    try:
+        with rasterio.open(path) as ds:
+            return len(ds.overviews(1)) > 0
+    except Exception:
+        return False
