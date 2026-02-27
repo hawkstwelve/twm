@@ -24,7 +24,7 @@ from PIL import Image
 from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
 
-from app.services.render_resampling import rio_tiler_resampling_kwargs
+from .render_resampling import rio_tiler_resampling_kwargs
 
 logger = logging.getLogger(__name__)
 
