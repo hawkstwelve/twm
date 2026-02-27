@@ -53,6 +53,11 @@ class GFSPlugin(BaseModelPlugin):
             "u10": "10u",
             "10v": "10v",
             "v10": "10v",
+            "precip_total": "precip_total",
+            "total_precip": "precip_total",
+            "apcp": "precip_total",
+            "qpf": "precip_total",
+            "total_qpf": "precip_total",
             "qpf6h": "qpf6h",
             "precip_ptype": "precip_ptype",
             "crain": "crain",
@@ -278,6 +283,23 @@ GFS_VARS: dict[str, VarSpec] = {
         ),
     ),
     # ── QPF (Phase 3 candidate) ──────────────────────────────────────────────
+    "precip_total": VarSpec(
+        id="precip_total",
+        name="Total Precip",
+        selectors=VarSelectors(
+            search=[":APCP:surface:"],
+            filter_by_keys={
+                "shortName": "apcp",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "apcp",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="in",
+    ),
     "qpf6h": VarSpec(
         id="qpf6h",
         name="6-hr Precip",
@@ -288,7 +310,6 @@ GFS_VARS: dict[str, VarSpec] = {
                 "apcp_window_hours": "6",
             }
         ),
-        primary=True,
         kind="continuous",
         units="in",
     ),
@@ -299,11 +320,13 @@ GFS_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "wspd10m": "wspd10m",
     "refc": "refc",
     "precip_ptype": "precip_ptype",
+    "precip_total": "precip_total",
     "qpf6h": "qpf6h",
 }
 
 GFS_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
     "precip_ptype": 1,
+    "precip_total": 6,
     "qpf6h": 6,
 }
 
@@ -312,12 +335,14 @@ GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
     "refc": 1,
     "wspd10m": 2,
     "precip_ptype": 3,
-    "qpf6h": 4,
+    "precip_total": 4,
+    "qpf6h": 5,
 }
 
 GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "wspd10m": "ms_to_mph",
+    "precip_total": "kgm2_to_in",
     "qpf6h": "kgm2_to_in",
 }
 
