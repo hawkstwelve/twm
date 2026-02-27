@@ -15,10 +15,10 @@ from typing import Any, Iterable
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import Resampling
 
 from app.models.registry import MODEL_REGISTRY
 from app.services.builder.pipeline import build_frame
+from app.services.render_resampling import rasterio_resampling_for_loop
 
 logger = logging.getLogger(__name__)
 
@@ -553,6 +553,8 @@ def _enforce_run_retention(root: Path, keep_runs: int) -> None:
 
 def _convert_rgba_cog_to_loop_webp(
     *,
+    model_id: str,
+    var_key: str,
     cog_path: Path,
     out_path: Path,
     quality: int,
@@ -560,6 +562,7 @@ def _convert_rgba_cog_to_loop_webp(
 ) -> bool:
     try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
@@ -574,7 +577,7 @@ def _convert_rgba_cog_to_loop_webp(
             data = ds.read(
                 indexes=(1, 2, 3, 4),
                 out_shape=(4, out_h, out_w),
-                resampling=Resampling.bilinear,
+                resampling=resampling,
             )
 
         rgba = np.moveaxis(data, 0, -1)
@@ -607,7 +610,7 @@ def _pregenerate_loop_webp_for_run(
         (1, int(tier1_quality), int(tier1_max_dim)),
     )
 
-    jobs: list[tuple[Path, Path, int, int, int]] = []
+    jobs: list[tuple[str, Path, Path, int, int, int]] = []
     for var_dir in sorted([p for p in published_run.iterdir() if p.is_dir()]):
         variable = var_dir.name
         for cog_path in sorted(var_dir.glob("fh*.rgba.cog.tif")):
@@ -616,7 +619,7 @@ def _pregenerate_loop_webp_for_run(
                 out_path = loop_cache_root / model / run_id / variable / f"tier{tier}" / f"{fh}.loop.webp"
                 if out_path.is_file():
                     continue
-                jobs.append((cog_path, out_path, quality, max_dim, tier))
+                jobs.append((variable, cog_path, out_path, quality, max_dim, tier))
 
     if not jobs:
         return 0, 0
@@ -640,12 +643,14 @@ def _pregenerate_loop_webp_for_run(
         futures = [
             pool.submit(
                 _convert_rgba_cog_to_loop_webp,
+                model_id=model,
+                var_key=variable,
                 cog_path=cog_path,
                 out_path=out_path,
                 quality=quality,
                 max_dim=max_dim,
             )
-            for cog_path, out_path, quality, max_dim, _tier in jobs
+            for variable, cog_path, out_path, quality, max_dim, _tier in jobs
         ]
         for future in concurrent.futures.as_completed(futures):
             if future.result():

@@ -22,11 +22,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from PIL import Image
 from pyproj import Transformer
-from rasterio.enums import Resampling
 from rasterio.windows import Window
 
 from .config.regions import REGION_PRESETS
 from .models.registry import list_model_capabilities
+from .services.render_resampling import rasterio_resampling_for_loop
 
 logger = logging.getLogger(__name__)
 
@@ -584,7 +584,14 @@ def _legacy_loop_webp_path(model: str, run: str, var: str, fh: int, *, tier: int
     return None
 
 
-def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
+def _ensure_loop_webp(
+    cog_path: Path,
+    out_path: Path,
+    *,
+    model_id: str,
+    var_key: str,
+    tier: int,
+) -> bool:
     if out_path.is_file():
         return True
 
@@ -600,6 +607,7 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
         tmp_path = Path(tmp.name)
 
     try:
+        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
@@ -614,7 +622,7 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
             data = ds.read(
                 indexes=(1, 2, 3, 4),
                 out_shape=(4, out_h, out_w),
-                resampling=Resampling.bilinear,
+                resampling=resampling,
             )
 
         rgba = np.moveaxis(data, 0, -1)
@@ -632,7 +640,13 @@ def _ensure_loop_webp(cog_path: Path, out_path: Path, *, tier: int) -> bool:
         return False
 
 
-def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
+def _render_loop_webp_bytes(
+    cog_path: Path,
+    *,
+    model_id: str,
+    var_key: str,
+    tier: int,
+) -> bytes | None:
     tier_cfg = LOOP_TIER_CONFIG.get(tier)
     if tier_cfg is None:
         return None
@@ -641,6 +655,7 @@ def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
 
     try:
+        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
@@ -655,7 +670,7 @@ def _render_loop_webp_bytes(cog_path: Path, *, tier: int) -> bytes | None:
             data = ds.read(
                 indexes=(1, 2, 3, 4),
                 out_shape=(4, out_h, out_w),
-                resampling=Resampling.bilinear,
+                resampling=resampling,
             )
 
         rgba = np.moveaxis(data, 0, -1)
@@ -1075,7 +1090,13 @@ def get_loop_webp(
     if out_path is None:
         return Response(status_code=404, headers={"Cache-Control": CACHE_MISS})
 
-    if not _ensure_loop_webp(cog_path, out_path, tier=tier):
+    if not _ensure_loop_webp(
+        cog_path,
+        out_path,
+        model_id=model,
+        var_key=var,
+        tier=tier,
+    ):
         # Graceful degradation path: avoid surfacing hard 500s to clients when
         # cache writes fail (permissions/disk), and allow tier-1 to fall back.
         if tier == 1:
@@ -1088,18 +1109,34 @@ def get_loop_webp(
                 )
 
             tier0_out = _loop_webp_path(model, resolved, var, fh, tier=0)
-            if tier0_out is not None and _ensure_loop_webp(cog_path, tier0_out, tier=0):
+            if tier0_out is not None and _ensure_loop_webp(
+                cog_path,
+                tier0_out,
+                model_id=model,
+                var_key=var,
+                tier=0,
+            ):
                 return FileResponse(
                     path=str(tier0_out),
                     media_type="image/webp",
                     headers={"Cache-Control": CACHE_MISS},
                 )
 
-            tier0_bytes = _render_loop_webp_bytes(cog_path, tier=0)
+            tier0_bytes = _render_loop_webp_bytes(
+                cog_path,
+                model_id=model,
+                var_key=var,
+                tier=0,
+            )
             if tier0_bytes is not None:
                 return Response(content=tier0_bytes, media_type="image/webp", headers={"Cache-Control": CACHE_MISS})
 
-        content = _render_loop_webp_bytes(cog_path, tier=tier)
+        content = _render_loop_webp_bytes(
+            cog_path,
+            model_id=model,
+            var_key=var,
+            tier=tier,
+        )
         if content is not None:
             return Response(content=content, media_type="image/webp", headers={"Cache-Control": CACHE_MISS})
 

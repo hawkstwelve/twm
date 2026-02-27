@@ -38,8 +38,8 @@ def _gdalinfo(path: str) -> str:
 def test_rgba_cog_continuous():
     """Write a continuous RGBA COG for HRRR/PNW and validate structure.
 
-    Key assertion: all bands, including alpha, use average resampling
-    for overview generation.
+    Key assertion: RGB overviews use average while alpha remains nearest,
+    preserving hard transparency edges.
     """
     bbox, grid_m = get_grid_params("hrrr", "pnw")
     transform, height, width = compute_transform_and_shape(bbox, grid_m)

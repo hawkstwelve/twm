@@ -17,7 +17,7 @@ Overview resampling is defined exactly twice — once for continuous, once for c
 
 | `VarSpec.kind` | Bands 1–3 (RGB) | Band 4 (Alpha) | `gdaladdo` flags |
 |---|---|---|---|
-| `continuous` | `average` | `nearest` | `-r average` for RGB; alpha band overview built with `nearest` via separate pass or `--config GDAL_TIFF_OVR_BLOCKSIZE 512` |
+| `continuous` | `average` | `nearest` | Two-pass `gdaladdo`: `-r average -b 1 -b 2 -b 3` then `-r nearest -b 4` |
 | `discrete` | `nearest` | `nearest` | `-r nearest` for all bands |
 
 **Rules:**

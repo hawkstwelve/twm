@@ -1,8 +1,9 @@
 """TWF V3 Tile Server — dumb RGBA COG → PNG tile server.
 
-Hard Rule: No Runtime Transformation.
-The tile server MUST NOT apply any variable-dependent transformation.
-It reads 4-band RGBA COGs and returns PNG tiles. That's it.
+Hard Rule: No runtime colormap transformation.
+The tile server reads pre-styled 4-band RGBA COGs and returns PNG tiles.
+Render-time resampling is kind-driven (continuous vs categorical) to keep
+tile extraction consistent with loop WebP rendering.
 """
 
 from __future__ import annotations
@@ -22,6 +23,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image
 from rio_tiler.io.rasterio import Reader
 from rio_tiler.errors import TileOutsideBounds
+
+from app.services.render_resampling import rio_tiler_resampling_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -187,6 +190,8 @@ def _read_tile_compat(
     x: int,
     y: int,
     z: int,
+    resampling_method: str,
+    reproject_method: str,
 ):
     """Read a tile with compatibility across rio-tiler versions.
 
@@ -197,6 +202,8 @@ def _read_tile_compat(
     common_args = {
         "indexes": (1, 2, 3, 4),
         "tilesize": 512,
+        "resampling_method": resampling_method,
+        "reproject_method": reproject_method,
     }
 
     try:
@@ -402,11 +409,14 @@ def get_tile(
 
     try:
         with Reader(input=str(cog_path)) as cog:
+            resampling_kwargs = rio_tiler_resampling_kwargs(model_id=model, var_key=var)
             tile = _read_tile_compat(
                 cog,
                 x=x,
                 y=y,
                 z=z,
+                resampling_method=resampling_kwargs["resampling_method"],
+                reproject_method=resampling_kwargs["reproject_method"],
             )
 
         if _tile_is_fully_masked(tile):

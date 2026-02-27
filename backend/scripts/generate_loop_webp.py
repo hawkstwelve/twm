@@ -24,7 +24,8 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from PIL import Image
-from rasterio.enums import Resampling
+
+from app.services.render_resampling import rasterio_resampling_for_loop
 
 
 RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
@@ -95,9 +96,10 @@ def discover_jobs(
     return jobs
 
 
-def convert_job(job: Job, quality: int, max_dim: int) -> tuple[Job, bool, str | None]:
+def convert_job(job: Job, model_id: str, quality: int, max_dim: int) -> tuple[Job, bool, str | None]:
     try:
         job.webp_path.parent.mkdir(parents=True, exist_ok=True)
+        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=job.variable)
 
         with rasterio.open(job.cog_path) as ds:
             src_h = int(ds.height)
@@ -113,7 +115,7 @@ def convert_job(job: Job, quality: int, max_dim: int) -> tuple[Job, bool, str | 
             data = ds.read(
                 indexes=(1, 2, 3, 4),
                 out_shape=(4, out_h, out_w),
-                resampling=Resampling.bilinear,
+                resampling=resampling,
             )
 
         rgba = np.moveaxis(data, 0, -1)
@@ -166,7 +168,7 @@ def main() -> int:
     ok = 0
     failed = 0
     with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = [executor.submit(convert_job, job, args.quality, args.max_dim) for job in jobs]
+        futures = [executor.submit(convert_job, job, args.model, args.quality, args.max_dim) for job in jobs]
         for future in as_completed(futures):
             job, success, error = future.result()
             if success:

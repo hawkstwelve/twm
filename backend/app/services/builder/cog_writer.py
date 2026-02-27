@@ -8,7 +8,7 @@ All output files share a pixel-aligned grid for a given model/region,
 guaranteed by the use of fixed bounding boxes and target-aligned pixels.
 
 Overview strategy:
-  - continuous RGBA: average for all bands (RGBA)
+  - continuous RGBA: average for RGB, nearest for alpha
   - discrete/indexed RGBA: nearest for all bands
   - value: nearest
 
@@ -254,10 +254,10 @@ def write_rgba_cog(
         Model id (e.g. "hrrr") — used to look up grid parameters.
     region : str
         Region id (e.g. "pnw") — used to look up grid parameters.
-    kind : str
+        kind : str
         "continuous" or "discrete" / "indexed" — controls overview resampling.
         Current overview strategy:
-          continuous → average all bands (RGBA)
+          continuous → average RGB + nearest alpha
           discrete/indexed → nearest (all bands)
 
     Returns
@@ -560,26 +560,84 @@ def _build_continuous_rgba_cog(
     transform: rasterio.transform.Affine,
     levels: list[int],
 ) -> Path:
-    """Build a continuous RGBA COG with average overviews on all bands."""
+    """Build a continuous RGBA COG with RGB=average, alpha=nearest overviews."""
     level_strs = [str(l) for l in levels]
     ovr_blocksize = str(COG_BLOCKSIZE)
-    base_path = tmp_dir / "rgba_base.tif"
+    rgb_path = tmp_dir / "rgb_base.tif"
+    alpha_path = tmp_dir / "alpha_base.tif"
+    vrt_path = tmp_dir / "rgba_stacked.vrt"
+    height = int(rgba.shape[1])
+    width = int(rgba.shape[2])
+    gt = (
+        f"{transform.c:.14f}, {transform.a:.14f}, {transform.b:.14f}, "
+        f"{transform.f:.14f}, {transform.d:.14f}, {transform.e:.14f}"
+    )
+
     _write_base_gtiff(
-        data=rgba,
-        path=base_path,
+        data=rgba[:3, :, :],
+        path=rgb_path,
         transform=transform,
-        count=4,
+        count=3,
         dtype="uint8",
         nodata=None,
     )
+    _write_base_gtiff(
+        data=rgba[3:4, :, :],
+        path=alpha_path,
+        transform=transform,
+        count=1,
+        dtype="uint8",
+        nodata=None,
+    )
+    # Pass 1: RGB overviews use average resampling for smoother continuous fields.
     _run_gdal([
         _gdal("gdaladdo"), "-r", "average",
         "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-        str(base_path), *level_strs,
+        str(rgb_path), *level_strs,
     ])
-    _gtiff_to_cog(base_path, output_path)
+    # Pass 2: Alpha overview stays nearest to preserve sharp validity boundaries.
+    _run_gdal([
+        _gdal("gdaladdo"), "-r", "nearest",
+        "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
+        str(alpha_path), *level_strs,
+    ])
+    # Ensure CRS/geotransform are explicit in the VRT metadata.
+    vrt_path.write_text(
+        (
+            f'<VRTDataset rasterXSize="{width}" rasterYSize="{height}">\n'
+            f"  <SRS>EPSG:3857</SRS>\n"
+            f"  <GeoTransform>{gt}</GeoTransform>\n"
+            f"  <VRTRasterBand dataType=\"Byte\" band=\"1\">\n"
+            f"    <SimpleSource>\n"
+            f"      <SourceFilename relativeToVRT=\"1\">{rgb_path.name}</SourceFilename>\n"
+            f"      <SourceBand>1</SourceBand>\n"
+            f"    </SimpleSource>\n"
+            f"  </VRTRasterBand>\n"
+            f"  <VRTRasterBand dataType=\"Byte\" band=\"2\">\n"
+            f"    <SimpleSource>\n"
+            f"      <SourceFilename relativeToVRT=\"1\">{rgb_path.name}</SourceFilename>\n"
+            f"      <SourceBand>2</SourceBand>\n"
+            f"    </SimpleSource>\n"
+            f"  </VRTRasterBand>\n"
+            f"  <VRTRasterBand dataType=\"Byte\" band=\"3\">\n"
+            f"    <SimpleSource>\n"
+            f"      <SourceFilename relativeToVRT=\"1\">{rgb_path.name}</SourceFilename>\n"
+            f"      <SourceBand>3</SourceBand>\n"
+            f"    </SimpleSource>\n"
+            f"  </VRTRasterBand>\n"
+            f"  <VRTRasterBand dataType=\"Byte\" band=\"4\">\n"
+            f"    <SimpleSource>\n"
+            f"      <SourceFilename relativeToVRT=\"1\">{alpha_path.name}</SourceFilename>\n"
+            f"      <SourceBand>1</SourceBand>\n"
+            f"    </SimpleSource>\n"
+            f"  </VRTRasterBand>\n"
+            f"</VRTDataset>\n"
+        ),
+        encoding="utf-8",
+    )
+    _gtiff_to_cog(vrt_path, output_path)
     logger.debug(
-        "Built continuous RGBA COG with average overviews (RGBA), levels=%s",
+        "Built continuous RGBA COG with overviews (RGB=average, A=nearest), levels=%s",
         levels,
     )
     return output_path
