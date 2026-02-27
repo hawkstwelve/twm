@@ -1991,11 +1991,16 @@ export default function App() {
           return;
         }
         const requested = latestRequestedHour as number;
+        const useExactScrubSelection = model === "gfs";
         if (!isLoopDisplayActive) {
           if (frameHours.length === 0) {
             return;
           }
           const snappedTileHour = nearestFrame(frameHours, requested);
+          if (useExactScrubSelection) {
+            setTargetForecastHour(snappedTileHour);
+            return;
+          }
           const readyTileHour = findNearestReadyTileScrubHour(snappedTileHour);
           if (Number.isFinite(readyTileHour)) {
             setTargetForecastHour(readyTileHour as number);
@@ -2006,11 +2011,16 @@ export default function App() {
         const nextHour = loopFrameHours.length > 0
           ? nearestFrame(loopFrameHours, requested)
           : requested;
-        const readyLoopHour = findNearestDecodedLoopScrubHour(nextHour, visibleRenderMode);
-        if (Number.isFinite(readyLoopHour)) {
-          const resolvedReadyHour = readyLoopHour as number;
-          setTargetForecastHour(resolvedReadyHour);
-          setLoopDisplayHour(resolvedReadyHour);
+        if (useExactScrubSelection) {
+          setTargetForecastHour(nextHour);
+          setLoopDisplayHour(nextHour);
+        } else {
+          const readyLoopHour = findNearestDecodedLoopScrubHour(nextHour, visibleRenderMode);
+          if (Number.isFinite(readyLoopHour)) {
+            const resolvedReadyHour = readyLoopHour as number;
+            setTargetForecastHour(resolvedReadyHour);
+            setLoopDisplayHour(resolvedReadyHour);
+          }
         }
 
         loopDisplayDecodeTokenRef.current += 1;
@@ -2039,6 +2049,7 @@ export default function App() {
       isLoopDisplayActive,
       loopFrameHours,
       frameHours,
+      model,
       ensureLoopFrameDecoded,
       visibleRenderMode,
       findNearestReadyTileScrubHour,
