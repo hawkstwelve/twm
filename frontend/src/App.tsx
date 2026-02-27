@@ -2785,6 +2785,7 @@ export default function App() {
           regionViews={regionViews}
           opacity={opacity}
           mode={isLoopDisplayActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
+          model={model}
           variable={variable}
           overlayFadeOutZoom={overlayFadeOutZoom}
           zoomHintMinZoom={zoomHintMinZoom}

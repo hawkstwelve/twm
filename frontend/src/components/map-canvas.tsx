@@ -138,6 +138,15 @@ function getResamplingMode(variable?: string): "nearest" | "linear" {
   return "linear";
 }
 
+function getLoopResamplingMode(model?: string, variable?: string): "nearest" | "linear" {
+  // Preserve existing behavior for non-GFS models (including HRRR).
+  if (model !== "gfs") {
+    return "nearest";
+  }
+  // For GFS, use variable-aware resampling (continuous -> linear, discrete -> nearest).
+  return getResamplingMode(variable);
+}
+
 function getOverlayPaintSettingsForDark(variable?: string): {
   contrast: number;
   saturation: number;
@@ -231,7 +240,8 @@ function styleFor(
   variable?: string,
   overlayFadeOutZoom?: { start: number; end: number } | null,
   contourGeoJsonUrl?: string | null,
-  basemapMode: BasemapMode = "light"
+  basemapMode: BasemapMode = "light",
+  model?: string
 ): StyleSpecification {
   const resamplingMode = getResamplingMode(variable);
   const paintSettings = getOverlayPaintSettings(variable, basemapMode);
@@ -457,7 +467,7 @@ function styleFor(
         },
         paint: {
           "raster-opacity": opacity,
-          "raster-resampling": "nearest",
+          "raster-resampling": getLoopResamplingMode(model, variable),
           "raster-fade-duration": 0,
         },
       },
@@ -477,6 +487,7 @@ type MapCanvasProps = {
   regionViews?: Record<string, RegionView>;
   opacity: number;
   mode: PlaybackMode;
+  model?: string;
   variable?: string;
   overlayFadeOutZoom?: { start: number; end: number } | null;
   zoomHintMinZoom?: number | null;
@@ -503,6 +514,7 @@ export function MapCanvas({
   regionViews,
   opacity,
   mode,
+  model,
   variable,
   overlayFadeOutZoom = null,
   zoomHintMinZoom = null,
@@ -877,7 +889,7 @@ export function MapCanvas({
 
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleFor(tileUrl, opacity, variable, overlayFadeOutZoom, contourGeoJsonUrl, basemapMode),
+      style: styleFor(tileUrl, opacity, variable, overlayFadeOutZoom, contourGeoJsonUrl, basemapMode, model),
       center: view.center,
       zoom: view.zoom,
       minZoom: view.minZoom ?? 3,
@@ -949,7 +961,8 @@ export function MapCanvas({
       variable,
       overlayFadeOutZoom,
       contourGeoJsonUrl,
-      basemapMode
+      basemapMode,
+      model
     );
 
     const onStyleData = () => {
@@ -1020,7 +1033,16 @@ export function MapCanvas({
     setLayerOpacity,
     setLayerRasterPaint,
     variable,
+    model,
   ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded || !map.getLayer(LOOP_LAYER_ID)) {
+      return;
+    }
+    map.setPaintProperty(LOOP_LAYER_ID, "raster-resampling", getLoopResamplingMode(model, variable));
+  }, [isLoaded, model, variable]);
 
   useEffect(() => {
     const map = mapRef.current;
