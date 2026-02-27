@@ -223,21 +223,21 @@ function getLabelPaintSettings(basemapMode: BasemapMode): {
 } {
   if (basemapMode === "dark") {
     return {
-      // Keep map labels crisp at fractional zoom on dark basemap.
-      "raster-resampling": "nearest",
+      // Use linear filtering to avoid blocky/pixelated labels on zoom.
+      "raster-resampling": "linear",
       "raster-opacity": 1,
-      "raster-contrast": 0.24,
-      "raster-saturation": -0.1,
+      "raster-contrast": 0.1,
+      "raster-saturation": -0.06,
       "raster-brightness-min": 0.05,
       "raster-brightness-max": 1,
     };
   }
   return {
-    // Keep map labels crisp at fractional zoom on light basemap.
-    "raster-resampling": "nearest",
+    // Use linear filtering to avoid blocky/pixelated labels on zoom.
+    "raster-resampling": "linear",
     "raster-opacity": 1,
-    "raster-contrast": 0.18,
-    "raster-saturation": -0.12,
+    "raster-contrast": 0.08,
+    "raster-saturation": -0.06,
     "raster-brightness-min": 0,
     "raster-brightness-max": 1,
   };
