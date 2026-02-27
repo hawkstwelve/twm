@@ -12,7 +12,7 @@ from typing import Any
 
 from rasterio.enums import Resampling
 
-from app.models.registry import list_model_capabilities
+from ..models.registry import list_model_capabilities
 
 logger = logging.getLogger(__name__)
 
