@@ -765,7 +765,15 @@ export default function App() {
   }, [regionPresets]);
 
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
-  const latestRunId = runs[0] ?? frameRows[0]?.run ?? null;
+  const latestRunId = useMemo(() => {
+    const manifestLatest =
+      run === "latest" && runManifest?.model === model ? (runManifest.run ?? null) : null;
+    const availabilityLatest =
+      model && capabilities?.availability?.[model]
+        ? (capabilities.availability[model].latest_run ?? null)
+        : null;
+    return manifestLatest ?? availabilityLatest ?? runs[0] ?? frameRows[0]?.run ?? null;
+  }, [run, runManifest, model, capabilities, runs, frameRows]);
   const resolvedRunForRequests = run === "latest" ? (latestRunId ?? "latest") : run;
   const apiRoot = API_ORIGIN.replace(/\/$/, "");
 
