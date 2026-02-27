@@ -685,34 +685,43 @@ def _process_run(
     cycle_hour = run_dt.hour
     targets = _scheduled_targets_for_cycle(plugin, vars_to_build, cycle_hour)
 
-    # Build targets sequentially per variable: if the next FH is missing,
-    # do not attempt later FHs for that variable in this poll cycle.
-    # Upstream publication is typically hour-by-hour, so this avoids repeated
-    # futile fetches for future FHs and significantly reduces log spam.
+    # Catch up within a single poll cycle: for each variable, keep advancing
+    # forecast hours until we hit the first unavailable/failed hour.
     fhs_by_var: dict[str, list[int]] = {}
     for var_id, fh in targets:
         fhs_by_var.setdefault(var_id, []).append(int(fh))
 
-    missing: list[tuple[str, int]] = []
-    for var_id, fhs in fhs_by_var.items():
-        for fh in sorted(set(fhs)):
-            if _frame_artifacts_exist(data_root, model_id, run_id, var_id, fh):
+    total = len(targets)
+    built_ok = 0
+    blocked_vars: set[str] = set()
+    rounds = 0
+    while True:
+        next_missing: list[tuple[str, int]] = []
+        for var_id, fhs in fhs_by_var.items():
+            if var_id in blocked_vars:
                 continue
-            missing.append((var_id, fh))
+            for fh in sorted(set(fhs)):
+                if _frame_artifacts_exist(data_root, model_id, run_id, var_id, fh):
+                    continue
+                next_missing.append((var_id, fh))
+                break
+
+        if not next_missing:
             break
 
-    total = len(targets)
-    logger.info(
-        "Run=%s model=%s coverage=%s targets=%d next_missing=%d",
-        run_id,
-        model_id,
-        CANONICAL_COVERAGE,
-        total,
-        len(missing),
-    )
+        rounds += 1
+        logger.info(
+            "Run=%s model=%s coverage=%s targets=%d catchup_round=%d pending=%d blocked=%d",
+            run_id,
+            model_id,
+            CANONICAL_COVERAGE,
+            total,
+            rounds,
+            len(next_missing),
+            len(blocked_vars),
+        )
 
-    built_ok = 0
-    if missing:
+        round_successes = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
                 pool.submit(
@@ -724,15 +733,26 @@ def _process_run(
                     data_root=data_root,
                     plugin=plugin,
                 )
-                for var_id, fh in missing
+                for var_id, fh in next_missing
             ]
             for future in concurrent.futures.as_completed(futures):
                 var_id, fh, ok = future.result()
                 if ok:
                     built_ok += 1
+                    round_successes += 1
                     logger.info("Build success: %s %s fh%03d", run_id, var_id, fh)
                 else:
+                    blocked_vars.add(var_id)
                     logger.warning("Build skipped/failed: %s %s fh%03d", run_id, var_id, fh)
+
+        if round_successes == 0:
+            logger.info(
+                "Catch-up paused: run=%s no progress in round=%d; blocked_vars=%s",
+                run_id,
+                rounds,
+                sorted(blocked_vars),
+            )
+            break
 
     if _should_promote(data_root, model_id, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
         _promote_run(data_root, model_id, run_id)
