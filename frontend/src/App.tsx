@@ -448,41 +448,6 @@ function runIdToIso(runId: string | null): string | null {
   return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), 0, 0)).toISOString();
 }
 
-function runIdHour(runId: string): number | null {
-  const match = runId.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})z$/i);
-  if (!match) {
-    return null;
-  }
-  const hour = Number(match[4]);
-  return Number.isFinite(hour) ? hour : null;
-}
-
-function runIdMatchesCycle(runId: string, modelCapability: CapabilityModel | null | undefined): boolean {
-  const hour = runIdHour(runId);
-  if (!Number.isFinite(hour)) {
-    return false;
-  }
-
-  const runDiscovery = (modelCapability?.run_discovery ?? {}) as Record<string, unknown>;
-  const cycleHoursRaw = runDiscovery.cycle_hours;
-  if (Array.isArray(cycleHoursRaw)) {
-    const allowedHours = cycleHoursRaw
-      .map((value) => Number(value))
-      .filter((value) => Number.isInteger(value) && value >= 0 && value <= 23);
-    if (allowedHours.length > 0) {
-      return allowedHours.includes(hour as number);
-    }
-  }
-
-  const cadenceRaw = Number(runDiscovery.cycle_cadence_hours);
-  const cadence = Number.isFinite(cadenceRaw) && cadenceRaw >= 1 ? Math.max(1, Math.floor(cadenceRaw)) : 1;
-  return (hour as number) % cadence === 0;
-}
-
-function filterRunsForModel(runs: string[], modelCapability: CapabilityModel | null | undefined): string[] {
-  return runs.filter((runId) => runIdMatchesCycle(runId, modelCapability));
-}
-
 function isPrecipPtypeLegendMeta(
   meta: LegendMeta & { var_key?: string; spec_key?: string; id?: string; var?: string }
 ): boolean {
@@ -809,9 +774,8 @@ export default function App() {
         : null;
     const fallbackRun = runs[0] ?? frameRows[0]?.run ?? null;
     const candidates = [manifestLatest, availabilityLatest, fallbackRun].filter((value): value is string => Boolean(value));
-    const firstValid = candidates.find((value) => runIdMatchesCycle(value, selectedModelCapability));
-    return firstValid ?? null;
-  }, [run, runManifest, model, capabilities, runs, frameRows, selectedModelCapability]);
+    return candidates[0] ?? null;
+  }, [run, runManifest, model, capabilities, runs, frameRows]);
   const resolvedRunForRequests = run === "latest" ? (latestRunId ?? "latest") : run;
   const apiRoot = API_ORIGIN.replace(/\/$/, "");
 
@@ -2292,8 +2256,7 @@ export default function App() {
           return;
         }
 
-        const filteredRunData = filterRunsForModel(runData, selectedModelCapability);
-        const nextRun = run !== "latest" && filteredRunData.includes(run) ? run : "latest";
+        const nextRun = run !== "latest" && runData.includes(run) ? run : "latest";
         let manifestData = requestedManifest;
         if (!manifestData && nextRun !== run) {
           manifestData = await fetchManifest(model, nextRun, { signal: controller.signal }).catch(() => null);
@@ -2301,13 +2264,10 @@ export default function App() {
             return;
           }
         }
-        if (manifestData && !runIdMatchesCycle(manifestData.run, selectedModelCapability)) {
-          manifestData = null;
-        }
 
         if (shouldFetchRuns) {
           runsLoadedForModelRef.current = model;
-          setRuns(filteredRunData);
+          setRuns(runData);
         }
         setRun(nextRun);
 

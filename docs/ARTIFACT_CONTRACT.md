@@ -14,10 +14,11 @@
 #### Locked Overview Strategy
 
 Overview resampling is defined exactly twice — once for continuous, once for categorical — and encoded in `VarSpec.kind`. There are no per-variable overrides, no special cases, no hacks.
+This policy applies globally across all models (including HRRR and GFS).
 
 | `VarSpec.kind` | Bands 1–3 (RGB) | Band 4 (Alpha) | `gdaladdo` flags |
 |---|---|---|---|
-| `continuous` | `average` | `nearest` | Two-pass `gdaladdo`: `-r average -b 1 -b 2 -b 3` then `-r nearest -b 4` |
+| `continuous` | `average` | `nearest` | Two-pass `gdaladdo` on split sources: RGB file `-r average`, alpha file `-r nearest`; stack and copy overviews into final COG |
 | `discrete` | `nearest` | `nearest` | `-r nearest` for all bands |
 
 **Rules:**

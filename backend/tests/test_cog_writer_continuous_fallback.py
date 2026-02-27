@@ -12,7 +12,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.services.builder import cog_writer
 
 
-def test_continuous_rgba_falls_back_when_vrt_copy_loses_overviews(
+def test_continuous_rgba_uses_two_pass_split_source_policy(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -21,40 +21,21 @@ def test_continuous_rgba_falls_back_when_vrt_copy_loses_overviews(
     rgba = np.zeros((4, height, width), dtype=np.uint8)
     out_path = tmp_path / "fh000.rgba.cog.tif"
 
-    called = {
-        "continuous": 0,
-        "write_base": 0,
-        "gdaladdo": 0,
-        "translate": 0,
-    }
-
-    def fake_continuous_build(
-        rgba_in: np.ndarray,
-        tmp_dir: Path,
-        output_path: Path,
-        transform,
-        levels: list[int],
-    ) -> Path:
-        del rgba_in, tmp_dir, transform, levels
-        called["continuous"] += 1
-        output_path.touch()
-        return output_path
+    called = {"write_base": 0, "translate": 0}
+    gdal_commands: list[list[str]] = []
 
     def fake_write_base(*args, **kwargs) -> None:
         del args, kwargs
         called["write_base"] += 1
 
     def fake_run_gdal(cmd: list[str]) -> None:
-        if len(cmd) > 0 and "gdaladdo" in str(cmd[0]):
-            called["gdaladdo"] += 1
+        gdal_commands.append(list(cmd))
 
     def fake_translate(src: Path, dst: Path) -> None:
         del src
         called["translate"] += 1
         dst.touch()
 
-    monkeypatch.setattr(cog_writer, "_build_continuous_rgba_cog", fake_continuous_build)
-    monkeypatch.setattr(cog_writer, "_cog_has_overviews", lambda path: False)
     monkeypatch.setattr(cog_writer, "_write_base_gtiff", fake_write_base)
     monkeypatch.setattr(cog_writer, "_run_gdal", fake_run_gdal)
     monkeypatch.setattr(cog_writer, "_gtiff_to_cog", fake_translate)
@@ -62,7 +43,29 @@ def test_continuous_rgba_falls_back_when_vrt_copy_loses_overviews(
 
     cog_writer.write_rgba_cog(rgba, out_path, model="gfs", region="pnw", kind="continuous")
 
-    assert called["continuous"] == 1
-    assert called["write_base"] == 1
-    assert called["gdaladdo"] == 1
+    assert called["write_base"] == 2
     assert called["translate"] == 1
+
+    gdaladdo_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdaladdo"]
+    assert len(gdaladdo_cmds) == 2
+
+    rgb_cmd = gdaladdo_cmds[0]
+    alpha_cmd = gdaladdo_cmds[1]
+
+    def _source_path_arg(cmd: list[str]) -> str:
+        for token in cmd:
+            if token.endswith(".tif"):
+                return token
+        return ""
+
+    assert "-r" in rgb_cmd and rgb_cmd[rgb_cmd.index("-r") + 1] == "average"
+    assert _source_path_arg(rgb_cmd).endswith("rgb_base.tif")
+
+    assert "-r" in alpha_cmd and alpha_cmd[alpha_cmd.index("-r") + 1] == "nearest"
+    assert _source_path_arg(alpha_cmd).endswith("alpha_base.tif")
+
+    translate_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdal_translate"]
+    assert len(translate_cmds) == 1
+    gtiff_translate = translate_cmds[0]
+    assert "-of" in gtiff_translate and gtiff_translate[gtiff_translate.index("-of") + 1] == "GTiff"
+    assert "COPY_SRC_OVERVIEWS=YES" in gtiff_translate
