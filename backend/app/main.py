@@ -135,6 +135,47 @@ LOOP_MANIFEST_PROJECTION = "EPSG:4326"
 LOOP_MANIFEST_BBOX = [-125.0, 24.0, -66.5, 50.0]
 
 
+def _run_hour(run_id: str) -> int | None:
+    match = _RUN_ID_RE.match(run_id)
+    if not match:
+        return None
+    try:
+        return int(run_id[9:11])
+    except ValueError:
+        return None
+
+
+@lru_cache(maxsize=64)
+def _model_allowed_cycle_hours(model: str) -> set[int]:
+    model_id = model.strip().lower()
+    capabilities = list_model_capabilities().get(model_id)
+    run_discovery = getattr(capabilities, "run_discovery", {}) if capabilities is not None else {}
+
+    explicit_hours = run_discovery.get("cycle_hours") if isinstance(run_discovery, dict) else None
+    if isinstance(explicit_hours, (list, tuple, set)):
+        resolved = {
+            int(hour)
+            for hour in explicit_hours
+            if isinstance(hour, int) and 0 <= int(hour) <= 23
+        }
+        if resolved:
+            return resolved
+
+    cadence_raw = run_discovery.get("cycle_cadence_hours") if isinstance(run_discovery, dict) else 1
+    try:
+        cadence = max(1, int(cadence_raw))
+    except (TypeError, ValueError):
+        cadence = 1
+    return set(range(0, 24, cadence))
+
+
+def _run_matches_model_cycle(model: str, run_id: str) -> bool:
+    hour = _run_hour(run_id)
+    if hour is None:
+        return False
+    return hour in _model_allowed_cycle_hours(model)
+
+
 def _loop_webp_url(model: str, run: str, var: str, fh: int, *, tier: int, version_token: str) -> str:
     base = f"/api/v4/{model}/{run}/{var}/{fh}/loop.webp"
     return f"{base}?tier={tier}&v={version_token}"
@@ -252,6 +293,9 @@ def _latest_run_from_pointer(model: str) -> str | None:
     if not isinstance(run_id, str) or not _RUN_ID_RE.match(run_id):
         logger.warning("Invalid run_id in LATEST.json at %s: %r", latest_path, run_id)
         return None
+    if not _run_matches_model_cycle(model, run_id):
+        logger.warning("LATEST.json points to out-of-cycle run for %s: %s", model, run_id)
+        return None
 
     run_dir = PUBLISHED_ROOT / model / run_id
     manifest_path = MANIFESTS_ROOT / model / f"{run_id}.json"
@@ -269,6 +313,8 @@ def _scan_manifest_runs(model: str) -> list[str]:
     for file_path in model_manifest_dir.glob("*.json"):
         run_id = file_path.stem
         if not _RUN_ID_RE.match(run_id):
+            continue
+        if not _run_matches_model_cycle(model, run_id):
             continue
         if not (PUBLISHED_ROOT / model / run_id).is_dir():
             continue
@@ -458,6 +504,8 @@ def _resolve_run(model: str, run: str) -> str | None:
     if run == "latest":
         return _resolve_latest_run(model)
     if not _RUN_ID_RE.match(run):
+        return None
+    if not _run_matches_model_cycle(model, run):
         return None
     run_dir = PUBLISHED_ROOT / model / run
     manifest_path = MANIFESTS_ROOT / model / f"{run}.json"

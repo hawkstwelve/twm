@@ -983,7 +983,15 @@ export function MapCanvas({
 
     const handleMapError = (event: { error?: unknown }) => {
       const err = event?.error;
-      if (err instanceof Error && err.name === "AbortError") {
+      const errName =
+        typeof err === "object" && err !== null && "name" in err
+          ? String((err as { name?: unknown }).name ?? "")
+          : "";
+      const errMessage =
+        typeof err === "object" && err !== null && "message" in err
+          ? String((err as { message?: unknown }).message ?? "")
+          : "";
+      if (errName === "AbortError" || errMessage === "AbortError") {
         // Expected when setTiles() rapidly supersedes in-flight requests.
         return;
       }

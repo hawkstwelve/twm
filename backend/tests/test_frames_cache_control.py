@@ -28,6 +28,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     var = "radar_ptype"
     gfs_model = "gfs"
     gfs_run_id = "20260224_12z"
+    gfs_invalid_run_id = "20260224_20z"
     gfs_var = "tmp2m"
 
     model_manifest_dir = manifests_root / model
@@ -78,6 +79,21 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
             }
         )
     )
+    (gfs_manifest_dir / f"{gfs_invalid_run_id}.json").write_text(
+        json.dumps(
+            {
+                "variables": {
+                    gfs_var: {
+                        "expected_frames": 1,
+                        "available_frames": 1,
+                        "frames": [
+                            {"fh": 0},
+                        ],
+                    }
+                }
+            }
+        )
+    )
 
     model_published_dir = published_root / model
     (model_published_dir / run_id).mkdir(parents=True, exist_ok=True)
@@ -85,7 +101,10 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     (model_published_dir / "LATEST.json").write_text(json.dumps({"run_id": run_id}))
     gfs_published_dir = published_root / gfs_model
     (gfs_published_dir / gfs_run_id).mkdir(parents=True, exist_ok=True)
-    (gfs_published_dir / "LATEST.json").write_text(json.dumps({"run_id": gfs_run_id}))
+    (gfs_published_dir / gfs_invalid_run_id).mkdir(parents=True, exist_ok=True)
+    # Intentionally point at an invalid GFS cycle hour to ensure API-side filtering
+    # still resolves latest to a valid 6-hour cycle.
+    (gfs_published_dir / "LATEST.json").write_text(json.dumps({"run_id": gfs_invalid_run_id}))
 
     # Seed loop cache artifacts so frame payloads include loop URLs.
     for fh in (0, 1):
@@ -207,3 +226,12 @@ async def test_capabilities_availability_readiness_fields(client: httpx.AsyncCli
     assert gfs["latest_run_ready"] is False
     assert gfs["latest_run_ready_vars"] == []
     assert gfs["latest_run_ready_frame_count"] == 0
+
+
+async def test_runs_and_manifest_reject_out_of_cycle_gfs_run(client: httpx.AsyncClient) -> None:
+    runs_resp = await client.get("/api/v4/gfs/runs")
+    assert runs_resp.status_code == 200
+    assert runs_resp.json() == ["20260224_12z"]
+
+    invalid_manifest_resp = await client.get("/api/v4/gfs/20260224_20z/manifest")
+    assert invalid_manifest_resp.status_code == 404
