@@ -590,7 +590,6 @@ export function MapCanvas({
   const loopToTileIdleCleanupRef = useRef<(() => void) | null>(null);
   const loopToTileTokenRef = useRef(0);
   const previousLoopActiveRef = useRef(loopActive);
-  const loopActiveSignalRef = useRef(loopActive);
   const isLoopToTileTransitioningRef = useRef(false);
 
   const view = useMemo(() => {
@@ -982,6 +981,19 @@ export function MapCanvas({
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
+    const handleMapError = (event: { error?: unknown }) => {
+      const err = event?.error;
+      if (err instanceof Error && err.name === "AbortError") {
+        // Expected when setTiles() rapidly supersedes in-flight requests.
+        return;
+      }
+      if (err) {
+        console.warn("[map] MapLibre error", err);
+      }
+    };
+
+    map.on("error", handleMapError as any);
+
     map.on("load", () => {
       setIsLoaded(true);
       initializeSourceTracking(tileUrl);
@@ -992,6 +1004,7 @@ export function MapCanvas({
     mapRef.current = map;
 
     return () => {
+      map.off("error", handleMapError as any);
       cancelCrossfade();
       cancelLoopToTileTransition();
       map.remove();
@@ -1567,17 +1580,6 @@ export function MapCanvas({
   }, [prefetchTileUrls, isLoaded, waitForSourceReady, setTilesSafe, onTileReady]);
 
   useEffect(() => {
-    const wasLoopActive = loopActiveSignalRef.current;
-    if (wasLoopActive && !loopActive) {
-      isLoopToTileTransitioningRef.current = true;
-    }
-    if (loopActive) {
-      isLoopToTileTransitioningRef.current = false;
-    }
-    loopActiveSignalRef.current = loopActive;
-  }, [loopActive]);
-
-  useEffect(() => {
     const map = mapRef.current;
     if (!map || !isLoaded) {
       return;
@@ -1634,6 +1636,7 @@ export function MapCanvas({
       setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
       setLayerVisibility(map, LOOP_LAYER_ID, Boolean(loopImageUrl));
       setLayerOpacity(map, LOOP_LAYER_ID, targetOpacity);
+      setLayerVisibility(map, CONTOUR_LAYER_ID, false);
     } else if (wasLoopActive && loopImageUrl) {
       isLoopToTileTransitioningRef.current = true;
       const transitionToken = ++loopToTileTokenRef.current;
@@ -1709,6 +1712,7 @@ export function MapCanvas({
       setLayerVisibility(map, layerId(inactiveBuffer), false);
       setLayerVisibility(map, LOOP_LAYER_ID, false);
       setLayerOpacity(map, LOOP_LAYER_ID, targetOpacity);
+      setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m");
     }
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
       setLayerOpacity(map, prefetchLayerId(idx), HIDDEN_PREFETCH_OPACITY);
