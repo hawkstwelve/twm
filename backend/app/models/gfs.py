@@ -219,8 +219,8 @@ GFS_VARS: dict[str, VarSpec] = {
         derived=True,
         derive="precip_ptype_blend",
         kind="discrete",
-        units="mm/hr",
-        normalize_units="mm/hr",
+        units="in/hr",
+        normalize_units="in/hr",
     ),
     "crain": VarSpec(
         id="crain",
@@ -325,7 +325,7 @@ GFS_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
 }
 
 GFS_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
-    "precip_ptype": 1,
+    "precip_ptype": 6,
     "precip_total": 6,
     "qpf6h": 6,
 }
@@ -347,6 +347,9 @@ GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
 }
 
 GFS_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {
+    "precip_total": {
+        "min_fh": 6,
+    },
     "qpf6h": {
         "min_fh": 6,
     },

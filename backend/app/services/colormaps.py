@@ -9,10 +9,16 @@ from __future__ import annotations
 
 import numpy as np
 
-# Precipitation type configuration with levels and colors
-RAIN_LEVELS = [0.01, 0.1, 0.25, 0.5, 1.0, 1.5, 2.5, 4, 6, 10, 16, 24]
-SNOW_LEVELS = [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0]
-WINTER_LEVELS = [0.1, 0.5, 1, 2, 3, 4, 6, 10, 14]
+# Precipitation type configuration with levels and colors.
+# Legacy thresholds were specified in mm/hr; convert once to in/hr so legend
+# units are consistent with HRRR-style precip displays.
+MM_PER_INCH = 25.4
+RAIN_LEVELS_MMHR = [0.01, 0.1, 0.25, 0.5, 1.0, 1.5, 2.5, 4, 6, 10, 16, 24]
+SNOW_LEVELS_MMHR = [0.1, 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0, 14.0]
+WINTER_LEVELS_MMHR = [0.1, 0.5, 1, 2, 3, 4, 6, 10, 14]
+RAIN_LEVELS = [value / MM_PER_INCH for value in RAIN_LEVELS_MMHR]
+SNOW_LEVELS = [value / MM_PER_INCH for value in SNOW_LEVELS_MMHR]
+WINTER_LEVELS = [value / MM_PER_INCH for value in WINTER_LEVELS_MMHR]
 
 PRECIP_CONFIG = {
     "rain": {
@@ -326,25 +332,25 @@ TMP850_RANGE = (-40.0, 40.0)
 COLOR_MAP_SPECS: dict[str, dict] = {
     "precip_rain": {
         "type": "discrete",
-        "units": "mm/hr",
+        "units": "in/hr",
         "levels": PRECIP_CONFIG["rain"]["levels"],
         "colors": PRECIP_CONFIG["rain"]["colors"],
     },
     "precip_frzr": {
         "type": "discrete",
-        "units": "mm/hr",
+        "units": "in/hr",
         "levels": PRECIP_CONFIG["frzr"]["levels"],
         "colors": PRECIP_CONFIG["frzr"]["colors"],
     },
     "precip_sleet": {
         "type": "discrete",
-        "units": "mm/hr",
+        "units": "in/hr",
         "levels": PRECIP_CONFIG["sleet"]["levels"],
         "colors": PRECIP_CONFIG["sleet"]["colors"],
     },
     "precip_snow": {
         "type": "discrete",
-        "units": "mm/hr",
+        "units": "in/hr",
         "levels": PRECIP_CONFIG["snow"]["levels"],
         "colors": PRECIP_CONFIG["snow"]["colors"],
     },
@@ -384,13 +390,13 @@ COLOR_MAP_SPECS: dict[str, dict] = {
     },
     "precip_ptype": {
         "type": "indexed",
-        "units": "mm/hr",
+        "units": "in/hr",
         "levels": PRECIP_PTYPE_LEVELS,
         "colors": PRECIP_PTYPE_COLORS,
         "range": PRECIP_PTYPE_RANGE,
         "bins_per_ptype": PRECIP_PTYPE_BINS_PER_TYPE,
         "display_name": "Precipitation Intensity",
-        "legend_title": "Precipitation Rate (mm/hr)",
+        "legend_title": "Precipitation Rate (in/hr)",
         "ptype_order": list(PRECIP_PTYPE_ORDER),
         "ptype_breaks": PRECIP_PTYPE_BREAKS,
         "ptype_levels": PRECIP_PTYPE_LEVELS_BY_TYPE,

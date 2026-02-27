@@ -52,11 +52,13 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert precip_ptype["buildable"] is True
     assert precip_ptype["derived"] is True
     assert precip_ptype["derive_strategy_id"] == "precip_ptype_blend"
+    assert precip_ptype["units"] == "in/hr"
 
     precip_total = payload["variables"]["precip_total"]
     assert precip_total["buildable"] is True
     assert precip_total["derived"] is False
     assert precip_total["kind"] == "continuous"
+    assert precip_total["constraints"]["min_fh"] == 6
 
     qpf6h = payload["variables"]["qpf6h"]
     assert qpf6h["buildable"] is False

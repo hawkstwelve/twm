@@ -243,8 +243,12 @@ def _derive_precip_ptype_blend(
     sleet, _, _ = _fetch_component(model_id=model_id, product=product, run_date=run_date, fh=fh, model_plugin=model_plugin, var_key=sleet_id)
     frzr, _, _ = _fetch_component(model_id=model_id, product=product, run_date=run_date, fh=fh, model_plugin=model_plugin, var_key=frzr_id)
 
-    # GFS PRATE is typically kg m^-2 s^-1 (equivalent to mm/s) → mm/hr.
-    prate_mmhr = np.where(np.isfinite(prate), np.maximum(prate, 0.0) * 3600.0, np.nan).astype(np.float32)
+    # GFS PRATE is typically kg m^-2 s^-1 (equivalent to mm/s) → in/hr.
+    prate_inhr = np.where(
+        np.isfinite(prate),
+        np.maximum(prate, 0.0) * 3600.0 * 0.03937007874015748,
+        np.nan,
+    ).astype(np.float32)
 
     # Breaks order is authoritative for flattened palette indexing.
     mask_by_code = {
@@ -260,9 +264,9 @@ def _derive_precip_ptype_blend(
     ptype = ptype_codes[ptype_idx]
 
     range_min, range_max = float(PRECIP_PTYPE_RANGE[0]), float(PRECIP_PTYPE_RANGE[1])
-    normalized = np.clip((prate_mmhr - range_min) / max(range_max - range_min, 1e-6), 0.0, 1.0)
+    normalized = np.clip((prate_inhr - range_min) / max(range_max - range_min, 1e-6), 0.0, 1.0)
 
-    indexed = np.full(prate_mmhr.shape, np.nan, dtype=np.float32)
+    indexed = np.full(prate_inhr.shape, np.nan, dtype=np.float32)
     for code in PRECIP_PTYPE_ORDER:
         breaks = PRECIP_PTYPE_BREAKS[code]
         offset = int(breaks["offset"])
@@ -271,7 +275,7 @@ def _derive_precip_ptype_blend(
         if count != PRECIP_PTYPE_BINS_PER_TYPE:
             count = PRECIP_PTYPE_BINS_PER_TYPE
         local_bin = np.clip(np.rint(normalized * (count - 1)), 0, count - 1).astype(np.int32)
-        selector = (ptype == code) & np.isfinite(prate_mmhr) & (prate_mmhr > 0.0) & (mask_max > 0)
+        selector = (ptype == code) & np.isfinite(prate_inhr) & (prate_inhr > 0.0) & (mask_max > 0)
         indexed[selector] = (offset + local_bin[selector]).astype(np.float32)
 
     return indexed, src_crs, src_transform

@@ -652,6 +652,7 @@ def _format_units(units: str) -> str:
         "m/s": "m/s",
         "dBZ": "dBZ",
         "mm/hr": "mm/hr",
+        "in/hr": "in/hr",
         "in": "in",
     }
     return mapping.get(units, units)
