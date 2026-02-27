@@ -625,6 +625,27 @@ export function MapCanvas({
     map.setPaintProperty(id, "raster-opacity", value);
   }, []);
 
+  const setTilesSafe = useCallback(
+    (
+      source: maplibregl.RasterTileSource,
+      tiles: string[],
+      context: { sourceId: string; tileUrl: string; mode: string }
+    ): boolean => {
+      try {
+        source.setTiles(tiles);
+        return true;
+      } catch (error) {
+        if (error instanceof Error && error.name === "AbortError") {
+          console.debug("[map] ignored setTiles AbortError", context);
+          return false;
+        }
+        console.warn("[map] setTiles failed", { ...context, error });
+        return false;
+      }
+    },
+    []
+  );
+
   const setLayerRasterPaint = useCallback(
     (
       map: maplibregl.Map,
@@ -1236,7 +1257,15 @@ export function MapCanvas({
 
     setLayerVisibility(map, layerId(inactiveBuffer), true);
     setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
-    inactiveSource.setTiles([tileUrl]);
+    if (
+      !setTilesSafe(inactiveSource, [tileUrl], {
+        sourceId: inactiveSourceId,
+        tileUrl,
+        mode: "loop-warm",
+      })
+    ) {
+      return;
+    }
     sourceRequestedUrlRef.current.set(inactiveSourceId, tileUrl);
     const nextSwapRequestToken = (sourceRequestTokenRef.current.get(inactiveSourceId) ?? 0) + 1;
     sourceRequestTokenRef.current.set(inactiveSourceId, nextSwapRequestToken);
@@ -1279,6 +1308,7 @@ export function MapCanvas({
     loopActive,
     tileUrl,
     waitForSourceReady,
+    setTilesSafe,
     setLayerOpacity,
     onTileReady,
     onFrameSettled,
@@ -1338,7 +1368,16 @@ export function MapCanvas({
 
     const inactiveSourceId = sourceId(inactiveBuffer);
     onFrameLoadingChange?.(tileUrl, true);
-    inactiveSource.setTiles([tileUrl]);
+    if (
+      !setTilesSafe(inactiveSource, [tileUrl], {
+        sourceId: inactiveSourceId,
+        tileUrl,
+        mode: mode,
+      })
+    ) {
+      onFrameLoadingChange?.(tileUrl, false);
+      return;
+    }
     sourceRequestedUrlRef.current.set(inactiveSourceId, tileUrl);
     const nextSwapRequestToken = (sourceRequestTokenRef.current.get(inactiveSourceId) ?? 0) + 1;
     sourceRequestTokenRef.current.set(inactiveSourceId, nextSwapRequestToken);
@@ -1416,6 +1455,7 @@ export function MapCanvas({
     opacity,
     crossfade,
     waitForSourceReady,
+    setTilesSafe,
     runCrossfade,
     cancelCrossfade,
     setLayerOpacity,
@@ -1456,7 +1496,17 @@ export function MapCanvas({
       // Show the layer so MapLibre actually requests the tiles (visibility:none skips them).
       setLayerVisibility(map, prefetchLayerId(idx + 1), true);
       setLayerOpacity(map, prefetchLayerId(idx + 1), WARM_PREFETCH_OPACITY);
-      source.setTiles([url]);
+      if (
+        !setTilesSafe(source, [url], {
+          sourceId: prefetchSourceId(idx + 1),
+          tileUrl: url,
+          mode: "prefetch",
+        })
+      ) {
+        setLayerOpacity(map, prefetchLayerId(idx + 1), HIDDEN_PREFETCH_OPACITY);
+        setLayerVisibility(map, prefetchLayerId(idx + 1), false);
+        return;
+      }
       const prefetchSource = prefetchSourceId(idx + 1);
       sourceRequestedUrlRef.current.set(prefetchSource, url);
       const nextPrefetchRequestToken = (sourceRequestTokenRef.current.get(prefetchSource) ?? 0) + 1;
@@ -1514,7 +1564,7 @@ export function MapCanvas({
     return () => {
       cleanups.forEach((cleanup) => cleanup());
     };
-  }, [prefetchTileUrls, isLoaded, waitForSourceReady, onTileReady]);
+  }, [prefetchTileUrls, isLoaded, waitForSourceReady, setTilesSafe, onTileReady]);
 
   useEffect(() => {
     const wasLoopActive = loopActiveSignalRef.current;
@@ -1621,6 +1671,7 @@ export function MapCanvas({
           setLayerOpacity(map, layerId(activeBuffer), targetOpacity);
           setLayerOpacity(map, LOOP_LAYER_ID, targetOpacity);
           setLayerVisibility(map, LOOP_LAYER_ID, false);
+          setLayerVisibility(map, CONTOUR_LAYER_ID, variable === "tmp2m");
           isLoopToTileTransitioningRef.current = false;
           loopToTileRafRef.current = null;
         };
