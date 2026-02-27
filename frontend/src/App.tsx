@@ -1098,6 +1098,8 @@ export default function App() {
     }
 
     if (renderMode === "tiles") {
+      setVisibleRenderMode("tiles");
+      setLoopDisplayHour(null);
       return;
     }
 
