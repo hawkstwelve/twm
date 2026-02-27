@@ -562,90 +562,45 @@ def _build_continuous_rgba_cog(
 ) -> Path:
     """Build a continuous RGBA COG with RGB=average, alpha=nearest overviews.
 
-    Policy is enforced with two overview passes on split sources:
-      1) RGB source (bands 1-3) uses average
-      2) Alpha source (band 4) uses nearest
-
-    The sources are stacked via VRT, then materialized to a GTiff with copied
-    overviews before final COG translation.
+    Policy is enforced with per-band sources:
+      1) R/G/B single-band sources use average overviews
+      2) Alpha single-band source uses nearest overviews
+      3) Sources are stacked with gdalbuildvrt -separate and translated to COG
     """
     level_strs = [str(l) for l in levels]
     ovr_blocksize = str(COG_BLOCKSIZE)
-    rgb_path = tmp_dir / "rgb_base.tif"
-    alpha_path = tmp_dir / "alpha_base.tif"
+    r_path = tmp_dir / "r_base.tif"
+    g_path = tmp_dir / "g_base.tif"
+    b_path = tmp_dir / "b_base.tif"
+    a_path = tmp_dir / "a_base.tif"
     vrt_path = tmp_dir / "rgba_stacked.vrt"
-    stacked_gtiff = tmp_dir / "rgba_stacked.tif"
-    height = int(rgba.shape[1])
-    width = int(rgba.shape[2])
-    gt = (
-        f"{transform.c:.14f}, {transform.a:.14f}, {transform.b:.14f}, "
-        f"{transform.f:.14f}, {transform.d:.14f}, {transform.e:.14f}"
-    )
 
-    _write_base_gtiff(
-        data=rgba[:3, :, :],
-        path=rgb_path,
-        transform=transform,
-        count=3,
-        dtype="uint8",
-        nodata=None,
-    )
-    _write_base_gtiff(
-        data=rgba[3:4, :, :],
-        path=alpha_path,
-        transform=transform,
-        count=1,
-        dtype="uint8",
-        nodata=None,
-    )
-    # Pass 1: RGB overviews use average resampling for smoother continuous fields.
-    _run_gdal([
-        _gdal("gdaladdo"), "-r", "average",
-        "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-        str(rgb_path), *level_strs,
-    ])
-    # Pass 2: Alpha overview stays nearest to preserve sharp validity boundaries.
+    _write_base_gtiff(data=rgba[0:1, :, :], path=r_path, transform=transform, count=1, dtype="uint8", nodata=None)
+    _write_base_gtiff(data=rgba[1:2, :, :], path=g_path, transform=transform, count=1, dtype="uint8", nodata=None)
+    _write_base_gtiff(data=rgba[2:3, :, :], path=b_path, transform=transform, count=1, dtype="uint8", nodata=None)
+    _write_base_gtiff(data=rgba[3:4, :, :], path=a_path, transform=transform, count=1, dtype="uint8", nodata=None)
+
+    for rgb_path in (r_path, g_path, b_path):
+        _run_gdal([
+            _gdal("gdaladdo"), "-r", "average",
+            "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
+            str(rgb_path), *level_strs,
+        ])
     _run_gdal([
         _gdal("gdaladdo"), "-r", "nearest",
         "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-        str(alpha_path), *level_strs,
+        str(a_path), *level_strs,
     ])
-    # Ensure CRS/geotransform are explicit in the VRT metadata.
-    vrt_path.write_text(
-        (
-            f'<VRTDataset rasterXSize="{width}" rasterYSize="{height}">\n'
-            f"  <SRS>EPSG:3857</SRS>\n"
-            f"  <GeoTransform>{gt}</GeoTransform>\n"
-            f"  <VRTRasterBand dataType=\"Byte\" band=\"1\">\n"
-            f"    <SimpleSource>\n"
-            f"      <SourceFilename relativeToVRT=\"1\">{rgb_path.name}</SourceFilename>\n"
-            f"      <SourceBand>1</SourceBand>\n"
-            f"    </SimpleSource>\n"
-            f"  </VRTRasterBand>\n"
-            f"  <VRTRasterBand dataType=\"Byte\" band=\"2\">\n"
-            f"    <SimpleSource>\n"
-            f"      <SourceFilename relativeToVRT=\"1\">{rgb_path.name}</SourceFilename>\n"
-            f"      <SourceBand>2</SourceBand>\n"
-            f"    </SimpleSource>\n"
-            f"  </VRTRasterBand>\n"
-            f"  <VRTRasterBand dataType=\"Byte\" band=\"3\">\n"
-            f"    <SimpleSource>\n"
-            f"      <SourceFilename relativeToVRT=\"1\">{rgb_path.name}</SourceFilename>\n"
-            f"      <SourceBand>3</SourceBand>\n"
-            f"    </SimpleSource>\n"
-            f"  </VRTRasterBand>\n"
-            f"  <VRTRasterBand dataType=\"Byte\" band=\"4\">\n"
-            f"    <SimpleSource>\n"
-            f"      <SourceFilename relativeToVRT=\"1\">{alpha_path.name}</SourceFilename>\n"
-            f"      <SourceBand>1</SourceBand>\n"
-            f"    </SimpleSource>\n"
-            f"  </VRTRasterBand>\n"
-            f"</VRTDataset>\n"
-        ),
-        encoding="utf-8",
-    )
-    _vrt_to_gtiff_with_overviews(vrt_path, stacked_gtiff)
-    _gtiff_to_cog(stacked_gtiff, output_path)
+
+    _run_gdal([
+        _gdal("gdalbuildvrt"), "-separate",
+        str(vrt_path),
+        str(r_path),
+        str(g_path),
+        str(b_path),
+        str(a_path),
+    ])
+    _gtiff_to_cog(vrt_path, output_path)
     logger.debug(
         "Built continuous RGBA COG with overviews (RGB=average, A=nearest), levels=%s",
         levels,
@@ -671,19 +626,4 @@ def _gtiff_to_cog(src_path: Path, dst_path: Path) -> None:
         "-co", "COPY_SRC_OVERVIEWS=YES",
         str(src_path),
         str(dst_path),
-    ])
-
-
-def _vrt_to_gtiff_with_overviews(vrt_path: Path, gtiff_path: Path) -> None:
-    """Materialize a VRT to GTiff while preserving source overviews."""
-    _run_gdal([
-        _gdal("gdal_translate"),
-        "-of", "GTiff",
-        "-co", "TILED=YES",
-        "-co", f"BLOCKXSIZE={COG_BLOCKSIZE}",
-        "-co", f"BLOCKYSIZE={COG_BLOCKSIZE}",
-        "-co", f"COMPRESS={COG_COMPRESS.upper()}",
-        "-co", "COPY_SRC_OVERVIEWS=YES",
-        str(vrt_path),
-        str(gtiff_path),
     ])

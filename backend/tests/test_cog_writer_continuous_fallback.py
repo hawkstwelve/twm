@@ -12,7 +12,7 @@ if str(BACKEND_ROOT) not in sys.path:
 from app.services.builder import cog_writer
 
 
-def test_continuous_rgba_uses_two_pass_split_source_policy(
+def test_continuous_rgba_uses_two_pass_same_source_policy(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -43,29 +43,24 @@ def test_continuous_rgba_uses_two_pass_split_source_policy(
 
     cog_writer.write_rgba_cog(rgba, out_path, model="gfs", region="pnw", kind="continuous")
 
-    assert called["write_base"] == 2
+    assert called["write_base"] == 4
     assert called["translate"] == 1
 
     gdaladdo_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdaladdo"]
-    assert len(gdaladdo_cmds) == 2
-
-    rgb_cmd = gdaladdo_cmds[0]
-    alpha_cmd = gdaladdo_cmds[1]
+    assert len(gdaladdo_cmds) == 4
 
     def _source_path_arg(cmd: list[str]) -> str:
         for token in cmd:
             if token.endswith(".tif"):
                 return token
         return ""
+    addo_by_src = {_source_path_arg(cmd).split("/")[-1]: cmd for cmd in gdaladdo_cmds}
+    assert set(addo_by_src.keys()) == {"r_base.tif", "g_base.tif", "b_base.tif", "a_base.tif"}
+    assert addo_by_src["r_base.tif"][addo_by_src["r_base.tif"].index("-r") + 1] == "average"
+    assert addo_by_src["g_base.tif"][addo_by_src["g_base.tif"].index("-r") + 1] == "average"
+    assert addo_by_src["b_base.tif"][addo_by_src["b_base.tif"].index("-r") + 1] == "average"
+    assert addo_by_src["a_base.tif"][addo_by_src["a_base.tif"].index("-r") + 1] == "nearest"
 
-    assert "-r" in rgb_cmd and rgb_cmd[rgb_cmd.index("-r") + 1] == "average"
-    assert _source_path_arg(rgb_cmd).endswith("rgb_base.tif")
-
-    assert "-r" in alpha_cmd and alpha_cmd[alpha_cmd.index("-r") + 1] == "nearest"
-    assert _source_path_arg(alpha_cmd).endswith("alpha_base.tif")
-
-    translate_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdal_translate"]
-    assert len(translate_cmds) == 1
-    gtiff_translate = translate_cmds[0]
-    assert "-of" in gtiff_translate and gtiff_translate[gtiff_translate.index("-of") + 1] == "GTiff"
-    assert "COPY_SRC_OVERVIEWS=YES" in gtiff_translate
+    vrt_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdalbuildvrt"]
+    assert len(vrt_cmds) == 1
+    assert "-separate" in vrt_cmds[0]

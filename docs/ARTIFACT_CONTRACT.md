@@ -18,7 +18,7 @@ This policy applies globally across all models (including HRRR and GFS).
 
 | `VarSpec.kind` | Bands 1–3 (RGB) | Band 4 (Alpha) | `gdaladdo` flags |
 |---|---|---|---|
-| `continuous` | `average` | `nearest` | Two-pass `gdaladdo` on split sources: RGB file `-r average`, alpha file `-r nearest`; stack and copy overviews into final COG |
+| `continuous` | `average` | `nearest` | Per-band-source `gdaladdo`: R/G/B files `-r average`, alpha file `-r nearest`; then `gdalbuildvrt -separate` and COG translate |
 | `discrete` | `nearest` | `nearest` | `-r nearest` for all bands |
 
 **Rules:**
