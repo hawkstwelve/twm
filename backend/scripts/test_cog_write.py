@@ -38,8 +38,8 @@ def _gdalinfo(path: str) -> str:
 def test_rgba_cog_continuous():
     """Write a continuous RGBA COG for HRRR/PNW and validate structure.
 
-    Key assertion: band 4 (alpha) overviews use nearest resampling
-    while bands 1-3 (RGB) use average — per the artifact contract.
+    Key assertion: all bands, including alpha, use average resampling
+    for overview generation.
     """
     bbox, grid_m = get_grid_params("hrrr", "pnw")
     transform, height, width = compute_transform_and_shape(bbox, grid_m)
@@ -48,7 +48,7 @@ def test_rgba_cog_continuous():
     # Synthetic RGBA data with binary alpha
     rgba = np.random.randint(0, 255, (4, height, width), dtype=np.uint8)
     rgba[3, :, :] = 255  # valid everywhere
-    rgba[3, :10, :] = 0  # nodata strip at top
+    rgba[3, :7, :] = 0  # nodata strip at top (odd thickness to force blended overview pixels)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out = os.path.join(tmpdir, "fh000.rgba.cog.tif")
@@ -65,18 +65,6 @@ def test_rgba_cog_continuous():
             print(f"  Overviews (band 4): {src.overviews(4)}")
             print(f"  Block shapes: {src.block_shapes[0]}")
             assert len(ovrs) >= 1, "Expected at least 1 overview level"
-
-            # Verify alpha overviews are nearest (binary values only: 0 or 255)
-            # If alpha had been averaged, we'd see intermediate values
-            for level in src.overviews(4):
-                alpha_ovr = src.read(4, out_shape=(height // level, width // level))
-                unique_vals = set(np.unique(alpha_ovr))
-                # Nearest on binary alpha should only produce 0 and 255
-                non_binary = unique_vals - {0, 255}
-                if non_binary:
-                    print(f"  WARNING: Alpha overview {level}x has non-binary values: {non_binary}")
-                else:
-                    print(f"  Alpha overview {level}x: OK (binary 0/255 only)")
 
         # Validate COG layout with gdalinfo
         info = _gdalinfo(out)
@@ -224,7 +212,7 @@ if __name__ == "__main__":
     ensure_gdal()
     print(f"gdaladdo:       {_gdal('gdaladdo')}")
     print(f"gdal_translate: {_gdal('gdal_translate')}")
-    print(f"gdalbuildvrt:   {_gdal('gdalbuildvrt')}\n")
+    print()
 
     test_rgba_cog_continuous()
     test_rgba_cog_discrete()

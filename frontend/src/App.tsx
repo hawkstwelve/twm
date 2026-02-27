@@ -80,6 +80,7 @@ type VariableEntry = {
   order?: number | null;
   defaultFh?: number | null;
   buildable?: boolean;
+  kind?: string | null;
 };
 
 type ModelEntry = {
@@ -200,6 +201,7 @@ function normalizeCapabilityVarRows(modelCapability: CapabilityModel | null | un
       order: toNumberOrNull(entry.order),
       defaultFh: variableDefaultFh(entry),
       buildable: entry.buildable !== false,
+      kind: typeof entry.kind === "string" ? entry.kind : null,
     }))
     .filter((entry) => Boolean(entry.id) && entry.buildable);
 
@@ -716,6 +718,7 @@ export default function App() {
   }, [selectedCapabilityVars]);
   const hasRenderableSelection = Boolean(model && variable && selectedCapabilityVarMap.has(variable));
   const selectedVariableDefaultFh = selectedCapabilityVarMap.get(variable)?.defaultFh ?? null;
+  const selectedVariableKind = selectedCapabilityVarMap.get(variable)?.kind ?? null;
   const selectedModelConstraints = (selectedModelCapability?.constraints ?? {}) as Record<string, unknown>;
   const zoomHintMinZoom = toNumberOrNull(selectedModelConstraints.zoom_hint_min);
   const overlayFadeOutZoom = useMemo(() => {
@@ -2785,8 +2788,8 @@ export default function App() {
           regionViews={regionViews}
           opacity={opacity}
           mode={isLoopDisplayActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
-          model={model}
           variable={variable}
+          variableKind={selectedVariableKind}
           overlayFadeOutZoom={overlayFadeOutZoom}
           zoomHintMinZoom={zoomHintMinZoom}
           basemapMode={basemapMode}

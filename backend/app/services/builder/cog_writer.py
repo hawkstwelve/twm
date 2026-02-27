@@ -7,14 +7,13 @@ Produces two artifact types per the V3 artifact contract:
 All output files share a pixel-aligned grid for a given model/region,
 guaranteed by the use of fixed bounding boxes and target-aligned pixels.
 
-Overview strategy follows model-specific rendering policy:
-  - continuous RGBA (HRRR and others): average for bands 1–3, nearest for band 4
-  - continuous RGBA (GFS): average for bands 1–4
+Overview strategy:
+  - continuous RGBA: average for all bands (RGBA)
   - discrete/indexed RGBA: nearest for all bands
   - value: nearest
 
-Overviews are built with gdaladdo (subprocess) for per-band resampling
-control. Final COG is produced with gdal_translate -of COG.
+Overviews are built with gdaladdo (subprocess). Final COG is produced with
+gdal_translate -of COG.
 
 Grid constants are defined in this module —
 the rest of the builder imports them from here.
@@ -132,7 +131,7 @@ def ensure_gdal() -> None:
     Call this at startup if you want fast-fail instead of lazy discovery.
     Optional — the write functions call _gdal() on first use regardless.
     """
-    for tool in ("gdaladdo", "gdal_translate", "gdalbuildvrt"):
+    for tool in ("gdaladdo", "gdal_translate"):
         _gdal(tool)
 
 
@@ -258,8 +257,7 @@ def write_rgba_cog(
     kind : str
         "continuous" or "discrete" / "indexed" — controls overview resampling.
         Current overview strategy:
-          continuous (HRRR and others) → average RGB + nearest alpha
-          continuous (GFS) → average all bands (RGBA)
+          continuous → average all bands (RGBA)
           discrete/indexed → nearest (all bands)
 
     Returns
@@ -291,7 +289,7 @@ def write_rgba_cog(
 
         if kind == "continuous" and levels:
             _build_continuous_rgba_cog(
-                rgba, tmp_dir_path, output_path, transform, levels, model=model,
+                rgba, tmp_dir_path, output_path, transform, levels,
             )
         else:
             # Discrete/indexed or no overviews: simple single-file path
@@ -561,81 +559,27 @@ def _build_continuous_rgba_cog(
     output_path: Path,
     transform: rasterio.transform.Affine,
     levels: list[int],
-    *,
-    model: str,
 ) -> Path:
-    """Build a continuous RGBA COG with model-specific overview strategy.
-
-    GFS:
-      - average overviews on all 4 bands (including alpha) for smoother look.
-    Non-GFS:
-      - average overviews on RGB bands, nearest on alpha (legacy HRRR behavior).
-    """
+    """Build a continuous RGBA COG with average overviews on all bands."""
     level_strs = [str(l) for l in levels]
     ovr_blocksize = str(COG_BLOCKSIZE)
-    model_id = str(model).strip().lower()
-
-    if model_id == "gfs":
-        base_path = tmp_dir / "rgba_base.tif"
-        _write_base_gtiff(
-            data=rgba,
-            path=base_path,
-            transform=transform,
-            count=4,
-            dtype="uint8",
-            nodata=None,
-        )
-        _run_gdal([
-            _gdal("gdaladdo"), "-r", "average",
-            "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-            str(base_path), *level_strs,
-        ])
-        _gtiff_to_cog(base_path, output_path)
-        logger.debug(
-            "Built GFS continuous RGBA COG with average overviews (RGBA), levels=%s",
-            levels,
-        )
-        return output_path
-
-    rgb_path = tmp_dir / "rgb.tif"
-    alpha_path = tmp_dir / "alpha.tif"
-    vrt_path = tmp_dir / "combined.vrt"
-
+    base_path = tmp_dir / "rgba_base.tif"
     _write_base_gtiff(
-        data=rgba[:3],  # (3, H, W)
-        path=rgb_path,
+        data=rgba,
+        path=base_path,
         transform=transform,
-        count=3,
-        dtype="uint8",
-        nodata=None,
-    )
-    _write_base_gtiff(
-        data=rgba[3:4],  # (1, H, W)
-        path=alpha_path,
-        transform=transform,
-        count=1,
+        count=4,
         dtype="uint8",
         nodata=None,
     )
     _run_gdal([
         _gdal("gdaladdo"), "-r", "average",
         "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-        str(rgb_path), *level_strs,
+        str(base_path), *level_strs,
     ])
-    _run_gdal([
-        _gdal("gdaladdo"), "-r", "nearest",
-        "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-        str(alpha_path), *level_strs,
-    ])
-    _run_gdal([
-        _gdal("gdalbuildvrt"), "-separate",
-        str(vrt_path),
-        str(rgb_path),
-        str(alpha_path),
-    ])
-    _gtiff_to_cog(vrt_path, output_path)
+    _gtiff_to_cog(base_path, output_path)
     logger.debug(
-        "Built non-GFS continuous RGBA COG via split-band: average(RGB)+nearest(alpha), levels=%s",
+        "Built continuous RGBA COG with average overviews (RGBA), levels=%s",
         levels,
     )
     return output_path
