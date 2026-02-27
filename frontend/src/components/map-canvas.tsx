@@ -486,6 +486,10 @@ function styleFor(
           "raster-opacity": opacity,
           "raster-resampling": resamplingMode,
           "raster-fade-duration": 0,
+          "raster-contrast": paintSettings.contrast,
+          "raster-saturation": paintSettings.saturation,
+          "raster-brightness-min": paintSettings.brightnessMin,
+          "raster-brightness-max": paintSettings.brightnessMax,
         },
       },
       {
@@ -1028,6 +1032,7 @@ export function MapCanvas({
       for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
         setLayerRasterPaint(map, prefetchLayerId(idx), variable, variableKind, basemapMode);
       }
+      setLayerRasterPaint(map, LOOP_LAYER_ID, variable, variableKind, basemapMode);
 
       enforceLayerOrder(map);
     };
@@ -1054,14 +1059,6 @@ export function MapCanvas({
     variable,
     variableKind,
   ]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isLoaded || !map.getLayer(LOOP_LAYER_ID)) {
-      return;
-    }
-    map.setPaintProperty(LOOP_LAYER_ID, "raster-resampling", getResamplingMode(variableKind));
-  }, [isLoaded, variableKind]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1480,6 +1477,7 @@ export function MapCanvas({
     for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
       setLayerRasterPaint(map, prefetchLayerId(idx), variable, variableKind, basemapMode);
     }
+    setLayerRasterPaint(map, LOOP_LAYER_ID, variable, variableKind, basemapMode);
   }, [isLoaded, variable, variableKind, basemapMode, setLayerRasterPaint]);
 
   useEffect(() => {
