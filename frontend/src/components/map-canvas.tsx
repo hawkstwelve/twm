@@ -4,32 +4,36 @@ import type { GeoJSON } from "geojson";
 
 import { MAP_VIEW_DEFAULTS, TILES_BASE } from "@/lib/config";
 
+const IS_HIDPI = typeof window !== "undefined" && window.devicePixelRatio > 1;
+const CARTO_TILE_SUFFIX = IS_HIDPI ? "@2x" : "";
+const CARTO_TILE_SIZE = IS_HIDPI ? 512 : 256;
+
 const CARTO_LIGHT_BASE_TILES = [
-  "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-  "https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-  "https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-  "https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+  `https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://d.basemaps.cartocdn.com/light_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
 ];
 
 const CARTO_LIGHT_LABEL_TILES = [
-  "https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
-  "https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
-  "https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
-  "https://d.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}.png",
+  `https://a.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://b.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://c.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://d.basemaps.cartocdn.com/light_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
 ];
 
 const CARTO_DARK_BASE_TILES = [
-  "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-  "https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-  "https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-  "https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+  `https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://b.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://c.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://d.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
 ];
 
 const CARTO_DARK_LABEL_TILES = [
-  "https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
-  "https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
-  "https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
-  "https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}.png",
+  `https://a.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://b.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://c.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
+  `https://d.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}${CARTO_TILE_SUFFIX}.png`,
 ];
 
 const BOUNDARIES_VECTOR_TILES_URL = `${TILES_BASE}/tiles/v3/boundaries/v1/tilejson.json`;
@@ -209,6 +213,36 @@ function getBasemapPaintSettings(basemapMode: BasemapMode): {
   };
 }
 
+function getLabelPaintSettings(basemapMode: BasemapMode): {
+  "raster-resampling": "nearest" | "linear";
+  "raster-opacity": number;
+  "raster-contrast": number;
+  "raster-saturation": number;
+  "raster-brightness-min": number;
+  "raster-brightness-max": number;
+} {
+  if (basemapMode === "dark") {
+    return {
+      // Keep map labels crisp at fractional zoom on dark basemap.
+      "raster-resampling": "nearest",
+      "raster-opacity": 1,
+      "raster-contrast": 0.24,
+      "raster-saturation": -0.1,
+      "raster-brightness-min": 0.05,
+      "raster-brightness-max": 1,
+    };
+  }
+  return {
+    // Keep map labels crisp at fractional zoom on light basemap.
+    "raster-resampling": "nearest",
+    "raster-opacity": 1,
+    "raster-contrast": 0.18,
+    "raster-saturation": -0.12,
+    "raster-brightness-min": 0,
+    "raster-brightness-max": 1,
+  };
+}
+
 function setLayerVisibility(map: maplibregl.Map, id: string, visible: boolean) {
   if (!map.getLayer(id)) {
     return;
@@ -232,6 +266,7 @@ function styleFor(
   const boundaryLineColor = getBoundaryLineColor(basemapMode);
   const lakeFillColor = getLakeFillColor(basemapMode);
   const basemapPaint = getBasemapPaintSettings(basemapMode);
+  const labelPaint = getLabelPaintSettings(basemapMode);
   const overlayOpacity: any = overlayFadeOutZoom
     ? [
       "interpolate",
@@ -276,7 +311,7 @@ function styleFor(
       "twf-basemap": {
         type: "raster",
         tiles: basemapTiles,
-        tileSize: 256,
+        tileSize: CARTO_TILE_SIZE,
       },
       [sourceId("a")]: {
         type: "raster",
@@ -292,7 +327,7 @@ function styleFor(
       "twf-labels": {
         type: "raster",
         tiles: labelTiles,
-        tileSize: 256,
+        tileSize: CARTO_TILE_SIZE,
       },
       [STATE_BOUNDARY_SOURCE_ID]: {
         type: "vector",
@@ -457,6 +492,7 @@ function styleFor(
         id: "twf-labels",
         type: "raster",
         source: "twf-labels",
+        paint: labelPaint,
       },
     ],
   };
