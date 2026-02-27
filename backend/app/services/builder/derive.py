@@ -281,6 +281,73 @@ def _derive_precip_ptype_blend(
     return indexed, src_crs, src_transform
 
 
+def _derive_precip_total_cumulative(
+    *,
+    model_id: str,
+    var_key: str,
+    product: str,
+    run_date: datetime,
+    fh: int,
+    var_spec_model: Any,
+    var_capability: Any | None,
+    model_plugin: Any,
+) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+    hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
+    apcp_component = hints.get("apcp_component", "apcp_step")
+    step_hours_raw = hints.get("step_hours", "6")
+    try:
+        step_hours = max(1, int(step_hours_raw))
+    except (TypeError, ValueError):
+        step_hours = 6
+
+    cumulative_kgm2: np.ndarray | None = None
+    valid_mask: np.ndarray | None = None
+    src_crs: rasterio.crs.CRS | None = None
+    src_transform: rasterio.transform.Affine | None = None
+
+    for step_fh in range(step_hours, fh + 1, step_hours):
+        step_data, step_crs, step_transform = _fetch_component(
+            model_id=model_id,
+            product=product,
+            run_date=run_date,
+            fh=step_fh,
+            model_plugin=model_plugin,
+            var_key=apcp_component,
+        )
+        step_clean = np.where(np.isfinite(step_data), np.maximum(step_data, 0.0), 0.0).astype(np.float32)
+        step_valid = np.isfinite(step_data)
+
+        if cumulative_kgm2 is None:
+            cumulative_kgm2 = step_clean
+            valid_mask = step_valid
+            src_crs = step_crs
+            src_transform = step_transform
+            continue
+
+        if step_clean.shape != cumulative_kgm2.shape:
+            raise ValueError(
+                f"APCP component shape mismatch for {model_id}/{var_key} at fh{step_fh:03d}: "
+                f"{step_clean.shape} != {cumulative_kgm2.shape}"
+            )
+
+        cumulative_kgm2 = cumulative_kgm2 + step_clean
+        valid_mask = np.logical_or(valid_mask, step_valid)
+
+    if cumulative_kgm2 is None or valid_mask is None or src_crs is None or src_transform is None:
+        raise ValueError(
+            f"No cumulative APCP source steps resolved for {model_id}/{var_key} fh{fh:03d}"
+        )
+
+    cumulative_kgm2 = np.where(valid_mask, cumulative_kgm2, np.nan).astype(np.float32)
+    cumulative_inches = convert_units(
+        cumulative_kgm2,
+        var_key=var_key,
+        model_id=model_id,
+        var_capability=var_capability,
+    )
+    return cumulative_inches.astype(np.float32, copy=False), src_crs, src_transform
+
+
 DERIVE_STRATEGIES: dict[str, DeriveStrategy] = {
     "wspd10m": DeriveStrategy(
         id="wspd10m",
@@ -299,5 +366,11 @@ DERIVE_STRATEGIES: dict[str, DeriveStrategy] = {
         required_inputs=("prate", "crain", "csnow", "cicep", "cfrzr"),
         output_var_key="precip_ptype",
         execute=_derive_precip_ptype_blend,
+    ),
+    "precip_total_cumulative": DeriveStrategy(
+        id="precip_total_cumulative",
+        required_inputs=("apcp_step",),
+        output_var_key="precip_total",
+        execute=_derive_precip_total_cumulative,
     ),
 }

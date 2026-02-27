@@ -53,9 +53,9 @@ class GFSPlugin(BaseModelPlugin):
             "u10": "10u",
             "10v": "10v",
             "v10": "10v",
-            "precip_total": "precip_total",
-            "total_precip": "precip_total",
-            "apcp": "precip_total",
+    "precip_total": "precip_total",
+    "total_precip": "precip_total",
+    "apcp": "precip_total",
             "qpf": "precip_total",
             "total_qpf": "precip_total",
             "qpf6h": "qpf6h",
@@ -283,9 +283,9 @@ GFS_VARS: dict[str, VarSpec] = {
         ),
     ),
     # ── QPF (Phase 3 candidate) ──────────────────────────────────────────────
-    "precip_total": VarSpec(
-        id="precip_total",
-        name="Total Precip",
+    "apcp_step": VarSpec(
+        id="apcp_step",
+        name="APCP Step",
         selectors=VarSelectors(
             search=[":APCP:surface:"],
             filter_by_keys={
@@ -296,7 +296,18 @@ GFS_VARS: dict[str, VarSpec] = {
                 "upstream_var": "apcp",
             },
         ),
-        primary=True,
+    ),
+    "precip_total": VarSpec(
+        id="precip_total",
+        name="Total Precip",
+        selectors=VarSelectors(
+            hints={
+                "apcp_component": "apcp_step",
+                "step_hours": "6",
+            },
+        ),
+        derived=True,
+        derive="precip_total_cumulative",
         kind="continuous",
         units="in",
     ),

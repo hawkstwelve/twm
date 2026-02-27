@@ -56,7 +56,8 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
 
     precip_total = payload["variables"]["precip_total"]
     assert precip_total["buildable"] is True
-    assert precip_total["derived"] is False
+    assert precip_total["derived"] is True
+    assert precip_total["derive_strategy_id"] == "precip_total_cumulative"
     assert precip_total["kind"] == "continuous"
     assert precip_total["constraints"]["min_fh"] == 6
 
