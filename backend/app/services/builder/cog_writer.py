@@ -7,8 +7,9 @@ Produces two artifact types per the V3 artifact contract:
 All output files share a pixel-aligned grid for a given model/region,
 guaranteed by the use of fixed bounding boxes and target-aligned pixels.
 
-Overview strategy follows the ARTIFACT_CONTRACT exactly:
-  - continuous RGBA: average for bands 1–3, nearest for band 4 (separate pass)
+Overview strategy follows model-specific rendering policy:
+  - continuous RGBA (HRRR and others): average for bands 1–3, nearest for band 4
+  - continuous RGBA (GFS): average for bands 1–4
   - discrete/indexed RGBA: nearest for all bands
   - value: nearest
 
@@ -256,8 +257,9 @@ def write_rgba_cog(
         Region id (e.g. "pnw") — used to look up grid parameters.
     kind : str
         "continuous" or "discrete" / "indexed" — controls overview resampling.
-        Per the artifact contract locked overview strategy:
-          continuous → average (bands 1-3) + nearest (band 4) via two gdaladdo passes
+        Current overview strategy:
+          continuous (HRRR and others) → average RGB + nearest alpha
+          continuous (GFS) → average all bands (RGBA)
           discrete/indexed → nearest (all bands)
 
     Returns
@@ -288,29 +290,9 @@ def write_rgba_cog(
         tmp_dir_path = Path(tmp_dir)
 
         if kind == "continuous" and levels:
-            # Contract-compliant continuous: split bands, per-band overviews, reassemble
             _build_continuous_rgba_cog(
-                rgba, tmp_dir_path, output_path, transform, levels,
+                rgba, tmp_dir_path, output_path, transform, levels, model=model,
             )
-            # Some GDAL builds do not always preserve source overviews through the
-            # VRT->COG path for very small grids. Fall back to a direct path so
-            # Gate 1 still has internal overviews to validate.
-            if not _has_internal_overviews(output_path):
-                logger.warning(
-                    "Continuous RGBA COG missing internal overviews; retrying with direct nearest overviews: %s",
-                    output_path,
-                )
-                tmp_gtiff = tmp_dir_path / "fallback_base.tif"
-                _write_base_gtiff(
-                    data=rgba, path=tmp_gtiff, transform=transform,
-                    count=4, dtype="uint8", nodata=None,
-                )
-                _run_gdal([
-                    _gdal("gdaladdo"), "-r", "nearest",
-                    "--config", "GDAL_TIFF_OVR_BLOCKSIZE", str(COG_BLOCKSIZE),
-                    str(tmp_gtiff), *[str(l) for l in levels],
-                ])
-                _gtiff_to_cog(tmp_gtiff, output_path)
         else:
             # Discrete/indexed or no overviews: simple single-file path
             tmp_gtiff = tmp_dir_path / "base.tif"
@@ -579,31 +561,46 @@ def _build_continuous_rgba_cog(
     output_path: Path,
     transform: rasterio.transform.Affine,
     levels: list[int],
+    *,
+    model: str,
 ) -> Path:
-    """Build a continuous RGBA COG with per-band overview resampling.
+    """Build a continuous RGBA COG with model-specific overview strategy.
 
-    Artifact contract locked strategy for continuous:
-      - Bands 1-3 (RGB): average overviews
-      - Band 4 (alpha):  nearest overviews
-
-    Workflow:
-      1. Write RGB as a 3-band GTiff, alpha as a 1-band GTiff
-      2. gdaladdo -r average on RGB
-      3. gdaladdo -r nearest on alpha
-      4. gdalbuildvrt -separate to recombine as 4-band VRT
-      5. gdal_translate -of COG from VRT → final COG
-
-    Returns the output path.
+    GFS:
+      - average overviews on all 4 bands (including alpha) for smoother look.
+    Non-GFS:
+      - average overviews on RGB bands, nearest on alpha (legacy HRRR behavior).
     """
-    _, height, width = rgba.shape
     level_strs = [str(l) for l in levels]
     ovr_blocksize = str(COG_BLOCKSIZE)
+    model_id = str(model).strip().lower()
+
+    if model_id == "gfs":
+        base_path = tmp_dir / "rgba_base.tif"
+        _write_base_gtiff(
+            data=rgba,
+            path=base_path,
+            transform=transform,
+            count=4,
+            dtype="uint8",
+            nodata=None,
+        )
+        _run_gdal([
+            _gdal("gdaladdo"), "-r", "average",
+            "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
+            str(base_path), *level_strs,
+        ])
+        _gtiff_to_cog(base_path, output_path)
+        logger.debug(
+            "Built GFS continuous RGBA COG with average overviews (RGBA), levels=%s",
+            levels,
+        )
+        return output_path
 
     rgb_path = tmp_dir / "rgb.tif"
     alpha_path = tmp_dir / "alpha.tif"
     vrt_path = tmp_dir / "combined.vrt"
 
-    # Step 1: Write separate band files
     _write_base_gtiff(
         data=rgba[:3],  # (3, H, W)
         path=rgb_path,
@@ -620,8 +617,6 @@ def _build_continuous_rgba_cog(
         dtype="uint8",
         nodata=None,
     )
-
-    # Step 2: Build overviews — average for RGB, nearest for alpha
     _run_gdal([
         _gdal("gdaladdo"), "-r", "average",
         "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
@@ -632,31 +627,18 @@ def _build_continuous_rgba_cog(
         "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
         str(alpha_path), *level_strs,
     ])
-
-    # Step 3: Combine into a 4-band VRT
     _run_gdal([
         _gdal("gdalbuildvrt"), "-separate",
         str(vrt_path),
         str(rgb_path),
         str(alpha_path),
     ])
-
-    # Step 4: Convert VRT → COG (copies source overviews)
     _gtiff_to_cog(vrt_path, output_path)
-
     logger.debug(
-        "Built continuous RGBA COG via split-band: "
-        "average(RGB) + nearest(alpha), levels=%s", levels,
+        "Built non-GFS continuous RGBA COG via split-band: average(RGB)+nearest(alpha), levels=%s",
+        levels,
     )
     return output_path
-
-
-def _has_internal_overviews(path: Path) -> bool:
-    try:
-        with rasterio.open(path) as src:
-            return len(src.overviews(1)) > 0
-    except Exception:
-        return False
 
 
 def _gtiff_to_cog(src_path: Path, dst_path: Path) -> None:
