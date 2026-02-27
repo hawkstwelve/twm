@@ -18,7 +18,7 @@ This policy applies globally across all models (including HRRR and GFS).
 
 | `VarSpec.kind` | Bands 1–3 (RGB) | Band 4 (Alpha) | `gdaladdo` flags |
 |---|---|---|---|
-| `continuous` | `average` | `nearest` | Per-band-source `gdaladdo`: R/G/B files `-r average`, alpha file `-r nearest`; then `gdalbuildvrt -separate` and COG translate |
+| `continuous` | `average` | `nearest` | Two-pass `gdaladdo` on one 4-band GTiff: pass 1 `-r nearest -b 4` (alpha), pass 2 `-r average -b 1 -b 2 -b 3` (RGB), then COG translate |
 | `discrete` | `nearest` | `nearest` | `-r nearest` for all bands |
 
 **Rules:**
@@ -29,7 +29,7 @@ This policy applies globally across all models (including HRRR and GFS).
 4. Alpha is always `nearest` — never averaged, interpolated, or thresholded. This is non-negotiable.
 5. This strategy is locked at Phase 0 and not revisited unless there is a measured, reproducible visual defect with evidence attached.
 
-This eliminates the historical pain of per-variable overview hacks and the 3-fallback cascade in the current `run_gdaladdo_overviews()` function.
+This eliminates the historical pain of per-variable overview hacks and keeps overview behavior deterministic across models.
 
 ### Value-grid artifact (per model/region/run/var/fh)
 

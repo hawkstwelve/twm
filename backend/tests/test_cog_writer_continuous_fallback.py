@@ -43,24 +43,26 @@ def test_continuous_rgba_uses_two_pass_same_source_policy(
 
     cog_writer.write_rgba_cog(rgba, out_path, model="gfs", region="pnw", kind="continuous")
 
-    assert called["write_base"] == 4
+    assert called["write_base"] == 1
     assert called["translate"] == 1
 
     gdaladdo_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdaladdo"]
-    assert len(gdaladdo_cmds) == 4
+    assert len(gdaladdo_cmds) == 2
 
     def _source_path_arg(cmd: list[str]) -> str:
         for token in cmd:
             if token.endswith(".tif"):
                 return token
         return ""
-    addo_by_src = {_source_path_arg(cmd).split("/")[-1]: cmd for cmd in gdaladdo_cmds}
-    assert set(addo_by_src.keys()) == {"r_base.tif", "g_base.tif", "b_base.tif", "a_base.tif"}
-    assert addo_by_src["r_base.tif"][addo_by_src["r_base.tif"].index("-r") + 1] == "average"
-    assert addo_by_src["g_base.tif"][addo_by_src["g_base.tif"].index("-r") + 1] == "average"
-    assert addo_by_src["b_base.tif"][addo_by_src["b_base.tif"].index("-r") + 1] == "average"
-    assert addo_by_src["a_base.tif"][addo_by_src["a_base.tif"].index("-r") + 1] == "nearest"
+    first = gdaladdo_cmds[0]
+    second = gdaladdo_cmds[1]
 
-    vrt_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdalbuildvrt"]
-    assert len(vrt_cmds) == 1
-    assert "-separate" in vrt_cmds[0]
+    assert _source_path_arg(first).endswith("rgba_base.tif")
+    assert _source_path_arg(second).endswith("rgba_base.tif")
+    assert first[first.index("-r") + 1] == "nearest"
+    assert second[second.index("-r") + 1] == "average"
+
+    first_bands = [first[i + 1] for i, token in enumerate(first[:-1]) if token == "-b"]
+    second_bands = [second[i + 1] for i, token in enumerate(second[:-1]) if token == "-b"]
+    assert first_bands == ["4"]
+    assert second_bands == ["1", "2", "3"]

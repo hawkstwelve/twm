@@ -562,45 +562,41 @@ def _build_continuous_rgba_cog(
 ) -> Path:
     """Build a continuous RGBA COG with RGB=average, alpha=nearest overviews.
 
-    Policy is enforced with per-band sources:
-      1) R/G/B single-band sources use average overviews
-      2) Alpha single-band source uses nearest overviews
-      3) Sources are stacked with gdalbuildvrt -separate and translated to COG
+    Policy is enforced with two gdaladdo passes on one 4-band source:
+      1) alpha (band 4) with nearest
+      2) RGB (bands 1-3) with average
+
+    Order matters: running alpha first preserves alpha overviews while allowing
+    RGB to be re-sampled smoothly in the second pass.
     """
     level_strs = [str(l) for l in levels]
     ovr_blocksize = str(COG_BLOCKSIZE)
-    r_path = tmp_dir / "r_base.tif"
-    g_path = tmp_dir / "g_base.tif"
-    b_path = tmp_dir / "b_base.tif"
-    a_path = tmp_dir / "a_base.tif"
-    vrt_path = tmp_dir / "rgba_stacked.vrt"
+    tmp_gtiff = tmp_dir / "rgba_base.tif"
 
-    _write_base_gtiff(data=rgba[0:1, :, :], path=r_path, transform=transform, count=1, dtype="uint8", nodata=None)
-    _write_base_gtiff(data=rgba[1:2, :, :], path=g_path, transform=transform, count=1, dtype="uint8", nodata=None)
-    _write_base_gtiff(data=rgba[2:3, :, :], path=b_path, transform=transform, count=1, dtype="uint8", nodata=None)
-    _write_base_gtiff(data=rgba[3:4, :, :], path=a_path, transform=transform, count=1, dtype="uint8", nodata=None)
+    _write_base_gtiff(
+        data=rgba,
+        path=tmp_gtiff,
+        transform=transform,
+        count=4,
+        dtype="uint8",
+        nodata=None,
+    )
 
-    for rgb_path in (r_path, g_path, b_path):
-        _run_gdal([
-            _gdal("gdaladdo"), "-r", "average",
-            "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-            str(rgb_path), *level_strs,
-        ])
+    # Pass 1: alpha stays nearest.
     _run_gdal([
         _gdal("gdaladdo"), "-r", "nearest",
+        "-b", "4",
         "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
-        str(a_path), *level_strs,
+        str(tmp_gtiff), *level_strs,
     ])
-
+    # Pass 2: RGB becomes average.
     _run_gdal([
-        _gdal("gdalbuildvrt"), "-separate",
-        str(vrt_path),
-        str(r_path),
-        str(g_path),
-        str(b_path),
-        str(a_path),
+        _gdal("gdaladdo"), "-r", "average",
+        "-b", "1", "-b", "2", "-b", "3",
+        "--config", "GDAL_TIFF_OVR_BLOCKSIZE", ovr_blocksize,
+        str(tmp_gtiff), *level_strs,
     ])
-    _gtiff_to_cog(vrt_path, output_path)
+    _gtiff_to_cog(tmp_gtiff, output_path)
     logger.debug(
         "Built continuous RGBA COG with overviews (RGB=average, A=nearest), levels=%s",
         levels,
