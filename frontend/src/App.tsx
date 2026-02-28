@@ -2820,8 +2820,18 @@ export default function App() {
           onMapHoverEnd={onHoverEnd}
         />
 
+        {/* Subtle radial vignette — darkens map edges for depth; never blocks interaction */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-10"
+          style={{
+            background:
+              "radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.28) 100%)",
+          }}
+        />
+
         {showBufferStatus && (
-          <div className="absolute left-1/2 top-4 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+          <div className="glass absolute left-1/2 top-4 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-xl px-3 py-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 font-medium">
                 <AlertCircle className="h-3.5 w-3.5" />
@@ -2842,7 +2852,7 @@ export default function App() {
 
         {tooltip && (
           <div
-            className="pointer-events-none absolute z-50 rounded-md border border-border/60 bg-[hsl(var(--toolbar))]/95 px-2.5 py-1.5 text-xs font-medium text-foreground shadow-xl backdrop-blur-md"
+            className="pointer-events-none absolute z-50 rounded-xl glass px-2.5 py-1.5 text-xs font-medium shadow-xl"
             style={{
               left: tooltip.x + 14,
               top: tooltip.y - 32,
@@ -2860,14 +2870,14 @@ export default function App() {
         )}
 
         {showZoomHint && (
-          <div className="absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+          <div className="glass absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl px-3 py-2 text-xs">
             <AlertCircle className="h-3.5 w-3.5" />
             GFS is low-resolution at this zoom. Switch to HRRR for sharper detail.
           </div>
         )}
 
         {renderMode === "tiles" && canUseLoopPlayback && isHighDetailZoom && (
-          <div className="absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-3 py-2 text-xs shadow-xl backdrop-blur-md">
+          <div className="glass absolute left-1/2 top-14 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl px-3 py-2 text-xs">
             <AlertCircle className="h-3.5 w-3.5" />
             High detail mode — zoom out for smooth loop
           </div>

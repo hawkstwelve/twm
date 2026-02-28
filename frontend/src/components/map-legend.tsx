@@ -29,7 +29,7 @@ function formatValue(value: number): string {
 
 function UnavailablePlaceholder() {
   return (
-    <div className="flex items-center gap-1.5 rounded-md glass px-2 py-2">
+    <div className="flex items-center gap-1.5 rounded-xl glass px-2.5 py-2">
       <AlertCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
       <span className="text-xs font-medium text-muted-foreground/80">Legend unavailable</span>
     </div>
@@ -256,7 +256,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
   return (
     <div
       className={cn(
-        "fixed z-40 flex flex-col max-h-[70vh] overflow-hidden rounded-md glass transition-all duration-200",
+        "fixed z-40 flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass transition-all duration-200",
         showPrecipPtypeRows ? "w-[220px]" : "w-[120px]",
         isSmallScreen ? "bottom-24 right-4" : "right-4 top-20"
       )}
