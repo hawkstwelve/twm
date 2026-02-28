@@ -5,20 +5,20 @@
 @layer components {
   /* Glass morphism surface — normal (legend, dropdowns, tooltips) */
   .glass {
-    background-color: hsl(var(--popover) / 0.55);
-    border: 1px solid hsl(var(--border) / 0.65);
+    background-color: hsl(var(--popover) / 0.45);
+    border: 1px solid hsl(var(--border) / 0.55);
     box-shadow: 0 4px 24px rgb(0 0 0 / 0.18);
-    backdrop-filter: blur(12px) saturate(1.6);
-    -webkit-backdrop-filter: blur(12px) saturate(1.6);
+    backdrop-filter: blur(14px) saturate(1.6);
+    -webkit-backdrop-filter: blur(14px) saturate(1.6);
   }
 
   /* Glass morphism surface — strong (toolbar, bottom controls) */
   .glass-strong {
-    background-color: hsl(var(--toolbar) / 0.72);
-    border: 1px solid hsl(var(--border) / 0.75);
+    background-color: hsl(var(--toolbar) / 0.45);
+    border: 1px solid hsl(var(--border) / 0.6);
     box-shadow: 0 8px 32px rgb(0 0 0 / 0.22);
-    backdrop-filter: blur(16px) saturate(1.8);
-    -webkit-backdrop-filter: blur(16px) saturate(1.8);
+    backdrop-filter: blur(18px) saturate(1.8);
+    -webkit-backdrop-filter: blur(18px) saturate(1.8);
   }
 }
 

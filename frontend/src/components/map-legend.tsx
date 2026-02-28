@@ -328,10 +328,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
                       {group.entries.map((entry, index) => (
                         <div
                           key={`${entry.value}-${entry.color}-${groupIndex}-${index}`}
-                          className={cn(
-                            "flex items-center gap-1.5 rounded-[2px] px-0.5 py-0.5 transition-colors duration-150",
-                            index % 2 === 0 ? "bg-secondary/20" : "bg-transparent"
-                          )}
+                          className="flex items-center gap-1.5 rounded-[2px] px-0.5 py-0.5 transition-colors duration-150"
                         >
                           <span
                             className="h-3 w-3 shrink-0 rounded-[2px] border border-border/30 shadow-sm"
@@ -347,10 +344,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
                 : legend.entries.slice().reverse().map((entry, index) => (
                     <div
                       key={`${entry.value}-${entry.color}-${index}`}
-                      className={cn(
-                        "flex items-center gap-1.5 rounded-[2px] px-0.5 py-0.5 transition-colors duration-150",
-                        index % 2 === 0 ? "bg-secondary/20" : "bg-transparent"
-                      )}
+                      className="flex items-center gap-1.5 rounded-[2px] px-0.5 py-0.5 transition-colors duration-150"
                     >
                       <span
                         className="h-3 w-3 shrink-0 rounded-[2px] border border-border/30 shadow-sm"
