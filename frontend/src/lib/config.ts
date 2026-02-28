@@ -1,7 +1,14 @@
-export const API_ORIGIN = "https://api.theweathermodels.com";
-export const API_V4_BASE = `${API_ORIGIN}/api/v4`;
+function trimTrailingSlash(value: string): string {
+  return value.replace(/\/$/, "");
+}
 
-export const TILES_BASE = "https://api.theweathermodels.com";
+const API_ORIGIN_ENV = String(import.meta.env.VITE_API_ORIGIN ?? "").trim();
+const TILES_BASE_ENV = String(import.meta.env.VITE_TILES_BASE ?? API_ORIGIN_ENV).trim();
+
+// Default to same-origin root paths so viewer works under nested routes like /viewer.
+export const API_ORIGIN = API_ORIGIN_ENV ? trimTrailingSlash(API_ORIGIN_ENV) : "";
+export const API_V4_BASE = `${API_ORIGIN}/api/v4`;
+export const TILES_BASE = TILES_BASE_ENV ? trimTrailingSlash(TILES_BASE_ENV) : "";
 
 export const WEBP_RENDER_MODE_THRESHOLDS = {
   tier0Max: 5.8,
