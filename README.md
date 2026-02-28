@@ -165,7 +165,7 @@ Use a dedicated env file for GFS so HRRR remains isolated. Initial rollout shoul
 
 | Variable | Recommended value | Description |
 |---|---|---|
-| `TWF_V3_SCHEDULER_VARS` | `tmp2m,wspd10m,precip_ptype,precip_total` | Core rollout vars for GFS |
+| `TWF_V3_SCHEDULER_VARS` | `tmp2m,tmp850,wspd10m,wgst10m,precip_ptype,precip_total` | Core rollout vars for GFS |
 | `TWF_V3_SCHEDULER_PRIMARY_VARS` | `tmp2m` | Promotion/probe gate var |
 | `TWF_V3_SCHEDULER_PROBE_VAR` | `tmp2m` | Run-availability probe var |
 

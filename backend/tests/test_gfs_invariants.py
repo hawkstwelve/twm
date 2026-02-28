@@ -29,7 +29,9 @@ def test_gfs_buildable_var_set_and_defaults_invariants() -> None:
     }
     assert buildable_var_keys == {
         "tmp2m",
+        "tmp850",
         "wspd10m",
+        "wgst10m",
         "precip_ptype",
         "precip_total",
     }
@@ -61,6 +63,16 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert precip_total["kind"] == "continuous"
     assert precip_total["constraints"]["min_fh"] == 6
 
+    tmp850 = payload["variables"]["tmp850"]
+    assert tmp850["buildable"] is True
+    assert tmp850["derived"] is False
+    assert tmp850["units"] == "C"
+
+    wgst10m = payload["variables"]["wgst10m"]
+    assert wgst10m["buildable"] is True
+    assert wgst10m["derived"] is False
+    assert wgst10m["units"] == "mph"
+
     qpf6h = payload["variables"]["qpf6h"]
     assert qpf6h["buildable"] is False
 
@@ -69,3 +81,12 @@ def test_gfs_precip_total_aliases_normalize() -> None:
     assert GFS_MODEL.normalize_var_id("apcp") == "precip_total"
     assert GFS_MODEL.normalize_var_id("qpf") == "precip_total"
     assert GFS_MODEL.normalize_var_id("total_precip") == "precip_total"
+
+
+def test_gfs_temp850_and_gust_aliases_normalize() -> None:
+    assert GFS_MODEL.normalize_var_id("tmp850") == "tmp850"
+    assert GFS_MODEL.normalize_var_id("t850") == "tmp850"
+    assert GFS_MODEL.normalize_var_id("t850mb") == "tmp850"
+    assert GFS_MODEL.normalize_var_id("wgst10m") == "wgst10m"
+    assert GFS_MODEL.normalize_var_id("gust") == "wgst10m"
+    assert GFS_MODEL.normalize_var_id("gust10m") == "wgst10m"

@@ -42,20 +42,31 @@ class GFSPlugin(BaseModelPlugin):
 
     def normalize_var_id(self, var_id: str) -> str:
         """Normalise common GFS variable aliases to canonical V3 IDs."""
+        normalized = var_id.strip().lower()
         _aliases: dict[str, str] = {
             "t2m": "tmp2m",
             "2t": "tmp2m",
             "tmp2m": "tmp2m",
+            "tmp850": "tmp850",
+            "t850": "tmp850",
+            "t850mb": "tmp850",
+            "temp850": "tmp850",
+            "temp850mb": "tmp850",
             "refc": "refc",
             "cref": "refc",
             "wspd10m": "wspd10m",
+            "wgst10m": "wgst10m",
+            "gust": "wgst10m",
+            "gust10m": "wgst10m",
+            "10m_gust": "wgst10m",
+            "wind_gust": "wgst10m",
             "10u": "10u",
             "u10": "10u",
             "10v": "10v",
             "v10": "10v",
-    "precip_total": "precip_total",
-    "total_precip": "precip_total",
-    "apcp": "precip_total",
+            "precip_total": "precip_total",
+            "total_precip": "precip_total",
+            "apcp": "precip_total",
             "qpf": "precip_total",
             "total_qpf": "precip_total",
             "qpf6h": "qpf6h",
@@ -65,7 +76,7 @@ class GFSPlugin(BaseModelPlugin):
             "cicep": "cicep",
             "cfrzr": "cfrzr",
         }
-        return _aliases.get(var_id, var_id)
+        return _aliases.get(normalized, normalized)
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +133,26 @@ GFS_VARS: dict[str, VarSpec] = {
         kind="continuous",
         units="F",
     ),
+    "tmp850": VarSpec(
+        id="tmp850",
+        name="850mb Temp",
+        selectors=VarSelectors(
+            search=[":TMP:850 mb:"],
+            filter_by_keys={
+                "shortName": "t",
+                "typeOfLevel": "isobaricInhPa",
+                "level": "850",
+            },
+            hints={
+                "upstream_var": "t850",
+                "cf_var": "t",
+                "short_name": "t",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="C",
+    ),
     # ── Wind components (fetched separately for wspd10m derivation) ─────────
     "10u": VarSpec(
         id="10u",
@@ -167,6 +198,25 @@ GFS_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="wspd10m",
+        kind="continuous",
+        units="mph",
+    ),
+    "wgst10m": VarSpec(
+        id="wgst10m",
+        name="10m Wind Gust",
+        selectors=VarSelectors(
+            search=[":GUST:surface:"],
+            filter_by_keys={
+                "typeOfLevel": "surface",
+                "shortName": "gust",
+            },
+            hints={
+                "upstream_var": "gust",
+                "cf_var": "gust",
+                "short_name": "gust",
+            },
+        ),
+        primary=True,
         kind="continuous",
         units="mph",
     ),
@@ -328,7 +378,9 @@ GFS_VARS: dict[str, VarSpec] = {
 
 GFS_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "tmp2m",
+    "tmp850": "tmp850",
     "wspd10m": "wspd10m",
+    "wgst10m": "wgst10m",
     "refc": "refc",
     "precip_ptype": "precip_ptype",
     "precip_total": "precip_total",
@@ -343,16 +395,19 @@ GFS_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
 
 GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
     "tmp2m": 0,
-    "refc": 1,
-    "wspd10m": 2,
-    "precip_ptype": 3,
-    "precip_total": 4,
-    "qpf6h": 5,
+    "tmp850": 1,
+    "refc": 2,
+    "wspd10m": 3,
+    "wgst10m": 4,
+    "precip_ptype": 5,
+    "precip_total": 6,
+    "qpf6h": 7,
 }
 
 GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "wspd10m": "ms_to_mph",
+    "wgst10m": "ms_to_mph",
     "precip_total": "kgm2_to_in",
     "qpf6h": "kgm2_to_in",
 }
