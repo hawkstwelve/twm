@@ -395,21 +395,16 @@ GFS_VARS: dict[str, VarSpec] = {
         id="snowfall_total",
         name="Total Snowfall (10:1)",
         selectors=VarSelectors(
-            search=[
-                ":SNOD:surface:",
-                ":ASNOW:surface:",
-            ],
-            filter_by_keys={
-                "shortName": "snod",
-                "typeOfLevel": "surface",
-            },
             hints={
-                "upstream_var": "snod",
-                "cf_var": "snod",
-                "short_name": "snod",
+                "apcp_component": "apcp_step",
+                "snow_component": "csnow",
+                "step_hours": "6",
+                "slr": "10",
             },
         ),
         primary=True,
+        derived=True,
+        derive="snowfall_total_10to1_cumulative",
         kind="continuous",
         units="in",
     ),
@@ -467,7 +462,6 @@ GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "wspd10m": "ms_to_mph",
     "wgst10m": "ms_to_mph",
     "precip_total": "kgm2_to_in",
-    "snowfall_total": "m_to_in",
     "qpf6h": "kgm2_to_in",
 }
 

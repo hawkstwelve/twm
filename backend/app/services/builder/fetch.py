@@ -39,6 +39,15 @@ ENV_HERBIE_PRIORITY = "TWF_HERBIE_PRIORITY"
 ENV_HERBIE_RETRIES = "TWF_HERBIE_SUBSET_RETRIES"
 ENV_HERBIE_RETRY_SLEEP = "TWF_HERBIE_RETRY_SLEEP_SECONDS"
 
+_MISSING_VALUE_TAG_KEYS = (
+    "missing_value",
+    "_FillValue",
+    "GRIB_missingValue",
+    "GRIB_NODATA",
+    "GRIB_noDataValue",
+    "NODATA",
+)
+
 
 class HerbieTransientUnavailableError(RuntimeError):
     """Raised when all Herbie attempts fail due to transient source/index availability."""
@@ -77,6 +86,16 @@ def _retry_sleep_seconds() -> float:
 def _is_missing_index_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return "no index file was found for none" in text
+
+
+def _parse_float_tag(value: Any) -> float | None:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(parsed):
+        return None
+    return parsed
 
 
 def _precheck_subset_available(
@@ -312,7 +331,29 @@ def fetch_variable(
 
     # Open with rasterio to get array + CRS + transform
     with rasterio.open(grib_path) as src:
-        data = src.read(1).astype(np.float32)
+        band_data = src.read(1, masked=True)
+        data = np.asarray(np.ma.filled(band_data, np.nan), dtype=np.float32)
+        band_mask = np.ma.getmaskarray(band_data)
+        if band_mask is not np.ma.nomask:
+            data = np.where(band_mask, np.nan, data).astype(np.float32, copy=False)
+
+        nodata_val = _parse_float_tag(getattr(src, "nodata", None))
+        if nodata_val is not None:
+            atol = max(1e-6, abs(nodata_val) * 1e-6)
+            data = np.where(np.isclose(data, nodata_val, rtol=0.0, atol=atol), np.nan, data).astype(np.float32, copy=False)
+
+        tag_values: list[float] = []
+        for tags in (src.tags(), src.tags(1)):
+            for key in _MISSING_VALUE_TAG_KEYS:
+                parsed = _parse_float_tag(tags.get(key))
+                if parsed is not None:
+                    tag_values.append(parsed)
+        for missing_val in set(tag_values):
+            atol = max(1e-6, abs(missing_val) * 1e-6)
+            data = np.where(np.isclose(data, missing_val, rtol=0.0, atol=atol), np.nan, data).astype(np.float32, copy=False)
+
+        # GRIB nodata sentinels occasionally leak through metadata handling.
+        data = np.where(np.abs(data) > 1e12, np.nan, data).astype(np.float32, copy=False)
         crs = src.crs
         transform = src.transform
 

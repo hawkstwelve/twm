@@ -82,7 +82,8 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
 
     snowfall_total = payload["variables"]["snowfall_total"]
     assert snowfall_total["buildable"] is True
-    assert snowfall_total["derived"] is False
+    assert snowfall_total["derived"] is True
+    assert snowfall_total["derive_strategy_id"] == "snowfall_total_10to1_cumulative"
     assert snowfall_total["units"] == "in"
     assert snowfall_total["constraints"]["min_fh"] == 6
     assert snowfall_total["default_fh"] == 6
@@ -120,4 +121,6 @@ def test_gfs_dewpoint_and_snow_aliases_normalize() -> None:
 def test_gfs_snowfall_total_search_patterns_include_upstream_fallback() -> None:
     var_spec = GFS_MODEL.get_var("snowfall_total")
     assert var_spec is not None
-    assert var_spec.selectors.search[:2] == [":SNOD:surface:", ":ASNOW:surface:"]
+    assert var_spec.selectors.search == []
+    assert var_spec.derived is True
+    assert var_spec.derive == "snowfall_total_10to1_cumulative"
