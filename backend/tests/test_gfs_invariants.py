@@ -84,6 +84,8 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert snowfall_total["buildable"] is True
     assert snowfall_total["derived"] is False
     assert snowfall_total["units"] == "in"
+    assert snowfall_total["constraints"]["min_fh"] == 6
+    assert snowfall_total["default_fh"] == 6
 
     qpf6h = payload["variables"]["qpf6h"]
     assert qpf6h["buildable"] is False
