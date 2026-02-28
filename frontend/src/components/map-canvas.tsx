@@ -1080,7 +1080,7 @@ export function MapCanvas({
       const inactiveBuffer = otherBuffer(activeBuffer);
       if (loopActive) {
         setLayerVisibility(map, layerId(activeBuffer), true);
-        setLayerOpacity(map, layerId(activeBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+        setLayerOpacity(map, layerId(activeBuffer), opacity);
         setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
         setLayerVisibility(map, layerId(inactiveBuffer), false);
       } else {
@@ -1640,7 +1640,7 @@ export function MapCanvas({
       isLoopToTileTransitioningRef.current = false;
       setLayerVisibility(map, layerId(activeBuffer), true);
       setLayerVisibility(map, layerId(inactiveBuffer), false);
-      setLayerOpacity(map, layerId(activeBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
+      setLayerOpacity(map, layerId(activeBuffer), targetOpacity);
       setLayerOpacity(map, layerId(inactiveBuffer), HIDDEN_SWAP_BUFFER_OPACITY);
       setLayerVisibility(map, LOOP_LAYER_ID, Boolean(loopImageUrl));
       setLayerOpacity(map, LOOP_LAYER_ID, targetOpacity);
