@@ -400,6 +400,8 @@ GFS_VARS: dict[str, VarSpec] = {
                 "snow_component": "csnow",
                 "step_hours": "6",
                 "slr": "10",
+                "snow_mask_threshold": "0.5",
+                "min_step_lwe_kgm2": "0.01",
             },
         ),
         primary=True,

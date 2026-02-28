@@ -365,6 +365,8 @@ def _derive_snowfall_total_10to1_cumulative(
     snow_component = hints.get("snow_component", "csnow")
     step_hours_raw = hints.get("step_hours", "6")
     slr_raw = hints.get("slr", "10")
+    snow_mask_threshold_raw = hints.get("snow_mask_threshold", "0.5")
+    min_step_lwe_raw = hints.get("min_step_lwe_kgm2", "0.01")
 
     try:
         step_hours = max(1, int(step_hours_raw))
@@ -377,6 +379,18 @@ def _derive_snowfall_total_10to1_cumulative(
         slr = 10.0
     if slr <= 0.0:
         slr = 10.0
+
+    try:
+        snow_mask_threshold = float(snow_mask_threshold_raw)
+    except (TypeError, ValueError):
+        snow_mask_threshold = 0.5
+    snow_mask_threshold = min(max(snow_mask_threshold, 0.0), 1.0)
+
+    try:
+        min_step_lwe = float(min_step_lwe_raw)
+    except (TypeError, ValueError):
+        min_step_lwe = 0.01
+    min_step_lwe = max(min_step_lwe, 0.0)
 
     cumulative_kgm2: np.ndarray | None = None
     valid_mask: np.ndarray | None = None
@@ -401,10 +415,25 @@ def _derive_snowfall_total_10to1_cumulative(
             var_key=snow_component,
         )
 
-        step_apcp_clean = np.where(np.isfinite(apcp_step), np.maximum(apcp_step, 0.0), 0.0).astype(np.float32)
-        step_snow_binary = np.where(np.isfinite(snow_mask) & (snow_mask > 0.0), 1.0, 0.0).astype(np.float32)
+        # Categorical snow mask should be binary; reject out-of-range sentinels.
+        apcp_valid = np.isfinite(apcp_step) & (apcp_step >= 0.0)
+        snow_valid = np.isfinite(snow_mask) & (snow_mask >= 0.0) & (snow_mask <= 1.0)
+
+        step_apcp_clean = np.where(apcp_valid, apcp_step, 0.0).astype(np.float32, copy=False)
+        if min_step_lwe > 0.0:
+            step_apcp_clean = np.where(
+                step_apcp_clean >= min_step_lwe,
+                step_apcp_clean,
+                0.0,
+            ).astype(np.float32, copy=False)
+
+        step_snow_binary = np.where(
+            snow_valid & (snow_mask >= snow_mask_threshold),
+            1.0,
+            0.0,
+        ).astype(np.float32)
         step_snow_kgm2 = step_apcp_clean * step_snow_binary
-        step_valid = np.isfinite(apcp_step) & np.isfinite(snow_mask)
+        step_valid = apcp_valid & snow_valid
 
         if cumulative_kgm2 is None:
             cumulative_kgm2 = step_snow_kgm2
