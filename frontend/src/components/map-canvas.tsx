@@ -968,6 +968,7 @@ export function MapCanvas({
       return;
     }
 
+    let resizeRafId: number | null = null;
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
       style: styleFor(tileUrl, opacity, variable, variableKind, overlayFadeOutZoom, contourGeoJsonUrl, basemapMode),
@@ -1010,8 +1011,14 @@ export function MapCanvas({
     });
 
     mapRef.current = map;
+    resizeRafId = window.requestAnimationFrame(() => {
+      map.resize();
+    });
 
     return () => {
+      if (resizeRafId !== null) {
+        window.cancelAnimationFrame(resizeRafId);
+      }
       map.off("error", handleMapError as any);
       cancelCrossfade();
       cancelLoopToTileTransition();

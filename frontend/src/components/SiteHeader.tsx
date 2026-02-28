@@ -21,7 +21,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
     <header className="sticky top-0 z-50 border-b border-white/10 bg-black/35 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4">
         <NavLink to="/" className="font-semibold tracking-tight text-white">
-          TheWeatherModels.com
+          The Weather Models
         </NavLink>
 
         <nav className="hidden md:flex items-center gap-4">
