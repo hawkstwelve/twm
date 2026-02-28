@@ -10,6 +10,12 @@
     box-shadow: 0 4px 24px rgb(0 0 0 / 0.18);
     backdrop-filter: blur(14px) saturate(1.6);
     -webkit-backdrop-filter: blur(14px) saturate(1.6);
+    /* Force readable white text inside glass panels */
+    --foreground: 0 0% 98%;
+    --muted-foreground: 0 0% 68%;
+    --card-foreground: 0 0% 98%;
+    --popover-foreground: 0 0% 98%;
+    color: hsl(0 0% 98%);
   }
 
   /* Glass morphism surface — strong (toolbar, bottom controls) */
@@ -19,6 +25,12 @@
     box-shadow: 0 8px 32px rgb(0 0 0 / 0.22);
     backdrop-filter: blur(18px) saturate(1.8);
     -webkit-backdrop-filter: blur(18px) saturate(1.8);
+    /* Force readable white text inside glass panels */
+    --foreground: 0 0% 98%;
+    --muted-foreground: 0 0% 68%;
+    --card-foreground: 0 0% 98%;
+    --popover-foreground: 0 0% 98%;
+    color: hsl(0 0% 98%);
   }
 }
 

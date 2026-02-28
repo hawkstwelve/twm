@@ -2773,7 +2773,7 @@ export default function App() {
   const activeLoopUrl = isLoopDisplayActive ? resolveLoopUrlForHour(activeLoopHour, visibleRenderMode) : null;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="relative h-full">
       <WeatherToolbar
         region={region}
         onRegionChange={setRegion}
@@ -2792,7 +2792,7 @@ export default function App() {
         disabled={loading || models.length === 0}
       />
 
-      <div className="relative flex-1 overflow-hidden">
+      <div className="relative h-full overflow-hidden">
         <MapCanvas
           tileUrl={tileUrl}
           contourGeoJsonUrl={contourGeoJsonUrl}
