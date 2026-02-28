@@ -395,15 +395,18 @@ GFS_VARS: dict[str, VarSpec] = {
         id="snowfall_total",
         name="Total Snowfall (10:1)",
         selectors=VarSelectors(
-            search=[":ASNOW:surface:"],
+            search=[
+                ":SNOD:surface:",
+                ":ASNOW:surface:",
+            ],
             filter_by_keys={
-                "shortName": "asnow",
+                "shortName": "snod",
                 "typeOfLevel": "surface",
             },
             hints={
-                "upstream_var": "asnow",
-                "cf_var": "asnow",
-                "short_name": "asnow",
+                "upstream_var": "snod",
+                "cf_var": "snod",
+                "short_name": "snod",
             },
         ),
         primary=True,

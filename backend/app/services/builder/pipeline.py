@@ -674,11 +674,11 @@ def _format_units(units: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _get_search_pattern(var_spec_model: Any) -> str:
-    """Extract the Herbie search pattern from a model VarSpec.
+def _get_search_patterns(var_spec_model: Any) -> list[str]:
+    """Extract Herbie search patterns from a model VarSpec.
 
     The VarSpec.selectors.search list contains GRIB index patterns.
-    We use the first one.
+    Patterns are tried in order.
     """
     selectors = getattr(var_spec_model, "selectors", None)
     if selectors is None:
@@ -689,7 +689,7 @@ def _get_search_pattern(var_spec_model: Any) -> str:
             f"VarSpec for {getattr(var_spec_model, 'id', '?')!r} has no "
             f"search patterns — cannot determine GRIB message to fetch"
         )
-    return search_list[0]
+    return [str(pattern) for pattern in search_list if str(pattern).strip()]
 
 
 # ---------------------------------------------------------------------------
@@ -774,7 +774,7 @@ def build_frame(
     )
     kind_normalized = str(kind).strip().lower() or "continuous"
     warp_resampling = _warp_resampling_for_kind(kind_normalized)
-    search_pattern = None if getattr(var_spec_model, "derived", False) else _get_search_pattern(var_spec_model)
+    search_patterns = None if getattr(var_spec_model, "derived", False) else _get_search_patterns(var_spec_model)
 
     # --- Staging directory ---
     staging_dir = data_root / "staging" / model / run_id / var_key
@@ -803,16 +803,50 @@ def build_frame(
         else:
             # --- Step 1: Fetch GRIB data ---
             logger.info("Step 1/6: Fetching GRIB data")
-            if search_pattern is None:
+            if search_patterns is None or not search_patterns:
                 raise ValueError(
-                    f"No search pattern resolved for non-derived var {var_id!r}"
+                    f"No search patterns resolved for non-derived var {var_id!r}"
                 )
-            raw_data, src_crs, src_transform = fetch_variable(
-                    model_id=model,
-                    product=product,
-                    search_pattern=search_pattern,
-                    run_date=run_date,
-                    fh=fh,
+            last_exc: Exception | None = None
+            raw_data: np.ndarray | None = None
+            src_crs = None
+            src_transform = None
+            for pattern_idx, search_pattern in enumerate(search_patterns, start=1):
+                try:
+                    raw_data, src_crs, src_transform = fetch_variable(
+                        model_id=model,
+                        product=product,
+                        search_pattern=search_pattern,
+                        run_date=run_date,
+                        fh=fh,
+                    )
+                    if pattern_idx > 1:
+                        logger.info(
+                            "Fetched via fallback search pattern %d/%d for %s: %s",
+                            pattern_idx,
+                            len(search_patterns),
+                            var_key,
+                            search_pattern,
+                        )
+                    break
+                except (HerbieTransientUnavailableError, RuntimeError) as exc:
+                    last_exc = exc
+                    if pattern_idx < len(search_patterns):
+                        logger.warning(
+                            "Search pattern %d/%d unavailable for %s fh%03d (%s); trying next pattern",
+                            pattern_idx,
+                            len(search_patterns),
+                            var_key,
+                            fh,
+                            search_pattern,
+                        )
+                        continue
+                    raise
+            if raw_data is None or src_crs is None or src_transform is None:
+                if last_exc is not None:
+                    raise last_exc
+                raise RuntimeError(
+                    f"Unable to fetch non-derived var {var_key!r} for fh{fh:03d}; no usable search pattern"
                 )
 
             # --- Step 2: Unit conversion ---

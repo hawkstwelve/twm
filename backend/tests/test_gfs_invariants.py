@@ -115,3 +115,9 @@ def test_gfs_dewpoint_and_snow_aliases_normalize() -> None:
     assert GFS_MODEL.normalize_var_id("snowfall_total") == "snowfall_total"
     assert GFS_MODEL.normalize_var_id("asnow") == "snowfall_total"
     assert GFS_MODEL.normalize_var_id("snow10") == "snowfall_total"
+
+
+def test_gfs_snowfall_total_search_patterns_include_upstream_fallback() -> None:
+    var_spec = GFS_MODEL.get_var("snowfall_total")
+    assert var_spec is not None
+    assert var_spec.selectors.search[:2] == [":SNOD:surface:", ":ASNOW:surface:"]
