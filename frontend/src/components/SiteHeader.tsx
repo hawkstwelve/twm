@@ -1,15 +1,25 @@
-import { NavLink } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { NavLink, useLocation } from "react-router-dom";
 
-function NavItem({ to, label }: { to: string; label: string }) {
+type NavItemProps = {
+  to: string;
+  label: string;
+  onClick?: () => void;
+  className?: string;
+};
+
+function NavItem({ to, label, onClick, className }: NavItemProps) {
   return (
     <NavLink
       to={to}
+      onClick={onClick}
       className={({ isActive }) =>
         [
           "text-sm font-medium transition px-3 py-1.5 rounded-md",
           isActive
             ? "text-white bg-white/10"
             : "text-white/70 hover:text-white hover:bg-white/10",
+          className ?? "",
         ].join(" ")
       }
     >
@@ -19,34 +29,120 @@ function NavItem({ to, label }: { to: string; label: string }) {
 }
 
 export default function SiteHeader({ variant }: { variant: "marketing" | "app" }) {
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const location = useLocation();
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const isAppVariant = variant === "app";
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) {
+      return;
+    }
+
+    function onPointerDown(event: MouseEvent | TouchEvent) {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (menuRef.current?.contains(target)) {
+        return;
+      }
+      setMobileMenuOpen(false);
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setMobileMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [mobileMenuOpen]);
+
+  const menuToggleClassName = isAppVariant
+    ? "inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white hover:bg-white/10"
+    : "inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white hover:bg-white/10 md:hidden";
+
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-black/35 backdrop-blur-2xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-5 md:px-8">
+    <header className="sticky top-0 z-[60] border-b border-white/10 bg-black/35 backdrop-blur-2xl">
+      <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8">
         <NavLink to="/" className="font-semibold tracking-tight text-white">
           The Weather Models
         </NavLink>
 
-        <nav className="hidden md:flex items-center gap-1">
-          <NavItem to="/viewer" label="Viewer" />
-          <NavItem to="/models" label="Models" />
-          <NavItem to="/variables" label="Variables" />
-          <NavItem to="/changelog" label="Changelog" />
-          <NavItem to="/status" label="Status" />
-        </nav>
+        {variant === "marketing" ? (
+          <nav className="hidden md:flex items-center gap-1">
+            <NavItem to="/viewer" label="Viewer" />
+            <NavItem to="/models" label="Models" />
+            <NavItem to="/variables" label="Variables" />
+            <NavItem to="/changelog" label="Changelog" />
+            <NavItem to="/status" label="Status" />
+          </nav>
+        ) : null}
 
-        <div className="ml-auto flex items-center gap-3">
-          <NavLink
-            to="/login"
-            className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
+        <div className="ml-auto flex items-center gap-2 md:gap-3" ref={menuRef}>
+          <button
+            type="button"
+            className={menuToggleClassName}
+            aria-label="Open menu"
+            aria-expanded={mobileMenuOpen}
+            aria-controls="mobile-site-nav"
+            onClick={() => setMobileMenuOpen((open) => !open)}
           >
-            Login
-          </NavLink>
-          <NavLink
-            to="/login"
-            className="rounded-md bg-emerald-400/20 border border-emerald-300/25 px-3 py-2 text-sm font-medium text-emerald-50 hover:bg-emerald-400/25"
-          >
-            Sign Up
-          </NavLink>
+            <span className="sr-only">{mobileMenuOpen ? "Close menu" : "Open menu"}</span>
+            <span className="flex w-4 flex-col gap-1.5">
+              <span className="block h-0.5 w-4 rounded bg-current" />
+              <span className="block h-0.5 w-4 rounded bg-current" />
+              <span className="block h-0.5 w-4 rounded bg-current" />
+            </span>
+          </button>
+
+          {variant === "marketing" ? (
+            <>
+              <NavLink
+                to="/login"
+                className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
+              >
+                Login
+              </NavLink>
+              <NavLink
+                to="/login"
+                className="rounded-md bg-emerald-400/20 border border-emerald-300/25 px-3 py-2 text-sm font-medium text-emerald-50 hover:bg-emerald-400/25"
+              >
+                Sign Up
+              </NavLink>
+            </>
+          ) : null}
+
+          {mobileMenuOpen ? (
+            <nav
+              id="mobile-site-nav"
+              className="glass absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/10 bg-black/65 p-2.5 shadow-2xl backdrop-blur-2xl"
+              aria-label="Site navigation"
+            >
+              <div className="flex flex-col gap-1">
+                <NavItem to="/viewer" label="Viewer" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem to="/models" label="Models" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem to="/variables" label="Variables" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem to="/changelog" label="Changelog" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem to="/status" label="Status" onClick={() => setMobileMenuOpen(false)} />
+                <div className="my-1 h-px bg-white/10" />
+                <NavItem to="/login" label="Login" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem to="/login" label="Sign Up" onClick={() => setMobileMenuOpen(false)} />
+              </div>
+            </nav>
+          ) : null}
         </div>
       </div>
     </header>
