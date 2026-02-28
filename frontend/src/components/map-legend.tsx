@@ -256,7 +256,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
   return (
     <div
       className={cn(
-        "fixed z-40 flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass transition-all duration-200",
+        "fixed z-40 flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
         showPrecipPtypeRows ? "w-[220px]" : "w-[120px]",
         isSmallScreen ? "bottom-24 right-4" : "right-4 top-20"
       )}
@@ -272,14 +272,14 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
             return next;
           })
         }
-        className="flex w-full items-center justify-between gap-1.5 border-b border-border/30 px-1.5 py-1 text-left transition-all duration-150 hover:bg-secondary/30 active:bg-secondary/50"
+        className="flex w-full items-center justify-between gap-1.5 border-b border-border/25 px-1.5 py-1 text-left transition-all duration-150 hover:bg-secondary/25 active:bg-secondary/45"
         aria-expanded={!collapsed}
         aria-controls="legend-body"
       >
         <div className="flex min-w-0 flex-col gap-0.5 overflow-hidden">
-          <span className="truncate text-xs font-semibold tracking-tight text-foreground">{legend.title}</span>
+          <span className="truncate text-sm font-semibold tracking-tight text-foreground/95">{legend.title}</span>
           {legend.units && (
-            <span className="text-[10px] font-medium text-muted-foreground/80">{legend.units}</span>
+            <span className="text-[10px] font-medium text-foreground/65">{legend.units}</span>
           )}
         </div>
         {collapsed ? (
@@ -295,7 +295,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
       >
         <div className="overflow-hidden">
           <div key={fadeKey} className="flex flex-col gap-1.5 px-1.5 py-1.5 animate-in fade-in duration-200">
-            <div className="max-h-[45vh] space-y-px overflow-y-auto scroll-smooth">
+            <div className="legend-scroll max-h-[45vh] space-y-px overflow-y-auto scroll-smooth">
               {showPrecipPtypeRows
                 ? precipPtypeRows.map((row, rowIndex) => (
                     <div
@@ -303,7 +303,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
                       className={cn(rowIndex > 0 ? "mt-2 border-t border-border/20 pt-2" : "")}
                     >
                       <div className="mb-1 flex items-center justify-between gap-2 px-0.5">
-                        <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/85">
+                        <span className="text-[9px] font-medium uppercase tracking-wide text-foreground/62">
                           {row.label}
                         </span>
                         <span className="font-mono text-[9px] font-medium tabular-nums text-foreground/90">
@@ -322,7 +322,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
                       key={`group-${groupIndex}`}
                       className={cn(groupIndex > 0 ? "mt-2 border-t border-border/20 pt-2" : "")}
                     >
-                      <div className="mb-1 px-0.5 text-[9px] font-semibold uppercase tracking-wide text-muted-foreground/85">
+                      <div className="mb-1 px-0.5 text-[9px] font-medium uppercase tracking-wide text-foreground/62">
                         {group.label}
                       </div>
                       {group.entries.map((entry, index) => (
@@ -359,7 +359,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
 
             <div className="border-t border-border/30 pt-1.5">
               <div className="mb-1 flex items-center justify-between">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-foreground/65">
                   Opacity
                 </span>
                 <span className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/90">

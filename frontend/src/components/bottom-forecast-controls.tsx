@@ -141,11 +141,11 @@ export function BottomForecastControls({
 
           <div className="flex flex-1 flex-col gap-1.5">
             <div className="flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+              <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-foreground/65">
                 <Clock className="h-3 w-3" />
                 Forecast Hour
               </span>
-              <span className="font-mono text-xs font-semibold tabular-nums tracking-tight text-foreground transition-all duration-150">
+              <span className="font-mono text-xs font-semibold tabular-nums tracking-tight text-foreground/95 transition-all duration-150">
                 {forecastHour}h
               </span>
             </div>
@@ -173,7 +173,7 @@ export function BottomForecastControls({
               max={Math.max(0, availableFrames.length - 1)}
               step={1}
               disabled={disabled || isPlaying || !hasFrames}
-              className="w-full transition-opacity duration-150"
+              className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:first-child>*:first-child]:bg-primary/95 [&>*:nth-child(2)]:h-[22px] [&>*:nth-child(2)]:w-[22px] [&>*:nth-child(2)]:border-primary/95 [&>*:nth-child(2)]:shadow-[0_0_0_1px_rgba(255,255,255,0.18),0_0_10px_rgba(56,189,248,0.32)]"
             />
           </div>
 
@@ -189,7 +189,7 @@ export function BottomForecastControls({
                 <span className="text-sm font-semibold leading-tight tracking-tight text-foreground transition-all duration-200">
                   {validTime.primary}
                 </span>
-                <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/70 transition-all duration-200">
+                <span className="text-[10px] font-medium uppercase tracking-wider text-foreground/65 transition-all duration-200">
                   {validTime.secondary}
                 </span>
               </>

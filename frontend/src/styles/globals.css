@@ -51,6 +51,31 @@
   .scroll-smooth {
     scroll-behavior: smooth;
   }
+
+  .legend-scroll {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.24) transparent;
+  }
+
+  .legend-scroll::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .legend-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .legend-scroll::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: 9999px;
+    background: rgba(255, 255, 255, 0.22);
+    background-clip: content-box;
+  }
+
+  .legend-scroll::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
+    background-clip: content-box;
+  }
 }
 
 @layer base {
