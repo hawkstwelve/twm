@@ -1,11 +1,13 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import "maplibre-gl/dist/maplibre-gl.css";
-import "@/styles/globals.css";
-import App from "@/App";
+import { BrowserRouter } from "react-router-dom";
+import RouterApp from "./RouterApp";
+import "./styles/globals.css";
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <BrowserRouter>
+      <RouterApp />
+    </BrowserRouter>
   </React.StrictMode>
 );
