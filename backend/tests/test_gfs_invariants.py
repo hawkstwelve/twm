@@ -29,11 +29,13 @@ def test_gfs_buildable_var_set_and_defaults_invariants() -> None:
     }
     assert buildable_var_keys == {
         "tmp2m",
+        "dp2m",
         "tmp850",
         "wspd10m",
         "wgst10m",
         "precip_ptype",
         "precip_total",
+        "snowfall_total",
     }
 
     assert capabilities.ui_defaults["default_var_key"] == "tmp2m"
@@ -68,10 +70,20 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert tmp850["derived"] is False
     assert tmp850["units"] == "C"
 
+    dp2m = payload["variables"]["dp2m"]
+    assert dp2m["buildable"] is True
+    assert dp2m["derived"] is False
+    assert dp2m["units"] == "F"
+
     wgst10m = payload["variables"]["wgst10m"]
     assert wgst10m["buildable"] is True
     assert wgst10m["derived"] is False
     assert wgst10m["units"] == "mph"
+
+    snowfall_total = payload["variables"]["snowfall_total"]
+    assert snowfall_total["buildable"] is True
+    assert snowfall_total["derived"] is False
+    assert snowfall_total["units"] == "in"
 
     qpf6h = payload["variables"]["qpf6h"]
     assert qpf6h["buildable"] is False
@@ -90,3 +102,14 @@ def test_gfs_temp850_and_gust_aliases_normalize() -> None:
     assert GFS_MODEL.normalize_var_id("wgst10m") == "wgst10m"
     assert GFS_MODEL.normalize_var_id("gust") == "wgst10m"
     assert GFS_MODEL.normalize_var_id("gust10m") == "wgst10m"
+
+
+def test_gfs_dewpoint_and_snow_aliases_normalize() -> None:
+    assert GFS_MODEL.normalize_var_id("dp2m") == "dp2m"
+    assert GFS_MODEL.normalize_var_id("d2m") == "dp2m"
+    assert GFS_MODEL.normalize_var_id("2d") == "dp2m"
+    assert GFS_MODEL.normalize_var_id("dpt2m") == "dp2m"
+
+    assert GFS_MODEL.normalize_var_id("snowfall_total") == "snowfall_total"
+    assert GFS_MODEL.normalize_var_id("asnow") == "snowfall_total"
+    assert GFS_MODEL.normalize_var_id("snow10") == "snowfall_total"

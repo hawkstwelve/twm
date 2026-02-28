@@ -8,7 +8,7 @@ def test_gfs_continuous_vars_skip_display_smoothing() -> None:
     data[4, 4] = 100.0
     spec = {"type": "continuous", "display_smoothing_sigma": 0.8}
 
-    for var_key in ("tmp2m", "tmp850", "wspd10m", "wgst10m", "precip_total", "qpf6h"):
+    for var_key in ("tmp2m", "dp2m", "tmp850", "wspd10m", "wgst10m", "precip_total", "snowfall_total", "qpf6h"):
         display = _prepare_display_data_for_colorize(
             data,
             spec,

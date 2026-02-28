@@ -47,6 +47,12 @@ class GFSPlugin(BaseModelPlugin):
             "t2m": "tmp2m",
             "2t": "tmp2m",
             "tmp2m": "tmp2m",
+            "dp2m": "dp2m",
+            "d2m": "dp2m",
+            "2d": "dp2m",
+            "dpt2m": "dp2m",
+            "dewpoint2m": "dp2m",
+            "dewpoint": "dp2m",
             "tmp850": "tmp850",
             "t850": "tmp850",
             "t850mb": "tmp850",
@@ -70,6 +76,11 @@ class GFSPlugin(BaseModelPlugin):
             "qpf": "precip_total",
             "total_qpf": "precip_total",
             "qpf6h": "qpf6h",
+            "snowfall_total": "snowfall_total",
+            "asnow": "snowfall_total",
+            "snow10": "snowfall_total",
+            "total_snow": "snowfall_total",
+            "totalsnow": "snowfall_total",
             "precip_ptype": "precip_ptype",
             "crain": "crain",
             "csnow": "csnow",
@@ -127,6 +138,25 @@ GFS_VARS: dict[str, VarSpec] = {
                 "upstream_var": "t2m",
                 "cf_var": "t2m",
                 "short_name": "2t",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="F",
+    ),
+    "dp2m": VarSpec(
+        id="dp2m",
+        name="Surface Dew Point",
+        selectors=VarSelectors(
+            search=[":DPT:2 m above ground:"],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "2",
+            },
+            hints={
+                "upstream_var": "d2m",
+                "cf_var": "d2m",
+                "short_name": "2d",
             },
         ),
         primary=True,
@@ -361,6 +391,25 @@ GFS_VARS: dict[str, VarSpec] = {
         kind="continuous",
         units="in",
     ),
+    "snowfall_total": VarSpec(
+        id="snowfall_total",
+        name="Total Snowfall (10:1)",
+        selectors=VarSelectors(
+            search=[":ASNOW:surface:"],
+            filter_by_keys={
+                "shortName": "asnow",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "asnow",
+                "cf_var": "asnow",
+                "short_name": "asnow",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="in",
+    ),
     "qpf6h": VarSpec(
         id="qpf6h",
         name="6-hr Precip",
@@ -378,12 +427,14 @@ GFS_VARS: dict[str, VarSpec] = {
 
 GFS_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "tmp2m",
+    "dp2m": "dp2m",
     "tmp850": "tmp850",
     "wspd10m": "wspd10m",
     "wgst10m": "wgst10m",
     "refc": "refc",
     "precip_ptype": "precip_ptype",
     "precip_total": "precip_total",
+    "snowfall_total": "snowfall_total",
     "qpf6h": "qpf6h",
 }
 
@@ -395,20 +446,24 @@ GFS_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
 
 GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
     "tmp2m": 0,
-    "tmp850": 1,
-    "refc": 2,
-    "wspd10m": 3,
-    "wgst10m": 4,
-    "precip_ptype": 5,
-    "precip_total": 6,
-    "qpf6h": 7,
+    "dp2m": 1,
+    "tmp850": 2,
+    "refc": 3,
+    "wspd10m": 4,
+    "wgst10m": 5,
+    "precip_ptype": 6,
+    "precip_total": 7,
+    "snowfall_total": 8,
+    "qpf6h": 9,
 }
 
 GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
+    "dp2m": "c_to_f",
     "wspd10m": "ms_to_mph",
     "wgst10m": "ms_to_mph",
     "precip_total": "kgm2_to_in",
+    "snowfall_total": "m_to_in",
     "qpf6h": "kgm2_to_in",
 }
 
