@@ -2,7 +2,7 @@ export const API_ORIGIN = "https://api.theweathermodels.com";
 export const API_V4_BASE = `${API_ORIGIN}/api/v4`;
 
 const TILES_BASE_ENV = String(import.meta.env.VITE_TILES_BASE ?? "").trim();
-export const TILES_BASE = TILES_BASE_ENV.replace(/\/$/, "");
+export const TILES_BASE = (TILES_BASE_ENV || API_ORIGIN).replace(/\/$/, "");
 
 export const WEBP_RENDER_MODE_THRESHOLDS = {
   tier0Max: 5.8,
