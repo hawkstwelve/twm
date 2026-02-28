@@ -8,7 +8,7 @@ export default function MarketingLayout() {
       {/* Background */}
       <div
         aria-hidden="true"
-        className="marketing-bg inset-0 -z-10"
+        className="absolute md:fixed inset-0 -z-10"
         style={{
           backgroundImage: `
             radial-gradient(1200px 700px at 20% 20%, rgba(120,160,255,0.14), transparent 55%),
@@ -23,10 +23,10 @@ export default function MarketingLayout() {
       {/* Vignette */}
       <div
         aria-hidden="true"
-        className="marketing-bg pointer-events-none inset-0 -z-10 bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(0,0,0,0.55)_100%)]"
+        className="absolute md:fixed inset-0 -z-10 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(0,0,0,0.55)_100%)]"
       />
       {/* Optional subtle noise (add /public/assets/noise.png if you want) */}
-      {/* <div aria-hidden="true" className="marketing-bg pointer-events-none inset-0 -z-10 opacity-[0.06] mix-blend-overlay bg-[url(/assets/noise.png)]" /> */}
+      {/* <div aria-hidden="true" className="absolute md:fixed inset-0 -z-10 pointer-events-none opacity-[0.06] mix-blend-overlay bg-[url(/assets/noise.png)]" /> */}
 
       <SiteHeader variant="marketing" />
 
