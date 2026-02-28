@@ -89,7 +89,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     <header
       role="toolbar"
       aria-label="Weather model controls"
-      className="sticky top-0 z-50 w-full border-b border-border/40 bg-[hsl(var(--toolbar))]/95 shadow-sm backdrop-blur-md"
+      className="glass-strong sticky top-0 z-50 w-full border-t-0 border-x-0"
     >
       <div className="flex flex-wrap items-end gap-2.5 px-4 py-2.5">
         <ToolbarSelect

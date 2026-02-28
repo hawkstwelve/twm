@@ -114,7 +114,7 @@ export function BottomForecastControls({
   return (
     <TooltipProvider delayDuration={300}>
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex items-end justify-center px-4 pb-5 sm:pb-6">
-        <div className="pointer-events-auto flex w-full max-w-3xl flex-col gap-3 rounded-md border border-border/50 bg-[hsl(var(--toolbar))]/95 px-5 py-3.5 shadow-2xl backdrop-blur-md sm:flex-row sm:items-center sm:gap-5">
+        <div className="pointer-events-auto flex w-full max-w-3xl flex-col gap-3 rounded-md glass-strong px-5 py-3.5 sm:flex-row sm:items-center sm:gap-5">
           <div className="flex shrink-0 items-center gap-2">
             <Tooltip>
               <TooltipTrigger asChild>
