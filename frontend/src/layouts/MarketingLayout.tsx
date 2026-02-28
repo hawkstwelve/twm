@@ -4,10 +4,11 @@ import SiteFooter from "../components/SiteFooter";
 
 export default function MarketingLayout() {
   return (
-    <div className="min-h-svh text-white">
+    <div className="relative min-h-svh text-white overflow-hidden">
       {/* Background */}
       <div
-        className="fixed inset-0 -z-10"
+        aria-hidden="true"
+        className="absolute inset-0 -z-10"
         style={{
           backgroundImage: `
             radial-gradient(1200px 700px at 20% 20%, rgba(120,160,255,0.14), transparent 55%),
@@ -20,9 +21,12 @@ export default function MarketingLayout() {
         }}
       />
       {/* Vignette */}
-      <div className="fixed inset-0 -z-10 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(0,0,0,0.55)_100%)]" />
+      <div
+        aria-hidden="true"
+        className="absolute inset-0 -z-10 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_45%,rgba(0,0,0,0.55)_100%)]"
+      />
       {/* Optional subtle noise (add /public/assets/noise.png if you want) */}
-      {/* <div className="fixed inset-0 -z-10 pointer-events-none opacity-[0.06] mix-blend-overlay bg-[url(/assets/noise.png)]" /> */}
+      {/* <div aria-hidden="true" className="absolute inset-0 -z-10 pointer-events-none opacity-[0.06] mix-blend-overlay bg-[url(/assets/noise.png)]" /> */}
 
       <SiteHeader variant="marketing" />
 
