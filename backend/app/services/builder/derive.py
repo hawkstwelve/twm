@@ -17,6 +17,7 @@ import rasterio
 import rasterio.transform
 
 from app.services.builder.fetch import convert_units, fetch_variable
+from app.services.builder.fetch import HerbieTransientUnavailableError
 from app.services.colormaps import (
     PRECIP_PTYPE_BINS_PER_TYPE,
     PRECIP_PTYPE_BREAKS,
@@ -95,15 +96,23 @@ def _fetch_component(
     var_key: str,
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
     normalized_var_key, selectors = _resolve_component_var(model_plugin, var_key)
-    search_pattern = selectors.search[0]
-    data, crs, transform = fetch_variable(
-        model_id=model_id,
-        product=product,
-        search_pattern=search_pattern,
-        run_date=run_date,
-        fh=fh,
-    )
-    return data.astype(np.float32, copy=False), crs, transform
+    last_exc: Exception | None = None
+    for search_pattern in selectors.search:
+        try:
+            data, crs, transform = fetch_variable(
+                model_id=model_id,
+                product=product,
+                search_pattern=search_pattern,
+                run_date=run_date,
+                fh=fh,
+            )
+            return data.astype(np.float32, copy=False), crs, transform
+        except (HerbieTransientUnavailableError, RuntimeError) as exc:
+            last_exc = exc
+            continue
+    if last_exc is not None:
+        raise last_exc
+    raise ValueError(f"Component var {normalized_var_key!r} has no usable search patterns")
 
 
 def _derive_wspd10m(
@@ -120,23 +129,43 @@ def _derive_wspd10m(
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     u_component = hints.get("u_component", "10u")
     v_component = hints.get("v_component", "10v")
+    speed_component = hints.get("speed_component")
 
-    u_data, src_crs, src_transform = _fetch_component(
-        model_id=model_id,
-        product=product,
-        run_date=run_date,
-        fh=fh,
-        model_plugin=model_plugin,
-        var_key=u_component,
-    )
-    v_data, _, _ = _fetch_component(
-        model_id=model_id,
-        product=product,
-        run_date=run_date,
-        fh=fh,
-        model_plugin=model_plugin,
-        var_key=v_component,
-    )
+    try:
+        u_data, src_crs, src_transform = _fetch_component(
+            model_id=model_id,
+            product=product,
+            run_date=run_date,
+            fh=fh,
+            model_plugin=model_plugin,
+            var_key=u_component,
+        )
+        v_data, _, _ = _fetch_component(
+            model_id=model_id,
+            product=product,
+            run_date=run_date,
+            fh=fh,
+            model_plugin=model_plugin,
+            var_key=v_component,
+        )
+    except (HerbieTransientUnavailableError, RuntimeError, ValueError):
+        if not speed_component:
+            raise
+        speed_data, src_crs, src_transform = _fetch_component(
+            model_id=model_id,
+            product=product,
+            run_date=run_date,
+            fh=fh,
+            model_plugin=model_plugin,
+            var_key=str(speed_component),
+        )
+        wspd = convert_units(
+            speed_data.astype(np.float32, copy=False),
+            var_key=var_key,
+            model_id=model_id,
+            var_capability=var_capability,
+        )
+        return wspd.astype(np.float32, copy=False), src_crs, src_transform
 
     wspd_ms = np.hypot(u_data, v_data, dtype=np.float32)
     wspd = convert_units(

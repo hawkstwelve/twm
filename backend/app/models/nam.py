@@ -35,6 +35,8 @@ class NAMPlugin(BaseModelPlugin):
             "t2m": "tmp2m",
             "2t": "tmp2m",
             "wspd10m": "wspd10m",
+            "wind10m": "10si",
+            "10si": "10si",
             "10u": "10u",
             "u10": "10u",
             "10v": "10v",
@@ -123,6 +125,25 @@ NAM_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
+    "10si": VarSpec(
+        id="10si",
+        name="10m Wind Speed (direct)",
+        selectors=VarSelectors(
+            search=[
+                ":WIND:10 m above ground:",
+                ":WIND:10 m above ground",
+            ],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "10",
+            },
+            hints={
+                "upstream_var": "10si",
+                "cf_var": "si10",
+                "short_name": "10si",
+            },
+        ),
+    ),
     "wspd10m": VarSpec(
         id="wspd10m",
         name="10m Wind Speed",
@@ -130,6 +151,7 @@ NAM_VARS: dict[str, VarSpec] = {
             hints={
                 "u_component": "10u",
                 "v_component": "10v",
+                "speed_component": "10si",
             },
         ),
         derived=True,

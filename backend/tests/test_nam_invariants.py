@@ -70,6 +70,9 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
     v10 = payload["variables"]["10v"]
     assert v10["buildable"] is False
 
+    si10 = payload["variables"]["10si"]
+    assert si10["buildable"] is False
+
 
 def test_nam_aliases_normalize() -> None:
     assert NAM_MODEL.normalize_var_id("tmp2m") == "tmp2m"
@@ -77,4 +80,6 @@ def test_nam_aliases_normalize() -> None:
     assert NAM_MODEL.normalize_var_id("2t") == "tmp2m"
     assert NAM_MODEL.normalize_var_id("u10") == "10u"
     assert NAM_MODEL.normalize_var_id("v10") == "10v"
+    assert NAM_MODEL.normalize_var_id("10si") == "10si"
+    assert NAM_MODEL.normalize_var_id("wind10m") == "10si"
     assert NAM_MODEL.normalize_var_id("wspd10m") == "wspd10m"
