@@ -33,6 +33,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
   const location = useLocation();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isAppVariant = variant === "app";
+  const hideInlineAuthOnMobile = variant === "marketing" && location.pathname === "/";
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -83,6 +84,14 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           The Weather Models
         </NavLink>
 
+        <nav className="ml-auto hidden items-center gap-1 md:flex">
+          <NavItem to="/viewer" label="Viewer" />
+          <NavItem to="/models" label="Models" />
+          <NavItem to="/variables" label="Variables" />
+          <NavItem to="/changelog" label="Changelog" />
+          <NavItem to="/status" label="Status" />
+        </nav>
+
         <div className="ml-auto flex items-center gap-2 md:hidden" ref={menuRef}>
           <button
             type="button"
@@ -104,13 +113,19 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
             <>
               <NavLink
                 to="/login"
-                className="rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10"
+                className={[
+                  "rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10",
+                  hideInlineAuthOnMobile ? "hidden md:inline-flex" : "",
+                ].join(" ")}
               >
                 Login
               </NavLink>
               <NavLink
                 to="/login"
-                className="rounded-md bg-emerald-400/20 border border-emerald-300/25 px-3 py-2 text-sm font-medium text-emerald-50 hover:bg-emerald-400/25"
+                className={[
+                  "rounded-md bg-emerald-400/20 border border-emerald-300/25 px-3 py-2 text-sm font-medium text-emerald-50 hover:bg-emerald-400/25",
+                  hideInlineAuthOnMobile ? "hidden md:inline-flex" : "",
+                ].join(" ")}
               >
                 Sign Up
               </NavLink>
