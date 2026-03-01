@@ -90,6 +90,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           <NavItem to="/variables" label="Variables" />
           <NavItem to="/changelog" label="Changelog" />
           <NavItem to="/status" label="Status" />
+          <NavItem to="/login" label="Login" />
         </nav>
 
         <div className="ml-auto flex items-center gap-2 md:hidden" ref={menuRef}>
