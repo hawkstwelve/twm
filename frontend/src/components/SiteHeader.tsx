@@ -32,7 +32,6 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const menuRef = useRef<HTMLDivElement | null>(null);
-  const isAppVariant = variant === "app";
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -70,10 +69,6 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
     };
   }, [mobileMenuOpen]);
 
-  const menuToggleClassName = isAppVariant
-    ? "inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white hover:bg-white/10"
-    : "inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white hover:bg-white/10 md:hidden";
-
   return (
     <header className="sticky top-0 z-[60] border-b border-white/10 bg-black/35 backdrop-blur-2xl">
       <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8">
@@ -81,20 +76,10 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           The Weather Models
         </NavLink>
 
-        {variant === "marketing" ? (
-          <nav className="hidden md:flex items-center gap-1">
-            <NavItem to="/viewer" label="Viewer" />
-            <NavItem to="/models" label="Models" />
-            <NavItem to="/variables" label="Variables" />
-            <NavItem to="/changelog" label="Changelog" />
-            <NavItem to="/status" label="Status" />
-          </nav>
-        ) : null}
-
-        <div className="ml-auto flex items-center gap-2 md:gap-3" ref={menuRef}>
+        <div className="ml-auto flex items-center gap-2 md:hidden" ref={menuRef}>
           <button
             type="button"
-            className={menuToggleClassName}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white hover:bg-white/10"
             aria-label="Open menu"
             aria-expanded={mobileMenuOpen}
             aria-controls="mobile-site-nav"
@@ -128,18 +113,53 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           {mobileMenuOpen ? (
             <nav
               id="mobile-site-nav"
-              className="glass absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/10 bg-black/65 p-2.5 shadow-2xl backdrop-blur-2xl"
+              className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/10 bg-black/25 p-2.5 text-white shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl"
               aria-label="Site navigation"
             >
               <div className="flex flex-col gap-1">
-                <NavItem to="/viewer" label="Viewer" onClick={() => setMobileMenuOpen(false)} />
-                <NavItem to="/models" label="Models" onClick={() => setMobileMenuOpen(false)} />
-                <NavItem to="/variables" label="Variables" onClick={() => setMobileMenuOpen(false)} />
-                <NavItem to="/changelog" label="Changelog" onClick={() => setMobileMenuOpen(false)} />
-                <NavItem to="/status" label="Status" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem
+                  to="/viewer"
+                  label="Viewer"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
+                <NavItem
+                  to="/models"
+                  label="Models"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
+                <NavItem
+                  to="/variables"
+                  label="Variables"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
+                <NavItem
+                  to="/changelog"
+                  label="Changelog"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
+                <NavItem
+                  to="/status"
+                  label="Status"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
                 <div className="my-1 h-px bg-white/10" />
-                <NavItem to="/login" label="Login" onClick={() => setMobileMenuOpen(false)} />
-                <NavItem to="/login" label="Sign Up" onClick={() => setMobileMenuOpen(false)} />
+                <NavItem
+                  to="/login"
+                  label="Login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
+                <NavItem
+                  to="/login"
+                  label="Sign Up"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="text-white/90 hover:text-white"
+                />
               </div>
             </nav>
           ) : null}
