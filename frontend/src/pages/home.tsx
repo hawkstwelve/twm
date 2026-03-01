@@ -55,6 +55,13 @@ export default function Home() {
         notes: "Storm-scale",
       },
       {
+        key: "NAM",
+        modelId: "nam",
+        update: "Every 6 hours",
+        forecast: "0-60h",
+        notes: "Mesoscale",
+      },
+      {
         key: "GFS",
         modelId: "gfs",
         update: "Every 6 hours",

@@ -173,7 +173,7 @@ export function BottomForecastControls({
               max={Math.max(0, availableFrames.length - 1)}
               step={1}
               disabled={disabled || isPlaying || !hasFrames}
-              className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:first-child>*:first-child]:bg-primary/95 [&>*:nth-child(2)]:h-[22px] [&>*:nth-child(2)]:w-[22px] [&>*:nth-child(2)]:border-primary/95 [&>*:nth-child(2)]:shadow-[0_0_0_1px_rgba(255,255,255,0.18),0_0_10px_rgba(56,189,248,0.32)]"
+              className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:first-child>*:first-child]:bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] [&>*:nth-child(2)]:h-[22px] [&>*:nth-child(2)]:w-[22px] [&>*:nth-child(2)]:border-[#526d5c]/95 [&>*:nth-child(2)]:bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] [&>*:nth-child(2)]:shadow-[0_0_0_1px_rgba(255,255,255,0.18),0_0_12px_rgba(82,109,92,0.5)] [&>*:nth-child(2)]:focus-visible:ring-[#526d5c]/70"
             />
           </div>
 
