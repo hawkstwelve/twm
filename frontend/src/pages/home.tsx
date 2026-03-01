@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { fetchCapabilities } from "@/lib/api";
 
 function GlassCard({
   title,
@@ -21,6 +23,78 @@ function GlassCard({
 }
 
 export default function Home() {
+  const [latestRunsByModel, setLatestRunsByModel] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetchCapabilities({ signal: controller.signal })
+      .then((capabilities) => {
+        const nextRuns: Record<string, string> = {};
+        for (const [modelId, availability] of Object.entries(capabilities.availability ?? {})) {
+          if (availability?.latest_run) {
+            nextRuns[modelId.toLowerCase()] = availability.latest_run;
+          }
+        }
+        setLatestRunsByModel(nextRuns);
+      })
+      .catch(() => {
+        // Keep fallback labels on transient errors.
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  const atAGlanceRows = useMemo(
+    () => [
+      {
+        key: "HRRR",
+        modelId: "hrrr",
+        update: "Hourly",
+        forecast: "0-18h",
+        notes: "Storm-scale",
+      },
+      {
+        key: "GFS",
+        modelId: "gfs",
+        update: "6-hourly",
+        forecast: "0-384h",
+        notes: "Global trends",
+      },
+    ],
+    []
+  );
+
+  function formatRunLabel(runId?: string): string {
+    if (!runId) {
+      return "Loading...";
+    }
+    const normalized = runId.trim();
+    if (!normalized) {
+      return "Loading...";
+    }
+    if (normalized.toLowerCase() === "latest") {
+      return "Latest";
+    }
+    const runMatch = normalized.match(/^(\d{4})(\d{2})(\d{2})_(\d{2})z$/i);
+    if (runMatch) {
+      const [, year, month, day, hour] = runMatch;
+      const runDate = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), 0, 0));
+      const dateLabel = new Intl.DateTimeFormat("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "UTC",
+      }).format(runDate);
+      return `${hour}Z (${dateLabel})`;
+    }
+
+    const hourMatch = normalized.match(/_(\d{2})z$/i);
+    if (hourMatch) {
+      return `${hourMatch[1]}Z`;
+    }
+    return normalized;
+  }
+
   return (
     <div className="space-y-14">
       {/* HERO */}
@@ -107,16 +181,15 @@ export default function Home() {
             <div className="px-4 py-3">Notes</div>
           </div>
 
-          {[
-            ["HRRR", "Hourly", "14Z", "0–18h", "Storm-scale"],
-            ["GFS", "6-hourly", "12Z", "0–384h", "Global trends"],
-          ].map((r) => (
-            <div key={r[0]} className="grid grid-cols-5 text-sm text-white/80 border-b border-white/5 last:border-b-0">
-              <div className="px-4 py-3 font-medium">{r[0]}</div>
-              <div className="px-4 py-3 text-white/70">{r[1]}</div>
-              <div className="px-4 py-3 text-white/70">{r[2]}</div>
-              <div className="px-4 py-3 text-white/70">{r[3]}</div>
-              <div className="px-4 py-3 text-white/70">{r[4]}</div>
+          {atAGlanceRows.map((row) => (
+            <div key={row.key} className="grid grid-cols-5 text-sm text-white/80 border-b border-white/5 last:border-b-0">
+              <div className="px-4 py-3 font-medium">{row.key}</div>
+              <div className="px-4 py-3 text-white/70">{row.update}</div>
+              <div className="px-4 py-3 text-white/70">
+                {formatRunLabel(latestRunsByModel[row.modelId])}
+              </div>
+              <div className="px-4 py-3 text-white/70">{row.forecast}</div>
+              <div className="px-4 py-3 text-white/70">{row.notes}</div>
             </div>
           ))}
         </div>
