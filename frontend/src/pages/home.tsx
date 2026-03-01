@@ -114,7 +114,7 @@ export default function Home() {
           <div className="mt-7 flex flex-wrap gap-3">
             <Link
               to="/viewer"
-              className="rounded-lg bg-white/15 px-4 py-2.5 text-sm font-medium text-white backdrop-blur hover:bg-white/20 border border-white/10"
+              className="rounded-lg bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-4 py-2.5 text-sm font-medium text-white border border-white/20 shadow-[0_8px_18px_rgba(0,0,0,0.28)] transition-all duration-150 hover:brightness-110"
             >
               Launch Viewer
             </Link>
