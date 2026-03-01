@@ -176,7 +176,7 @@ export default function Home() {
           <div className="grid grid-cols-5 gap-0 text-xs text-white/60 border-b border-white/10 bg-white/5">
             <div className="px-4 py-3">Model</div>
             <div className="px-4 py-3">Update</div>
-            <div className="px-4 py-3">Run</div>
+            <div className="px-4 py-3">Latest Run</div>
             <div className="px-4 py-3">Forecast</div>
             <div className="px-4 py-3">Notes</div>
           </div>
