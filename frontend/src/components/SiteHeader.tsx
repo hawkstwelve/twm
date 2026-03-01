@@ -33,6 +33,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
   const location = useLocation();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isAppVariant = variant === "app";
+  const isMarketingVariant = variant === "marketing";
   const hideInlineAuthOnMobile = variant === "marketing" && location.pathname === "/";
 
   useEffect(() => {
@@ -84,21 +85,24 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           The Weather Models
         </NavLink>
 
-        <nav className="ml-auto hidden items-center gap-1 md:flex">
-          <NavItem to="/viewer" label="Viewer" />
-          <NavItem to="/models" label="Models" />
-          <NavItem to="/variables" label="Variables" />
-          <NavItem to="/changelog" label="Changelog" />
-          <NavItem to="/status" label="Status" />
-          <NavLink
-            to="/login"
-            className="ml-1 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white transition hover:bg-white/10"
-          >
-            Login
-          </NavLink>
-        </nav>
+        {isMarketingVariant ? (
+          <nav className="ml-auto hidden items-center gap-1 md:flex">
+            <NavItem to="/viewer" label="Viewer" />
+            <NavItem to="/models" label="Models" />
+            <NavItem to="/variables" label="Variables" />
+            <NavItem to="/changelog" label="Changelog" />
+            <NavItem to="/status" label="Status" />
+            <NavLink
+              to="/login"
+              className="ml-1 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white transition hover:bg-white/10"
+            >
+              Login
+            </NavLink>
+          </nav>
+        ) : null}
 
-        <div className="ml-auto flex items-center gap-2 md:hidden" ref={menuRef}>
+        {isMarketingVariant ? (
+          <div className="ml-auto flex items-center gap-2 md:hidden" ref={menuRef}>
           <button
             type="button"
             className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-white/15 bg-white/5 text-white hover:bg-white/10"
@@ -191,7 +195,8 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
               </div>
             </nav>
           ) : null}
-        </div>
+          </div>
+        ) : null}
       </div>
     </header>
   );

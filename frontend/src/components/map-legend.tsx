@@ -237,7 +237,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
 
   if (!legend) {
     return (
-      <div className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "bottom-40 right-4" : "right-4 top-28")}>
+      <div className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "bottom-40 right-4" : "right-4 top-36")}>
         <UnavailablePlaceholder />
       </div>
     );
@@ -258,7 +258,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
       className={cn(
         "fixed z-[55] flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
         showPrecipPtypeRows ? "w-[220px]" : "w-[120px]",
-        isSmallScreen ? "bottom-40 right-4" : "right-4 top-28"
+        isSmallScreen ? "bottom-40 right-4" : "right-4 top-36"
       )}
       role="complementary"
       aria-label="Map legend"
