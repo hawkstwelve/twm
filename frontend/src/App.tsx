@@ -2168,11 +2168,7 @@ export default function App() {
         const supportedModelIds = capabilitiesData.supported_models.filter(
           (modelId) => Boolean(capabilitiesData.model_catalog?.[modelId])
         );
-        const readyModelIds = supportedModelIds.filter((modelId) => {
-          const availability = capabilitiesData.availability?.[modelId];
-          return availability?.latest_run_ready === true;
-        });
-        const visibleModelIds = readyModelIds.length > 0 ? readyModelIds : supportedModelIds;
+        const visibleModelIds = supportedModelIds;
         const modelRows = normalizeModelRows(capabilitiesData, visibleModelIds);
         const orderedVisibleModelIds = modelRows.map((entry) => entry.id);
         const preferredDefaultModel = orderedVisibleModelIds.includes("hrrr") ? "hrrr" : "";

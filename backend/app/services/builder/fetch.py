@@ -93,6 +93,11 @@ def _is_missing_file_error(exc: Exception) -> bool:
     return "no such file or directory" in text
 
 
+def _is_grib_not_found_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "grib2 file not found" in text
+
+
 def _parse_float_tag(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -274,12 +279,21 @@ def fetch_variable(
                     if sleep_s > 0 and attempt_idx < retries:
                         time.sleep(sleep_s)
                     continue
-                subset_path = H.download(search_pattern)
+                subset_path = H.download(search_pattern, errors="raise")
                 if subset_path is None:
-                    saw_non_transient_failure = True
-                    raise RuntimeError(
-                        f"Herbie subset download returned None ({model_id} fh{fh:03d} {search_pattern!r})"
+                    saw_missing_subset_file = True
+                    logger.warning(
+                        "Herbie subset unavailable: download returned None (%s fh%03d %s; priority=%s; attempt=%d/%d)",
+                        model_id,
+                        fh,
+                        search_pattern,
+                        priority,
+                        attempt_idx,
+                        retries,
                     )
+                    if sleep_s > 0 and attempt_idx < retries:
+                        time.sleep(sleep_s)
+                    continue
                 subset_candidate = Path(subset_path)
                 subset_ok = False
                 subset_size = 0
@@ -325,6 +339,20 @@ def fetch_variable(
                     saw_missing_index = True
                     logger.warning(
                         "Herbie subset unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): missing index",
+                        model_id,
+                        fh,
+                        search_pattern,
+                        priority,
+                        attempt_idx,
+                        retries,
+                    )
+                    if sleep_s > 0 and attempt_idx < retries:
+                        time.sleep(sleep_s)
+                    continue
+                if _is_grib_not_found_error(exc):
+                    saw_missing_subset_file = True
+                    logger.warning(
+                        "Herbie subset unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): grib not found",
                         model_id,
                         fh,
                         search_pattern,
