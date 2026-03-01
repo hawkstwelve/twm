@@ -7,6 +7,8 @@ Initial rollout scope:
   - wspd10m (10m wind speed, derived from 10u/10v)
   - wgst10m (10m wind gust)
   - precip_total (total precipitation)
+  - snowfall_total (10:1 total snowfall, cumulative)
+  - radar_ptype (composite reflectivity + precipitation type)
 
 Herbie wiring:
   - model = "nam"
@@ -59,6 +61,16 @@ class NAMPlugin(BaseModelPlugin):
             "apcp": "precip_total",
             "qpf": "precip_total",
             "total_qpf": "precip_total",
+            "snowfall_total": "snowfall_total",
+            "asnow": "snowfall_total",
+            "snow10": "snowfall_total",
+            "snow_10to1": "snowfall_total",
+            "total_snow": "snowfall_total",
+            "totalsnow": "snowfall_total",
+            "refc": "refc",
+            "cref": "refc",
+            "radar_ptype": "radar_ptype",
+            "radarptype": "radar_ptype",
             "wspd10m": "wspd10m",
             "wind10m": "10si",
             "10si": "10si",
@@ -243,6 +255,85 @@ NAM_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
+    "refc": VarSpec(
+        id="refc",
+        name="Composite Reflectivity",
+        selectors=VarSelectors(
+            search=[":REFC:"],
+            filter_by_keys={
+                "shortName": "refc",
+            },
+            hints={
+                "upstream_var": "refc",
+                "cf_var": "refc",
+                "short_name": "refc",
+            },
+        ),
+    ),
+    "crain": VarSpec(
+        id="crain",
+        name="Categorical Rain",
+        selectors=VarSelectors(
+            search=[":CRAIN:surface:"],
+            filter_by_keys={
+                "shortName": "crain",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "crain",
+                "cf_var": "crain",
+                "short_name": "crain",
+            },
+        ),
+    ),
+    "csnow": VarSpec(
+        id="csnow",
+        name="Categorical Snow",
+        selectors=VarSelectors(
+            search=[":CSNOW:surface:"],
+            filter_by_keys={
+                "shortName": "csnow",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "csnow",
+                "cf_var": "csnow",
+                "short_name": "csnow",
+            },
+        ),
+    ),
+    "cicep": VarSpec(
+        id="cicep",
+        name="Categorical Sleet",
+        selectors=VarSelectors(
+            search=[":CICEP:surface:"],
+            filter_by_keys={
+                "shortName": "cicep",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "cicep",
+                "cf_var": "cicep",
+                "short_name": "cicep",
+            },
+        ),
+    ),
+    "cfrzr": VarSpec(
+        id="cfrzr",
+        name="Categorical Freezing Rain",
+        selectors=VarSelectors(
+            search=[":CFRZR:surface:"],
+            filter_by_keys={
+                "shortName": "cfrzr",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "cfrzr",
+                "cf_var": "cfrzr",
+                "short_name": "cfrzr",
+            },
+        ),
+    ),
     "precip_total": VarSpec(
         id="precip_total",
         name="Total Precip",
@@ -254,6 +345,24 @@ NAM_VARS: dict[str, VarSpec] = {
         ),
         derived=True,
         derive="precip_total_cumulative",
+        kind="continuous",
+        units="in",
+    ),
+    "snowfall_total": VarSpec(
+        id="snowfall_total",
+        name="Total Snowfall (10:1)",
+        selectors=VarSelectors(
+            hints={
+                "apcp_component": "apcp_step",
+                "snow_component": "csnow",
+                "step_hours": "1",
+                "slr": "10",
+                "snow_mask_threshold": "0.5",
+                "min_step_lwe_kgm2": "0.01",
+            },
+        ),
+        derived=True,
+        derive="snowfall_total_10to1_cumulative",
         kind="continuous",
         units="in",
     ),
@@ -272,6 +381,24 @@ NAM_VARS: dict[str, VarSpec] = {
         kind="continuous",
         units="mph",
     ),
+    "radar_ptype": VarSpec(
+        id="radar_ptype",
+        name="Composite Reflectivity + Ptype",
+        selectors=VarSelectors(
+            hints={
+                "display_kind": "radar_ptype",
+                "refl_component": "refc",
+                "rain_component": "crain",
+                "snow_component": "csnow",
+                "sleet_component": "cicep",
+                "frzr_component": "cfrzr",
+            },
+        ),
+        derived=True,
+        derive="radar_ptype_combo",
+        kind="discrete",
+        units="dBZ",
+    ),
 }
 
 
@@ -282,10 +409,14 @@ NAM_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "wspd10m": "wspd10m",
     "wgst10m": "wgst10m",
     "precip_total": "precip_total",
+    "snowfall_total": "snowfall_total",
+    "radar_ptype": "radar_ptype",
 }
 
 NAM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
+    "radar_ptype": 1,
     "precip_total": 1,
+    "snowfall_total": 1,
 }
 
 NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
@@ -295,6 +426,8 @@ NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
     "wspd10m": 3,
     "wgst10m": 4,
     "precip_total": 5,
+    "snowfall_total": 6,
+    "radar_ptype": 7,
 }
 
 NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
@@ -307,6 +440,9 @@ NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
 
 NAM_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {
     "precip_total": {
+        "min_fh": 1,
+    },
+    "snowfall_total": {
         "min_fh": 1,
     },
 }

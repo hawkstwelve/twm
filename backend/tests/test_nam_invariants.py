@@ -34,6 +34,8 @@ def test_nam_buildable_var_set_and_defaults_invariants() -> None:
         "wspd10m",
         "wgst10m",
         "precip_total",
+        "snowfall_total",
+        "radar_ptype",
     }
 
     assert capabilities.ui_defaults["default_var_key"] == "tmp2m"
@@ -95,6 +97,23 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
     assert precip_total["default_fh"] == 1
     assert precip_total["constraints"] == {"min_fh": 1}
 
+    snowfall_total = payload["variables"]["snowfall_total"]
+    assert snowfall_total["buildable"] is True
+    assert snowfall_total["derived"] is True
+    assert snowfall_total["derive_strategy_id"] == "snowfall_total_10to1_cumulative"
+    assert snowfall_total["kind"] == "continuous"
+    assert snowfall_total["units"] == "in"
+    assert snowfall_total["default_fh"] == 1
+    assert snowfall_total["constraints"] == {"min_fh": 1}
+
+    radar_ptype = payload["variables"]["radar_ptype"]
+    assert radar_ptype["buildable"] is True
+    assert radar_ptype["derived"] is True
+    assert radar_ptype["derive_strategy_id"] == "radar_ptype_combo"
+    assert radar_ptype["kind"] == "discrete"
+    assert radar_ptype["units"] == "dBZ"
+    assert radar_ptype["default_fh"] == 1
+
     u10 = payload["variables"]["10u"]
     assert u10["buildable"] is False
 
@@ -106,6 +125,21 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
 
     apcp_step = payload["variables"]["apcp_step"]
     assert apcp_step["buildable"] is False
+
+    refc = payload["variables"]["refc"]
+    assert refc["buildable"] is False
+
+    crain = payload["variables"]["crain"]
+    assert crain["buildable"] is False
+
+    csnow = payload["variables"]["csnow"]
+    assert csnow["buildable"] is False
+
+    cicep = payload["variables"]["cicep"]
+    assert cicep["buildable"] is False
+
+    cfrzr = payload["variables"]["cfrzr"]
+    assert cfrzr["buildable"] is False
 
 
 def test_nam_aliases_normalize() -> None:
@@ -124,6 +158,13 @@ def test_nam_aliases_normalize() -> None:
     assert NAM_MODEL.normalize_var_id("precip_total") == "precip_total"
     assert NAM_MODEL.normalize_var_id("apcp") == "precip_total"
     assert NAM_MODEL.normalize_var_id("qpf") == "precip_total"
+    assert NAM_MODEL.normalize_var_id("snowfall_total") == "snowfall_total"
+    assert NAM_MODEL.normalize_var_id("asnow") == "snowfall_total"
+    assert NAM_MODEL.normalize_var_id("snow10") == "snowfall_total"
+    assert NAM_MODEL.normalize_var_id("refc") == "refc"
+    assert NAM_MODEL.normalize_var_id("cref") == "refc"
+    assert NAM_MODEL.normalize_var_id("radar_ptype") == "radar_ptype"
+    assert NAM_MODEL.normalize_var_id("radarptype") == "radar_ptype"
     assert NAM_MODEL.normalize_var_id("u10") == "10u"
     assert NAM_MODEL.normalize_var_id("v10") == "10v"
     assert NAM_MODEL.normalize_var_id("10si") == "10si"
