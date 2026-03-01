@@ -90,7 +90,12 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           <NavItem to="/variables" label="Variables" />
           <NavItem to="/changelog" label="Changelog" />
           <NavItem to="/status" label="Status" />
-          <NavItem to="/login" label="Login" />
+          <NavLink
+            to="/login"
+            className="ml-1 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white transition hover:bg-white/10"
+          >
+            Login
+          </NavLink>
         </nav>
 
         <div className="ml-auto flex items-center gap-2 md:hidden" ref={menuRef}>
