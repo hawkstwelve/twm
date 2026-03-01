@@ -94,7 +94,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
             <NavItem to="/status" label="Status" />
             <NavLink
               to="/login"
-              className="ml-1 rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white transition hover:bg-white/10"
+              className="ml-1 rounded-md border border-white/20 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-3 py-2 text-sm text-white shadow-[0_8px_18px_rgba(0,0,0,0.28)] transition-all duration-150 hover:brightness-110"
             >
               Login
             </NavLink>
@@ -124,7 +124,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
               <NavLink
                 to="/login"
                 className={[
-                  "rounded-md border border-white/15 bg-white/5 px-3 py-2 text-sm text-white hover:bg-white/10",
+                  "rounded-md border border-white/20 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-3 py-2 text-sm text-white shadow-[0_8px_18px_rgba(0,0,0,0.28)] transition-all duration-150 hover:brightness-110",
                   hideInlineAuthOnMobile ? "hidden md:inline-flex" : "",
                 ].join(" ")}
               >
