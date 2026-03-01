@@ -32,6 +32,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const location = useLocation();
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const isAppVariant = variant === "app";
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -71,7 +72,13 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
 
   return (
     <header className="sticky top-0 z-[60] border-b border-white/10 bg-black/35 backdrop-blur-2xl">
-      <div className="mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8">
+      <div
+        className={
+          isAppVariant
+            ? "flex h-16 items-center gap-3 px-5 md:px-8"
+            : "mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8"
+        }
+      >
         <NavLink to="/" className="font-semibold tracking-tight text-white">
           The Weather Models
         </NavLink>
@@ -113,7 +120,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           {mobileMenuOpen ? (
             <nav
               id="mobile-site-nav"
-              className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/10 bg-black/25 p-2.5 text-white shadow-[0_10px_30px_rgba(0,0,0,0.35)] backdrop-blur-xl"
+              className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/10 bg-black/55 p-2.5 text-white shadow-[0_12px_36px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
               aria-label="Site navigation"
             >
               <div className="flex flex-col gap-1">
