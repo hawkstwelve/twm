@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertCircle } from "lucide-react";
+import { AlertCircle, Moon, Sun } from "lucide-react";
 
 import { BottomForecastControls } from "@/components/bottom-forecast-controls";
 import { MapCanvas, type BasemapMode } from "@/components/map-canvas";
@@ -2787,8 +2787,6 @@ export default function App() {
         models={models}
         runs={runOptions}
         variables={variables}
-        basemapMode={basemapMode}
-        onBasemapModeChange={setBasemapMode}
         disabled={loading || models.length === 0}
       />
 
@@ -2882,6 +2880,16 @@ export default function App() {
             High detail mode — zoom out for smooth loop
           </div>
         )}
+
+        <button
+          type="button"
+          className="glass absolute bottom-24 right-4 z-40 inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-medium text-white/95 hover:bg-white/10"
+          aria-pressed={basemapMode === "dark"}
+          onClick={() => setBasemapMode(basemapMode === "dark" ? "light" : "dark")}
+        >
+          {basemapMode === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+          <span>{basemapMode === "dark" ? "Dark basemap" : "Light basemap"}</span>
+        </button>
 
         <MapLegend legend={legend} onOpacityChange={setOpacity} />
 
