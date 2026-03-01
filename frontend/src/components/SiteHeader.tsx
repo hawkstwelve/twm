@@ -75,7 +75,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
       <div
         className={
           isAppVariant
-            ? "flex h-16 items-center gap-3 px-5 md:px-8"
+            ? "flex h-16 items-center gap-3 px-4 md:px-5"
             : "mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8"
         }
       >
@@ -120,7 +120,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
           {mobileMenuOpen ? (
             <nav
               id="mobile-site-nav"
-              className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/10 bg-black/55 p-2.5 text-white shadow-[0_12px_36px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
+              className="absolute right-0 top-[calc(100%+0.5rem)] z-[70] w-[min(92vw,360px)] rounded-2xl border border-white/15 bg-black/72 p-2.5 text-white shadow-[0_18px_48px_rgba(0,0,0,0.62)] backdrop-blur-[28px]"
               aria-label="Site navigation"
             >
               <div className="flex flex-col gap-1">
