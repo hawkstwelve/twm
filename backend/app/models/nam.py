@@ -5,6 +5,8 @@ Initial rollout scope:
   - dp2m (2m dewpoint)
   - tmp850 (850mb temperature)
   - wspd10m (10m wind speed, derived from 10u/10v)
+  - wgst10m (10m wind gust)
+  - precip_total (total precipitation)
 
 Herbie wiring:
   - model = "nam"
@@ -47,6 +49,16 @@ class NAMPlugin(BaseModelPlugin):
             "t850mb": "tmp850",
             "temp850": "tmp850",
             "temp850mb": "tmp850",
+            "wgst10m": "wgst10m",
+            "gust10m": "wgst10m",
+            "10m_gust": "wgst10m",
+            "gust": "wgst10m",
+            "wind_gust": "wgst10m",
+            "precip_total": "precip_total",
+            "total_precip": "precip_total",
+            "apcp": "precip_total",
+            "qpf": "precip_total",
+            "total_qpf": "precip_total",
             "wspd10m": "wspd10m",
             "wind10m": "10si",
             "10si": "10si",
@@ -196,6 +208,44 @@ NAM_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
+    "wgst10m": VarSpec(
+        id="wgst10m",
+        name="10m Wind Gust",
+        selectors=VarSelectors(
+            search=[":GUST:surface:"],
+            filter_by_keys={
+                "typeOfLevel": "surface",
+                "shortName": "gust",
+            },
+            hints={
+                "upstream_var": "gust",
+                "cf_var": "gust",
+                "short_name": "gust",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="mph",
+    ),
+    "precip_total": VarSpec(
+        id="precip_total",
+        name="Total Precip",
+        selectors=VarSelectors(
+            search=[":APCP:surface:"],
+            filter_by_keys={
+                "shortName": "apcp",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "apcp",
+                "cf_var": "apcp",
+                "short_name": "apcp",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="in",
+    ),
     "wspd10m": VarSpec(
         id="wspd10m",
         name="10m Wind Speed",
@@ -219,21 +269,29 @@ NAM_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "dp2m": "dp2m",
     "tmp850": "tmp850",
     "wspd10m": "wspd10m",
+    "wgst10m": "wgst10m",
+    "precip_total": "precip_total",
 }
 
-NAM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {}
+NAM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
+    "precip_total": 1,
+}
 
 NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
     "tmp2m": 0,
     "dp2m": 1,
     "tmp850": 2,
     "wspd10m": 3,
+    "wgst10m": 4,
+    "precip_total": 5,
 }
 
 NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "dp2m": "c_to_f",
     "wspd10m": "ms_to_mph",
+    "wgst10m": "ms_to_mph",
+    "precip_total": "kgm2_to_in",
 }
 
 NAM_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {}

@@ -175,7 +175,7 @@ Use a dedicated env file for NAM so rollout scope stays isolated:
 
 | Variable | Recommended value | Description |
 |---|---|---|
-| `TWF_V3_SCHEDULER_VARS` | `tmp2m,dp2m,tmp850,wspd10m` | Initial NAM rollout vars |
+| `TWF_V3_SCHEDULER_VARS` | `tmp2m,dp2m,tmp850,wspd10m,wgst10m,precip_total` | Initial NAM rollout vars |
 | `TWF_V3_SCHEDULER_PRIMARY_VARS` | `tmp2m` | Promotion/probe gate var |
 | `TWF_V3_SCHEDULER_PROBE_VAR` | `tmp2m` | Run-availability probe var |
 

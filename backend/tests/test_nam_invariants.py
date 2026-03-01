@@ -32,6 +32,8 @@ def test_nam_buildable_var_set_and_defaults_invariants() -> None:
         "dp2m",
         "tmp850",
         "wspd10m",
+        "wgst10m",
+        "precip_total",
     }
 
     assert capabilities.ui_defaults["default_var_key"] == "tmp2m"
@@ -78,6 +80,19 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
     assert wspd10m["kind"] == "continuous"
     assert wspd10m["units"] == "mph"
 
+    wgst10m = payload["variables"]["wgst10m"]
+    assert wgst10m["buildable"] is True
+    assert wgst10m["derived"] is False
+    assert wgst10m["kind"] == "continuous"
+    assert wgst10m["units"] == "mph"
+
+    precip_total = payload["variables"]["precip_total"]
+    assert precip_total["buildable"] is True
+    assert precip_total["derived"] is False
+    assert precip_total["kind"] == "continuous"
+    assert precip_total["units"] == "in"
+    assert precip_total["default_fh"] == 1
+
     u10 = payload["variables"]["10u"]
     assert u10["buildable"] is False
 
@@ -98,6 +113,12 @@ def test_nam_aliases_normalize() -> None:
     assert NAM_MODEL.normalize_var_id("tmp850") == "tmp850"
     assert NAM_MODEL.normalize_var_id("t850") == "tmp850"
     assert NAM_MODEL.normalize_var_id("temp850") == "tmp850"
+    assert NAM_MODEL.normalize_var_id("wgst10m") == "wgst10m"
+    assert NAM_MODEL.normalize_var_id("gust") == "wgst10m"
+    assert NAM_MODEL.normalize_var_id("gust10m") == "wgst10m"
+    assert NAM_MODEL.normalize_var_id("precip_total") == "precip_total"
+    assert NAM_MODEL.normalize_var_id("apcp") == "precip_total"
+    assert NAM_MODEL.normalize_var_id("qpf") == "precip_total"
     assert NAM_MODEL.normalize_var_id("u10") == "10u"
     assert NAM_MODEL.normalize_var_id("v10") == "10v"
     assert NAM_MODEL.normalize_var_id("10si") == "10si"
