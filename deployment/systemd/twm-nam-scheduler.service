@@ -1,0 +1,27 @@
+[Unit]
+Description=TWM NAM Scheduler (CONUS canonical)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=twf
+Group=twf
+UMask=0027
+LimitNOFILE=65536
+WorkingDirectory=/opt/twf_v3/backend
+EnvironmentFile=-/etc/twf-v3/scheduler-nam.env
+Environment=PATH=/opt/twf_v3/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
+ExecStart=/opt/twf_v3/.venv/bin/python -m app.services.scheduler --model nam
+Nice=10
+CPUWeight=50
+IOWeight=50
+# Optional hard cap if needed for noisy neighbors / OOM protection:
+# MemoryMax=2G
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,225 @@
+"""NAM CONUS Nest model plugin.
+
+Initial rollout scope:
+  - tmp2m (2m temperature)
+  - wspd10m (10m wind speed, derived from 10u/10v)
+
+Herbie wiring:
+  - model = "nam"
+  - product = "conusnest.hiresf"
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from .base import (
+    BaseModelPlugin,
+    ModelCapabilities,
+    RegionSpec,
+    VarSelectors,
+    VarSpec,
+    VariableCapability,
+)
+
+
+class NAMPlugin(BaseModelPlugin):
+    def target_fhs(self, cycle_hour: int) -> list[int]:
+        del cycle_hour  # all NAM cycles share the same FH set for now
+        return list(NAM_INITIAL_FHS)
+
+    def normalize_var_id(self, var_id: str) -> str:
+        normalized = var_id.strip().lower()
+        aliases: dict[str, str] = {
+            "tmp2m": "tmp2m",
+            "t2m": "tmp2m",
+            "2t": "tmp2m",
+            "wspd10m": "wspd10m",
+            "10u": "10u",
+            "u10": "10u",
+            "10v": "10v",
+            "v10": "10v",
+        }
+        return aliases.get(normalized, normalized)
+
+    def select_dataarray(self, ds: object, var_id: str) -> object:
+        del ds, var_id
+        raise NotImplementedError("select_dataarray is not used in the V3 builder path")
+
+    def ensure_latest_cycles(self, keep_cycles: int, *, cache_dir: Path | None = None) -> dict[str, int]:
+        del keep_cycles, cache_dir
+        raise NotImplementedError("ensure_latest_cycles is not used in the V3 scheduler/builder path")
+
+
+NAM_REGIONS: dict[str, RegionSpec] = {
+    "conus": RegionSpec(
+        id="conus",
+        name="CONUS",
+        bbox_wgs84=(-125.0, 24.0, -66.5, 50.0),
+        clip=True,
+    ),
+    "pnw": RegionSpec(
+        id="pnw",
+        name="Pacific Northwest",
+        bbox_wgs84=(-125.5, 41.5, -111.0, 49.5),
+        clip=True,
+    ),
+}
+
+
+# NAM CONUS Nest: hourly forecast hours through fh060.
+NAM_INITIAL_FHS: tuple[int, ...] = tuple(range(0, 61))
+
+
+NAM_VARS: dict[str, VarSpec] = {
+    "tmp2m": VarSpec(
+        id="tmp2m",
+        name="2m Temp",
+        selectors=VarSelectors(
+            search=[":TMP:2 m above ground:"],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "2",
+            },
+            hints={
+                "upstream_var": "t2m",
+                "cf_var": "t2m",
+                "short_name": "2t",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="F",
+    ),
+    "10u": VarSpec(
+        id="10u",
+        name="10m U Wind",
+        selectors=VarSelectors(
+            search=[":UGRD:10 m above ground:"],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "10",
+            },
+            hints={
+                "upstream_var": "10u",
+                "cf_var": "u10",
+                "short_name": "10u",
+            },
+        ),
+    ),
+    "10v": VarSpec(
+        id="10v",
+        name="10m V Wind",
+        selectors=VarSelectors(
+            search=[":VGRD:10 m above ground:"],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "10",
+            },
+            hints={
+                "upstream_var": "10v",
+                "cf_var": "v10",
+                "short_name": "10v",
+            },
+        ),
+    ),
+    "wspd10m": VarSpec(
+        id="wspd10m",
+        name="10m Wind Speed",
+        selectors=VarSelectors(
+            hints={
+                "u_component": "10u",
+                "v_component": "10v",
+            },
+        ),
+        derived=True,
+        derive="wspd10m",
+        kind="continuous",
+        units="mph",
+    ),
+}
+
+
+NAM_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "tmp2m",
+    "wspd10m": "wspd10m",
+}
+
+NAM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {}
+
+NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
+    "tmp2m": 0,
+    "wspd10m": 1,
+}
+
+NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "c_to_f",
+    "wspd10m": "ms_to_mph",
+}
+
+NAM_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {}
+
+
+def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapability:
+    is_buildable = bool(var_spec.primary or var_spec.derived)
+    return VariableCapability(
+        var_key=var_key,
+        name=var_spec.name,
+        selectors=var_spec.selectors,
+        primary=var_spec.primary,
+        derived=var_spec.derived,
+        derive_strategy_id=var_spec.derive,
+        kind=var_spec.kind,
+        units=var_spec.units,
+        normalize_units=var_spec.normalize_units,
+        scale=var_spec.scale,
+        color_map_id=NAM_COLOR_MAP_BY_VAR_KEY.get(var_key),
+        default_fh=NAM_DEFAULT_FH_BY_VAR_KEY.get(var_key),
+        buildable=is_buildable,
+        order=NAM_ORDER_BY_VAR_KEY.get(var_key),
+        conversion=NAM_CONVERSION_BY_VAR_KEY.get(var_key),
+        constraints=dict(NAM_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
+    )
+
+
+NAM_VARIABLE_CATALOG: dict[str, VariableCapability] = {
+    var_key: _capability_from_var_spec(var_key, var_spec)
+    for var_key, var_spec in NAM_VARS.items()
+}
+
+
+NAM_CAPABILITIES = ModelCapabilities(
+    model_id="nam",
+    name="NAM",
+    product="conusnest.hiresf",
+    canonical_region="conus",
+    grid_meters_by_region={
+        "conus": 5_000.0,
+        "pnw": 5_000.0,
+    },
+    run_discovery={
+        "probe_var_key": "tmp2m",
+        "probe_enabled": True,
+        "probe_attempts": 4,
+        "cycle_cadence_hours": 6,
+        "fallback_lag_hours": 5,
+    },
+    ui_defaults={
+        "default_var_key": "tmp2m",
+        "default_run": "latest",
+    },
+    ui_constraints={
+        "canonical_region": "conus",
+    },
+    variable_catalog=NAM_VARIABLE_CATALOG,
+)
+
+
+NAM_MODEL = NAMPlugin(
+    id="nam",
+    name="NAM",
+    regions=NAM_REGIONS,
+    vars=NAM_VARS,
+    product="conusnest.hiresf",
+    capabilities=NAM_CAPABILITIES,
+)

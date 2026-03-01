@@ -19,6 +19,12 @@ try:
 except ImportError as exc:
     logger.warning("GFS plugin unavailable (missing dependency): %s", exc)
 
+try:
+    from .nam import NAM_MODEL
+    MODEL_REGISTRY[NAM_MODEL.id] = NAM_MODEL
+except ImportError as exc:
+    logger.warning("NAM plugin unavailable (missing dependency): %s", exc)
+
 
 def get_model(model_id: str) -> ModelPlugin:
     model = MODEL_REGISTRY.get(model_id)

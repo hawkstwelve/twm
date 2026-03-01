@@ -92,7 +92,8 @@ type ModelEntry = {
 const BASEMAP_MODE_STORAGE_KEY = "twf.map.basemap_mode";
 const MODEL_ORDER_BY_ID: Record<string, number> = {
   hrrr: 0,
-  gfs: 1,
+  nam: 1,
+  gfs: 2,
 };
 
 function readBasemapModePreference(): BasemapMode {

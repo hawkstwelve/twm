@@ -1,6 +1,6 @@
 # The Weather Models (TWM)
 
-A weather model tile pipeline and interactive map viewer. The system ingests GRIB2 output from NWP models (HRRR, optionally GFS), produces Cloud Optimized GeoTIFF (COG) artifacts, and serves them through a tile API and an animated loop frontend.
+A weather model tile pipeline and interactive map viewer. The system ingests GRIB2 output from NWP models (HRRR, optionally GFS/NAM), produces Cloud Optimized GeoTIFF (COG) artifacts, and serves them through a tile API and an animated loop frontend.
 
 ## Architecture
 
@@ -169,6 +169,16 @@ Use a dedicated env file for GFS so HRRR remains isolated. Initial rollout shoul
 | `TWF_V3_SCHEDULER_PRIMARY_VARS` | `tmp2m` | Promotion/probe gate var |
 | `TWF_V3_SCHEDULER_PROBE_VAR` | `tmp2m` | Run-availability probe var |
 
+### NAM Scheduler Rollout (`/etc/twf-v3/scheduler-nam.env`)
+
+Use a dedicated env file for NAM so rollout scope stays isolated:
+
+| Variable | Recommended value | Description |
+|---|---|---|
+| `TWF_V3_SCHEDULER_VARS` | `tmp2m,wspd10m` | Initial NAM rollout vars |
+| `TWF_V3_SCHEDULER_PRIMARY_VARS` | `tmp2m` | Promotion/probe gate var |
+| `TWF_V3_SCHEDULER_PROBE_VAR` | `tmp2m` | Run-availability probe var |
+
 ### Frontend
 
 | Variable | Default | Description |
@@ -234,6 +244,7 @@ Systemd unit files are in `deployment/systemd/`. Copy the example env files and 
 cp deployment/systemd/api.env.example          /etc/twf-v3/api.env
 cp deployment/systemd/scheduler.env.example    /etc/twf-v3/scheduler.env
 cp deployment/systemd/scheduler-gfs.env.example /etc/twf-v3/scheduler-gfs.env
+cp deployment/systemd/scheduler-nam.env.example /etc/twf-v3/scheduler-nam.env
 cp deployment/systemd/tile-server.env.example  /etc/twf-v3/tile-server.env
 ```
 
@@ -242,7 +253,7 @@ Services expect the virtualenv at `/opt/twf_v3/.venv` and the project at `/opt/t
 For model schedulers, deploy both units and keep env files isolated per model:
 
 ```bash
-sudo systemctl enable twm-hrrr-scheduler twm-gfs-scheduler twm-api twm-tile-server
+sudo systemctl enable twm-hrrr-scheduler twm-gfs-scheduler twm-nam-scheduler twm-api twm-tile-server
 ```
 
 ## Adding a New Model

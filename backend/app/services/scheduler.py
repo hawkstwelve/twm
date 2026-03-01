@@ -908,7 +908,7 @@ def run_scheduler(
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the V3 model scheduler.")
-    parser.add_argument("--model", required=True, help="Model id (e.g. hrrr, gfs)")
+    parser.add_argument("--model", required=True, help="Model id (e.g. hrrr, nam, gfs)")
     parser.add_argument("--vars", default=None, help="Comma-separated vars to build")
     parser.add_argument("--primary-vars", default=None, help="Comma-separated primary vars for promotion")
     parser.add_argument("--data-root", default=None, help="Override TWF_V3_DATA_ROOT")
