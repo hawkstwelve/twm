@@ -2889,7 +2889,7 @@ export default function App() {
           title={basemapMode === "dark" ? "Switch to light basemap" : "Switch to dark basemap"}
           onClick={() => setBasemapMode(basemapMode === "dark" ? "light" : "dark")}
         >
-          {basemapMode === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+          {basemapMode === "dark" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
 
         <MapLegend legend={legend} onOpacityChange={setOpacity} />
