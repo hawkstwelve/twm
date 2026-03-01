@@ -88,10 +88,12 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
 
     precip_total = payload["variables"]["precip_total"]
     assert precip_total["buildable"] is True
-    assert precip_total["derived"] is False
+    assert precip_total["derived"] is True
+    assert precip_total["derive_strategy_id"] == "precip_total_cumulative"
     assert precip_total["kind"] == "continuous"
     assert precip_total["units"] == "in"
     assert precip_total["default_fh"] == 1
+    assert precip_total["constraints"] == {"min_fh": 1}
 
     u10 = payload["variables"]["10u"]
     assert u10["buildable"] is False
@@ -101,6 +103,9 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
 
     si10 = payload["variables"]["10si"]
     assert si10["buildable"] is False
+
+    apcp_step = payload["variables"]["apcp_step"]
+    assert apcp_step["buildable"] is False
 
 
 def test_nam_aliases_normalize() -> None:

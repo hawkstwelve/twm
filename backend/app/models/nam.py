@@ -227,9 +227,9 @@ NAM_VARS: dict[str, VarSpec] = {
         kind="continuous",
         units="mph",
     ),
-    "precip_total": VarSpec(
-        id="precip_total",
-        name="Total Precip",
+    "apcp_step": VarSpec(
+        id="apcp_step",
+        name="APCP Step",
         selectors=VarSelectors(
             search=[":APCP:surface:"],
             filter_by_keys={
@@ -242,7 +242,18 @@ NAM_VARS: dict[str, VarSpec] = {
                 "short_name": "apcp",
             },
         ),
-        primary=True,
+    ),
+    "precip_total": VarSpec(
+        id="precip_total",
+        name="Total Precip",
+        selectors=VarSelectors(
+            hints={
+                "apcp_component": "apcp_step",
+                "step_hours": "1",
+            },
+        ),
+        derived=True,
+        derive="precip_total_cumulative",
         kind="continuous",
         units="in",
     ),
@@ -294,7 +305,11 @@ NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "precip_total": "kgm2_to_in",
 }
 
-NAM_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {}
+NAM_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {
+    "precip_total": {
+        "min_fh": 1,
+    },
+}
 
 
 def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapability:
