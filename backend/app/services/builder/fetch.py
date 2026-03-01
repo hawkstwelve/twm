@@ -211,7 +211,7 @@ def _manual_subset_download_with_corrected_range(
     try:
         inv = H.inventory(search_pattern)
     except Exception as exc:
-        logger.debug(
+        logger.warning(
             "Manual subset fallback inventory failed (%s fh%03d %s; priority=%s): %s",
             model_id,
             fh,
@@ -222,12 +222,27 @@ def _manual_subset_download_with_corrected_range(
         return None
 
     if inv is None or len(inv) == 0:
+        logger.warning(
+            "Manual subset fallback unavailable (%s fh%03d %s; priority=%s): no inventory rows",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+        )
         return None
 
     row = inv.iloc[0]
     try:
         start_byte = int(row["start_byte"])
-    except Exception:
+    except Exception as exc:
+        logger.warning(
+            "Manual subset fallback unavailable (%s fh%03d %s; priority=%s): invalid start_byte (%s)",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            exc,
+        )
         return None
 
     end_byte: int | None = None
@@ -264,10 +279,26 @@ def _manual_subset_download_with_corrected_range(
             )
 
     if end_byte is None or end_byte < start_byte:
+        logger.warning(
+            "Manual subset fallback unavailable (%s fh%03d %s; priority=%s): invalid byte range start=%s end=%s",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            start_byte,
+            end_byte,
+        )
         return None
 
     source = getattr(H, "grib", None)
     if source is None:
+        logger.warning(
+            "Manual subset fallback unavailable (%s fh%03d %s; priority=%s): no GRIB source URL/path",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+        )
         return None
 
     try:
@@ -284,9 +315,26 @@ def _manual_subset_download_with_corrected_range(
                 src.seek(start_byte)
                 data = src.read(end_byte - start_byte + 1)
         if not data:
+            logger.warning(
+                "Manual subset fallback produced empty payload (%s fh%03d %s; priority=%s; bytes=%d-%d)",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                start_byte,
+                end_byte,
+            )
             return None
         out_path.write_bytes(data)
         if not out_path.is_file() or out_path.stat().st_size <= 0:
+            logger.warning(
+                "Manual subset fallback wrote empty file (%s fh%03d %s; priority=%s; path=%s)",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                out_path,
+            )
             return None
         logger.info(
             "Downloaded GRIB via manual byte-range fallback: %s (%s fh%03d %s; priority=%s; bytes=%d-%d)",
@@ -300,7 +348,7 @@ def _manual_subset_download_with_corrected_range(
         )
         return out_path
     except Exception as exc:
-        logger.debug(
+        logger.warning(
             "Manual subset fallback download failed (%s fh%03d %s; priority=%s): %s",
             model_id,
             fh,
