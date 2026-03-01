@@ -29,6 +29,8 @@ def test_nam_buildable_var_set_and_defaults_invariants() -> None:
     }
     assert buildable_var_keys == {
         "tmp2m",
+        "dp2m",
+        "tmp850",
         "wspd10m",
     }
 
@@ -57,6 +59,18 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
     assert tmp2m["kind"] == "continuous"
     assert tmp2m["units"] == "F"
 
+    dp2m = payload["variables"]["dp2m"]
+    assert dp2m["buildable"] is True
+    assert dp2m["derived"] is False
+    assert dp2m["kind"] == "continuous"
+    assert dp2m["units"] == "F"
+
+    tmp850 = payload["variables"]["tmp850"]
+    assert tmp850["buildable"] is True
+    assert tmp850["derived"] is False
+    assert tmp850["kind"] == "continuous"
+    assert tmp850["units"] == "C"
+
     wspd10m = payload["variables"]["wspd10m"]
     assert wspd10m["buildable"] is True
     assert wspd10m["derived"] is True
@@ -78,6 +92,12 @@ def test_nam_aliases_normalize() -> None:
     assert NAM_MODEL.normalize_var_id("tmp2m") == "tmp2m"
     assert NAM_MODEL.normalize_var_id("t2m") == "tmp2m"
     assert NAM_MODEL.normalize_var_id("2t") == "tmp2m"
+    assert NAM_MODEL.normalize_var_id("dp2m") == "dp2m"
+    assert NAM_MODEL.normalize_var_id("d2m") == "dp2m"
+    assert NAM_MODEL.normalize_var_id("2d") == "dp2m"
+    assert NAM_MODEL.normalize_var_id("tmp850") == "tmp850"
+    assert NAM_MODEL.normalize_var_id("t850") == "tmp850"
+    assert NAM_MODEL.normalize_var_id("temp850") == "tmp850"
     assert NAM_MODEL.normalize_var_id("u10") == "10u"
     assert NAM_MODEL.normalize_var_id("v10") == "10v"
     assert NAM_MODEL.normalize_var_id("10si") == "10si"

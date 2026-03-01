@@ -2,6 +2,8 @@
 
 Initial rollout scope:
   - tmp2m (2m temperature)
+  - dp2m (2m dewpoint)
+  - tmp850 (850mb temperature)
   - wspd10m (10m wind speed, derived from 10u/10v)
 
 Herbie wiring:
@@ -34,6 +36,17 @@ class NAMPlugin(BaseModelPlugin):
             "tmp2m": "tmp2m",
             "t2m": "tmp2m",
             "2t": "tmp2m",
+            "dp2m": "dp2m",
+            "d2m": "dp2m",
+            "2d": "dp2m",
+            "dpt2m": "dp2m",
+            "dewpoint2m": "dp2m",
+            "dewpoint": "dp2m",
+            "tmp850": "tmp850",
+            "t850": "tmp850",
+            "t850mb": "tmp850",
+            "temp850": "tmp850",
+            "temp850mb": "tmp850",
             "wspd10m": "wspd10m",
             "wind10m": "10si",
             "10si": "10si",
@@ -92,6 +105,45 @@ NAM_VARS: dict[str, VarSpec] = {
         primary=True,
         kind="continuous",
         units="F",
+    ),
+    "dp2m": VarSpec(
+        id="dp2m",
+        name="Surface Dew Point",
+        selectors=VarSelectors(
+            search=[":DPT:2 m above ground:"],
+            filter_by_keys={
+                "typeOfLevel": "heightAboveGround",
+                "level": "2",
+            },
+            hints={
+                "upstream_var": "d2m",
+                "cf_var": "d2m",
+                "short_name": "2d",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="F",
+    ),
+    "tmp850": VarSpec(
+        id="tmp850",
+        name="850mb Temp",
+        selectors=VarSelectors(
+            search=[":TMP:850 mb:"],
+            filter_by_keys={
+                "shortName": "t",
+                "typeOfLevel": "isobaricInhPa",
+                "level": "850",
+            },
+            hints={
+                "upstream_var": "t850",
+                "cf_var": "t",
+                "short_name": "t",
+            },
+        ),
+        primary=True,
+        kind="continuous",
+        units="C",
     ),
     "10u": VarSpec(
         id="10u",
@@ -164,6 +216,8 @@ NAM_VARS: dict[str, VarSpec] = {
 
 NAM_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "tmp2m",
+    "dp2m": "dp2m",
+    "tmp850": "tmp850",
     "wspd10m": "wspd10m",
 }
 
@@ -171,11 +225,14 @@ NAM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {}
 
 NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
     "tmp2m": 0,
-    "wspd10m": 1,
+    "dp2m": 1,
+    "tmp850": 2,
+    "wspd10m": 3,
 }
 
 NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
+    "dp2m": "c_to_f",
     "wspd10m": "ms_to_mph",
 }
 
