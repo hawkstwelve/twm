@@ -134,32 +134,7 @@ def _derive_wspd10m(
     v_component = hints.get("v_component", "10v")
     speed_component = hints.get("speed_component")
 
-    model_norm = str(model_id).strip().lower()
-
-    # NAM-specific guardrail: prefer direct speed field and skip U/V extraction
-    # because some upstream UGRD/VGRD subset ranges can repeatedly yield 0-byte files.
-    if model_norm == "nam" and speed_component:
-        logger.info(
-            "wspd10m derive path (model=nam): using direct speed component=%s",
-            speed_component,
-        )
-        speed_data, src_crs, src_transform = _fetch_component(
-            model_id=model_id,
-            product=product,
-            run_date=run_date,
-            fh=fh,
-            model_plugin=model_plugin,
-            var_key=str(speed_component),
-        )
-        wspd = convert_units(
-            speed_data.astype(np.float32, copy=False),
-            var_key=var_key,
-            model_id=model_id,
-            var_capability=var_capability,
-        )
-        return wspd.astype(np.float32, copy=False), src_crs, src_transform
-
-    # Prefer a direct wind-speed field when available for non-NAM model/product paths.
+    # Prefer a direct wind-speed field when available.
     if speed_component:
         try:
             logger.info(

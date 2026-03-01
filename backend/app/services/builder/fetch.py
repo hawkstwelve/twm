@@ -31,6 +31,7 @@ import numpy as np
 import rasterio
 import rasterio.crs
 import rasterio.transform
+import requests
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,125 @@ def _precheck_subset_available(
         return True
 
 
+def _manual_subset_download_with_corrected_range(
+    H: Any,
+    *,
+    search_pattern: str,
+    out_path: Path,
+    model_id: str,
+    fh: int,
+    priority: str,
+) -> Path | None:
+    """Fallback subset fetch for edge-case index rows with duplicate start bytes.
+
+    Some upstream IDX inventories contain duplicate `start_byte` rows (for example
+    NAM 10m vector components). In those cases the first row can end up with an
+    invalid computed range in Herbie's subset path and produce 0-byte output.
+    This fallback computes `end_byte` from the next distinct start byte.
+    """
+    try:
+        inv = H.inventory(search_pattern)
+    except Exception as exc:
+        logger.debug(
+            "Manual subset fallback inventory failed (%s fh%03d %s; priority=%s): %s",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            exc,
+        )
+        return None
+
+    if inv is None or len(inv) == 0:
+        return None
+
+    row = inv.iloc[0]
+    try:
+        start_byte = int(row["start_byte"])
+    except Exception:
+        return None
+
+    end_byte: int | None = None
+    try:
+        raw_end = row.get("end_byte")
+        if raw_end is not None and np.isfinite(raw_end):
+            parsed_end = int(raw_end)
+            if parsed_end >= start_byte:
+                end_byte = parsed_end
+    except Exception:
+        end_byte = None
+
+    if end_byte is None:
+        try:
+            full_idx = H.index_as_dataframe
+            starts = (
+                full_idx["start_byte"]
+                .dropna()
+                .astype(int)
+            )
+            higher = starts[starts > start_byte]
+            if len(higher) > 0:
+                candidate_end = int(higher.min() - 1)
+                if candidate_end >= start_byte:
+                    end_byte = candidate_end
+        except Exception as exc:
+            logger.debug(
+                "Manual subset fallback full-index scan failed (%s fh%03d %s; priority=%s): %s",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                exc,
+            )
+
+    if end_byte is None or end_byte < start_byte:
+        return None
+
+    source = getattr(H, "grib", None)
+    if source is None:
+        return None
+
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        source_str = str(source)
+        if source_str.startswith(("http://", "https://")):
+            headers = {"Range": f"bytes={start_byte}-{end_byte}"}
+            response = requests.get(source_str, headers=headers, timeout=45)
+            response.raise_for_status()
+            data = response.content
+            response.close()
+        else:
+            with open(source_str, "rb") as src:
+                src.seek(start_byte)
+                data = src.read(end_byte - start_byte + 1)
+        if not data:
+            return None
+        out_path.write_bytes(data)
+        if not out_path.is_file() or out_path.stat().st_size <= 0:
+            return None
+        logger.info(
+            "Downloaded GRIB via manual byte-range fallback: %s (%s fh%03d %s; priority=%s; bytes=%d-%d)",
+            out_path.name,
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            start_byte,
+            end_byte,
+        )
+        return out_path
+    except Exception as exc:
+        logger.debug(
+            "Manual subset fallback download failed (%s fh%03d %s; priority=%s): %s",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            exc,
+        )
+        return None
+
+
 def fetch_variable(
     model_id: str,
     product: str,
@@ -317,6 +437,17 @@ def fetch_variable(
                         subset_candidate,
                         subset_size,
                     )
+                    manual_subset = _manual_subset_download_with_corrected_range(
+                        H,
+                        search_pattern=search_pattern,
+                        out_path=subset_candidate,
+                        model_id=model_id,
+                        fh=fh,
+                        priority=priority,
+                    )
+                    if manual_subset is not None:
+                        grib_path = manual_subset
+                        break
                     try:
                         if subset_candidate.exists():
                             subset_candidate.unlink()
