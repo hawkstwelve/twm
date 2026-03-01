@@ -2883,12 +2883,13 @@ export default function App() {
 
         <button
           type="button"
-          className="glass absolute bottom-24 right-4 z-40 inline-flex items-center gap-2 rounded-xl border border-white/15 px-3 py-2 text-xs font-medium text-white/95 hover:bg-white/10"
+          className="glass absolute bottom-24 right-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-white/95 hover:bg-white/10"
           aria-pressed={basemapMode === "dark"}
+          aria-label={basemapMode === "dark" ? "Switch to light basemap" : "Switch to dark basemap"}
+          title={basemapMode === "dark" ? "Switch to light basemap" : "Switch to dark basemap"}
           onClick={() => setBasemapMode(basemapMode === "dark" ? "light" : "dark")}
         >
           {basemapMode === "dark" ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
-          <span>{basemapMode === "dark" ? "Dark basemap" : "Light basemap"}</span>
         </button>
 
         <MapLegend legend={legend} onOpacityChange={setOpacity} />
