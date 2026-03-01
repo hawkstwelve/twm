@@ -115,6 +115,22 @@ def _fetch_component(
     raise ValueError(f"Component var {normalized_var_key!r} has no usable search patterns")
 
 
+def _neighbor_count_3x3(mask: np.ndarray) -> np.ndarray:
+    """Return count of True values in each 3x3 neighborhood (including center)."""
+    padded = np.pad(mask.astype(np.uint8, copy=False), 1, mode="constant", constant_values=0)
+    return (
+        padded[:-2, :-2]
+        + padded[:-2, 1:-1]
+        + padded[:-2, 2:]
+        + padded[1:-1, :-2]
+        + padded[1:-1, 1:-1]
+        + padded[1:-1, 2:]
+        + padded[2:, :-2]
+        + padded[2:, 1:-1]
+        + padded[2:, 2:]
+    ).astype(np.uint8, copy=False)
+
+
 def _derive_wspd10m(
     *,
     model_id: str,
@@ -205,8 +221,21 @@ def _derive_radar_ptype_combo(
     model_plugin: Any,
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
     del var_key, var_capability
-    min_visible_dbz = 10.0
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
+    try:
+        min_visible_dbz = float(hints.get("min_visible_dbz", "10.0"))
+    except (TypeError, ValueError):
+        min_visible_dbz = 10.0
+    try:
+        min_mask_value = float(hints.get("min_mask_value", "0.0"))
+    except (TypeError, ValueError):
+        min_mask_value = 0.0
+    try:
+        despeckle_min_neighbors = int(hints.get("despeckle_min_neighbors", "1"))
+    except (TypeError, ValueError):
+        despeckle_min_neighbors = 1
+    despeckle_min_neighbors = min(max(despeckle_min_neighbors, 1), 9)
+
     refl_id = hints.get("refl_component", "refc")
     rain_id = hints.get("rain_component", "crain")
     snow_id = hints.get("snow_component", "csnow")
@@ -250,8 +279,19 @@ def _derive_radar_ptype_combo(
         offset = int(breaks["offset"])
         count = bins_per_type[code]
         local_bin = np.clip(np.rint(normalized * (count - 1)), 0, count - 1).astype(np.int32)
-        selector = (ptype == code) & np.isfinite(refl_safe) & (mask_max > 0) & (refl_safe >= min_visible_dbz)
+        selector = (
+            (ptype == code)
+            & np.isfinite(refl_safe)
+            & (mask_max >= min_mask_value)
+            & (refl_safe >= min_visible_dbz)
+        )
         indexed[selector] = (offset + local_bin[selector]).astype(np.float32)
+
+    if despeckle_min_neighbors > 1:
+        valid = np.isfinite(indexed)
+        if np.any(valid):
+            neighbor_count = _neighbor_count_3x3(valid)
+            indexed = np.where(neighbor_count >= despeckle_min_neighbors, indexed, np.nan).astype(np.float32, copy=False)
 
     return indexed, src_crs, src_transform
 

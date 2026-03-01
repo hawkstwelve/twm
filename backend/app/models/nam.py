@@ -392,6 +392,10 @@ NAM_VARS: dict[str, VarSpec] = {
                 "snow_component": "csnow",
                 "sleet_component": "cicep",
                 "frzr_component": "cfrzr",
+                # NAM ptype masks can be noisy at low signal; tighten gates.
+                "min_visible_dbz": "15.0",
+                "min_mask_value": "0.5",
+                "despeckle_min_neighbors": "3",
             },
         ),
         derived=True,

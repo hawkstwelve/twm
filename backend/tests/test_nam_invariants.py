@@ -113,6 +113,11 @@ def test_nam_capabilities_schema_snapshot_invariants() -> None:
     assert radar_ptype["kind"] == "discrete"
     assert radar_ptype["units"] == "dBZ"
     assert radar_ptype["default_fh"] == 1
+    radar_ptype_spec = NAM_MODEL.get_var("radar_ptype")
+    assert radar_ptype_spec is not None
+    assert radar_ptype_spec.selectors.hints["min_visible_dbz"] == "15.0"
+    assert radar_ptype_spec.selectors.hints["min_mask_value"] == "0.5"
+    assert radar_ptype_spec.selectors.hints["despeckle_min_neighbors"] == "3"
 
     u10 = payload["variables"]["10u"]
     assert u10["buildable"] is False
