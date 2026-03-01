@@ -372,7 +372,7 @@ export function MapLegend({ legend, onOpacityChange }: MapLegendProps) {
                 min={0}
                 max={100}
                 step={1}
-                className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:first-child>*:first-child]:bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] [&>*:nth-child(2)]:h-[18px] [&>*:nth-child(2)]:w-[18px] [&>*:nth-child(2)]:border-[#526d5c]/95 [&>*:nth-child(2)]:bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] [&>*:nth-child(2)]:shadow-[0_0_0_1px_rgba(255,255,255,0.18),0_0_10px_rgba(82,109,92,0.45)] [&>*:nth-child(2)]:focus-visible:ring-[#526d5c]/70"
+                className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:first-child>*:first-child]:bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] [&>*:nth-child(2)]:h-[18px] [&>*:nth-child(2)]:w-[18px] [&>*:nth-child(2)]:border-[#526d5c]/95 [&>*:nth-child(2)]:bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] [&>*:nth-child(2)]:shadow-[0_0_0_1px_rgba(31,52,47,0.9),0_0_10px_rgba(82,109,92,0.5)] [&>*:nth-child(2)]:focus-visible:ring-0 [&>*:nth-child(2)]:focus-visible:ring-offset-0"
               />
             </div>
           </div>
