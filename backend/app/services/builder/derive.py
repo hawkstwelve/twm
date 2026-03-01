@@ -126,10 +126,65 @@ def _derive_wspd10m(
     var_capability: Any | None,
     model_plugin: Any,
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+    import logging
+
+    logger = logging.getLogger(__name__)
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     u_component = hints.get("u_component", "10u")
     v_component = hints.get("v_component", "10v")
     speed_component = hints.get("speed_component")
+
+    model_norm = str(model_id).strip().lower()
+
+    # NAM-specific guardrail: prefer direct speed field and skip U/V extraction
+    # because some upstream UGRD/VGRD subset ranges can repeatedly yield 0-byte files.
+    if model_norm == "nam" and speed_component:
+        logger.info(
+            "wspd10m derive path (model=nam): using direct speed component=%s",
+            speed_component,
+        )
+        speed_data, src_crs, src_transform = _fetch_component(
+            model_id=model_id,
+            product=product,
+            run_date=run_date,
+            fh=fh,
+            model_plugin=model_plugin,
+            var_key=str(speed_component),
+        )
+        wspd = convert_units(
+            speed_data.astype(np.float32, copy=False),
+            var_key=var_key,
+            model_id=model_id,
+            var_capability=var_capability,
+        )
+        return wspd.astype(np.float32, copy=False), src_crs, src_transform
+
+    # Prefer a direct wind-speed field when available for non-NAM model/product paths.
+    if speed_component:
+        try:
+            logger.info(
+                "wspd10m derive path (model=%s): trying direct speed component=%s",
+                model_id,
+                speed_component,
+            )
+            speed_data, src_crs, src_transform = _fetch_component(
+                model_id=model_id,
+                product=product,
+                run_date=run_date,
+                fh=fh,
+                model_plugin=model_plugin,
+                var_key=str(speed_component),
+            )
+            wspd = convert_units(
+                speed_data.astype(np.float32, copy=False),
+                var_key=var_key,
+                model_id=model_id,
+                var_capability=var_capability,
+            )
+            return wspd.astype(np.float32, copy=False), src_crs, src_transform
+        except (HerbieTransientUnavailableError, RuntimeError, ValueError):
+            # Fall back to vector magnitude from 10u/10v.
+            pass
 
     try:
         u_data, src_crs, src_transform = _fetch_component(
@@ -151,21 +206,7 @@ def _derive_wspd10m(
     except (HerbieTransientUnavailableError, RuntimeError, ValueError):
         if not speed_component:
             raise
-        speed_data, src_crs, src_transform = _fetch_component(
-            model_id=model_id,
-            product=product,
-            run_date=run_date,
-            fh=fh,
-            model_plugin=model_plugin,
-            var_key=str(speed_component),
-        )
-        wspd = convert_units(
-            speed_data.astype(np.float32, copy=False),
-            var_key=var_key,
-            model_id=model_id,
-            var_capability=var_capability,
-        )
-        return wspd.astype(np.float32, copy=False), src_crs, src_transform
+        raise
 
     wspd_ms = np.hypot(u_data, v_data, dtype=np.float32)
     wspd = convert_units(

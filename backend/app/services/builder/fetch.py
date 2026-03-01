@@ -279,7 +279,7 @@ def fetch_variable(
                     if sleep_s > 0 and attempt_idx < retries:
                         time.sleep(sleep_s)
                     continue
-                subset_path = H.download(search_pattern, errors="raise")
+                subset_path = H.download(search_pattern, errors="raise", overwrite=True)
                 if subset_path is None:
                     saw_missing_subset_file = True
                     logger.warning(
@@ -317,6 +317,11 @@ def fetch_variable(
                         subset_candidate,
                         subset_size,
                     )
+                    try:
+                        if subset_candidate.exists():
+                            subset_candidate.unlink()
+                    except OSError:
+                        pass
                     if sleep_s > 0 and attempt_idx < retries:
                         time.sleep(sleep_s)
                     continue
