@@ -88,6 +88,11 @@ def _is_missing_index_error(exc: Exception) -> bool:
     return "no index file was found for none" in text
 
 
+def _is_missing_file_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "no such file or directory" in text
+
+
 def _parse_float_tag(value: Any) -> float | None:
     try:
         parsed = float(value)
@@ -247,6 +252,7 @@ def fetch_variable(
 
     last_exc: Exception | None = None
     saw_missing_index = False
+    saw_missing_subset_file = False
     saw_non_transient_failure = False
     grib_path: Path | None = None
     for priority in priority_list:
@@ -274,7 +280,34 @@ def fetch_variable(
                     raise RuntimeError(
                         f"Herbie subset download returned None ({model_id} fh{fh:03d} {search_pattern!r})"
                     )
-                grib_path = Path(subset_path)
+                subset_candidate = Path(subset_path)
+                subset_ok = False
+                subset_size = 0
+                try:
+                    if subset_candidate.is_file():
+                        subset_size = int(subset_candidate.stat().st_size)
+                        subset_ok = subset_size > 0
+                except OSError:
+                    subset_ok = False
+
+                if not subset_ok:
+                    saw_missing_subset_file = True
+                    logger.warning(
+                        "Herbie subset file missing/empty after download (%s fh%03d %s; priority=%s; attempt=%d/%d): %s (size=%d)",
+                        model_id,
+                        fh,
+                        search_pattern,
+                        priority,
+                        attempt_idx,
+                        retries,
+                        subset_candidate,
+                        subset_size,
+                    )
+                    if sleep_s > 0 and attempt_idx < retries:
+                        time.sleep(sleep_s)
+                    continue
+
+                grib_path = subset_candidate
                 logger.info(
                     "Downloaded GRIB: %s (%s fh%03d %s; priority=%s; attempt=%d/%d)",
                     grib_path.name,
@@ -319,7 +352,7 @@ def fetch_variable(
             break
 
     if grib_path is None:
-        if saw_missing_index and not saw_non_transient_failure:
+        if (saw_missing_index or saw_missing_subset_file) and not saw_non_transient_failure:
             raise HerbieTransientUnavailableError(
                 f"Herbie subset transiently unavailable after priorities={priority_list} "
                 f"for {model_id} fh{fh:03d} pattern={search_pattern!r}"
@@ -330,32 +363,40 @@ def fetch_variable(
         ) from last_exc
 
     # Open with rasterio to get array + CRS + transform
-    with rasterio.open(grib_path) as src:
-        band_data = src.read(1, masked=True)
-        data = np.asarray(np.ma.filled(band_data, np.nan), dtype=np.float32)
-        band_mask = np.ma.getmaskarray(band_data)
-        if band_mask is not np.ma.nomask:
-            data = np.where(band_mask, np.nan, data).astype(np.float32, copy=False)
+    try:
+        with rasterio.open(grib_path) as src:
+            band_data = src.read(1, masked=True)
+            data = np.asarray(np.ma.filled(band_data, np.nan), dtype=np.float32)
+            band_mask = np.ma.getmaskarray(band_data)
+            if band_mask is not np.ma.nomask:
+                data = np.where(band_mask, np.nan, data).astype(np.float32, copy=False)
 
-        nodata_val = _parse_float_tag(getattr(src, "nodata", None))
-        if nodata_val is not None:
-            atol = max(1e-6, abs(nodata_val) * 1e-6)
-            data = np.where(np.isclose(data, nodata_val, rtol=0.0, atol=atol), np.nan, data).astype(np.float32, copy=False)
+            nodata_val = _parse_float_tag(getattr(src, "nodata", None))
+            if nodata_val is not None:
+                atol = max(1e-6, abs(nodata_val) * 1e-6)
+                data = np.where(np.isclose(data, nodata_val, rtol=0.0, atol=atol), np.nan, data).astype(np.float32, copy=False)
 
-        tag_values: list[float] = []
-        for tags in (src.tags(), src.tags(1)):
-            for key in _MISSING_VALUE_TAG_KEYS:
-                parsed = _parse_float_tag(tags.get(key))
-                if parsed is not None:
-                    tag_values.append(parsed)
-        for missing_val in set(tag_values):
-            atol = max(1e-6, abs(missing_val) * 1e-6)
-            data = np.where(np.isclose(data, missing_val, rtol=0.0, atol=atol), np.nan, data).astype(np.float32, copy=False)
+            tag_values: list[float] = []
+            for tags in (src.tags(), src.tags(1)):
+                for key in _MISSING_VALUE_TAG_KEYS:
+                    parsed = _parse_float_tag(tags.get(key))
+                    if parsed is not None:
+                        tag_values.append(parsed)
+            for missing_val in set(tag_values):
+                atol = max(1e-6, abs(missing_val) * 1e-6)
+                data = np.where(np.isclose(data, missing_val, rtol=0.0, atol=atol), np.nan, data).astype(np.float32, copy=False)
 
-        # GRIB nodata sentinels occasionally leak through metadata handling.
-        data = np.where(np.abs(data) > 1e12, np.nan, data).astype(np.float32, copy=False)
-        crs = src.crs
-        transform = src.transform
+            # GRIB nodata sentinels occasionally leak through metadata handling.
+            data = np.where(np.abs(data) > 1e12, np.nan, data).astype(np.float32, copy=False)
+            crs = src.crs
+            transform = src.transform
+    except rasterio.errors.RasterioIOError as exc:
+        if _is_missing_file_error(exc):
+            raise HerbieTransientUnavailableError(
+                f"Herbie subset file disappeared before open for {model_id} fh{fh:03d} "
+                f"pattern={search_pattern!r} path={grib_path}"
+            ) from exc
+        raise
 
     logger.debug(
         "GRIB data: shape=%s, CRS=%s, dtype=%s",
