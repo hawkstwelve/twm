@@ -3,7 +3,7 @@
 Initial rollout scope:
   - tmp2m (2m temperature)
   - precip_total (total precipitation, cumulative from APCP step)
-  - snowfall_total (10:1 total snowfall, cumulative from APCP step + CSNOW)
+  - snowfall_total (cumulative snowfall from ASNOW hourly accumulations)
   - wspd10m (10m wind speed)
 
 Herbie wiring:
@@ -172,19 +172,22 @@ NBM_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
-    "csnow": VarSpec(
-        id="csnow",
-        name="Categorical Snow",
+    "asnow_step": VarSpec(
+        id="asnow_step",
+        name="ASNOW Step",
         selectors=VarSelectors(
-            search=[":CSNOW:surface:"],
+            search=[
+                ":ASNOW:surface:[0-9]+-[0-9]+ hour acc fcst:$",
+                ":ASNOW:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=1 hour\\):$",
+            ],
             filter_by_keys={
-                "shortName": "csnow",
+                "shortName": "asnow",
                 "typeOfLevel": "surface",
             },
             hints={
-                "upstream_var": "csnow",
-                "cf_var": "csnow",
-                "short_name": "csnow",
+                "upstream_var": "asnow",
+                "cf_var": "asnow",
+                "short_name": "asnow",
             },
         ),
     ),
@@ -204,19 +207,15 @@ NBM_VARS: dict[str, VarSpec] = {
     ),
     "snowfall_total": VarSpec(
         id="snowfall_total",
-        name="Total Snowfall (10:1)",
+        name="Total Snowfall",
         selectors=VarSelectors(
             hints={
-                "apcp_component": "apcp_step",
-                "snow_component": "csnow",
-                "step_hours": "6",
-                "slr": "10",
-                "snow_mask_threshold": "0.5",
-                "min_step_lwe_kgm2": "0.01",
-            },
+                "apcp_component": "asnow_step",
+                "step_hours": "1",
+            }
         ),
         derived=True,
-        derive="snowfall_total_10to1_cumulative",
+        derive="precip_total_cumulative",
         kind="continuous",
         units="in",
     ),
@@ -260,6 +259,7 @@ NBM_ORDER_BY_VAR_KEY: dict[str, int] = {
 NBM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "precip_total": "kgm2_to_in",
+    "snowfall_total": "m_to_in",
     "wspd10m": "ms_to_mph",
 }
 

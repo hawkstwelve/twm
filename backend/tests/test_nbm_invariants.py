@@ -82,12 +82,12 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     snowfall_total = payload["variables"]["snowfall_total"]
     assert snowfall_total["buildable"] is True
     assert snowfall_total["derived"] is True
-    assert snowfall_total["derive_strategy_id"] == "snowfall_total_10to1_cumulative"
+    assert snowfall_total["derive_strategy_id"] == "precip_total_cumulative"
     assert snowfall_total["kind"] == "continuous"
     assert snowfall_total["units"] == "in"
     assert snowfall_total["default_fh"] == 6
     assert snowfall_total["constraints"] == {"min_fh": 6}
-    assert snowfall_total["display_name"] == "Total Snowfall (10:1)"
+    assert snowfall_total["display_name"] == "Total Snowfall"
     assert snowfall_total["order"] == 3
 
     wspd10m = payload["variables"]["wspd10m"]
@@ -111,24 +111,26 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     apcp_step = payload["variables"]["apcp_step"]
     assert apcp_step["buildable"] is False
 
-    csnow = payload["variables"]["csnow"]
-    assert csnow["buildable"] is False
+    asnow_step = payload["variables"]["asnow_step"]
+    assert asnow_step["buildable"] is False
 
     snowfall_spec = NBM_MODEL.get_var("snowfall_total")
     assert snowfall_spec is not None
-    assert snowfall_spec.selectors.hints["apcp_component"] == "apcp_step"
-    assert snowfall_spec.selectors.hints["snow_component"] == "csnow"
-    assert snowfall_spec.selectors.hints["step_hours"] == "6"
+    assert snowfall_spec.selectors.hints["apcp_component"] == "asnow_step"
+    assert snowfall_spec.selectors.hints["step_hours"] == "1"
 
     apcp_component_spec = NBM_MODEL.get_var("apcp_step")
     assert apcp_component_spec is not None
     assert apcp_component_spec.selectors.search == [":APCP:surface:"]
     assert apcp_component_spec.selectors.filter_by_keys["shortName"] == "apcp"
 
-    csnow_component_spec = NBM_MODEL.get_var("csnow")
-    assert csnow_component_spec is not None
-    assert csnow_component_spec.selectors.search == [":CSNOW:surface:"]
-    assert csnow_component_spec.selectors.filter_by_keys["shortName"] == "csnow"
+    asnow_component_spec = NBM_MODEL.get_var("asnow_step")
+    assert asnow_component_spec is not None
+    assert asnow_component_spec.selectors.search == [
+        ":ASNOW:surface:[0-9]+-[0-9]+ hour acc fcst:$",
+        ":ASNOW:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=1 hour\\):$",
+    ]
+    assert asnow_component_spec.selectors.filter_by_keys["shortName"] == "asnow"
 
 
 def test_nbm_aliases_normalize() -> None:
