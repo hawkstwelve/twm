@@ -473,6 +473,7 @@ def _write_run_manifest(
     model: str,
     run_id: str,
     targets: list[tuple[str, int]],
+    plugin: Any | None = None,
 ) -> None:
     run_dt = _parse_run_id_datetime(run_id)
     if run_dt is None:
@@ -488,6 +489,16 @@ def _write_run_manifest(
         frames: list[dict] = []
         units = ""
         kind = ""
+        display_name = var_id
+
+        if plugin is not None:
+            capability = plugin.get_var_capability(var_id) if hasattr(plugin, "get_var_capability") else None
+            if capability is not None and getattr(capability, "name", None):
+                display_name = str(getattr(capability, "name"))
+            else:
+                var_spec = plugin.get_var(var_id) if hasattr(plugin, "get_var") else None
+                if var_spec is not None and getattr(var_spec, "name", None):
+                    display_name = str(getattr(var_spec, "name"))
 
         for fh in expected_fhs:
             sidecar_path = _frame_sidecar_path(data_root, model, run_id, var_id, fh)
@@ -510,6 +521,7 @@ def _write_run_manifest(
             frames.append(frame_entry)
 
         variables[var_id] = {
+            "display_name": display_name,
             "kind": kind,
             "units": units,
             "expected_frames": len(expected_fhs),
@@ -766,6 +778,7 @@ def _process_run(
             model=model_id,
             run_id=run_id,
             targets=targets,
+            plugin=plugin,
         )
         _write_latest_pointer(data_root, model_id, run_id)
         if loop_pregenerate_enabled:

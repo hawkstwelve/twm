@@ -718,7 +718,20 @@ export default function App() {
     }
     return map;
   }, [selectedCapabilityVars]);
-  const hasRenderableSelection = Boolean(model && variable && selectedCapabilityVarMap.has(variable));
+
+  const manifestVarIds = useMemo(() => {
+    const vars = runManifest?.variables;
+    if (!vars) {
+      return new Set<string>();
+    }
+    return new Set(Object.keys(vars));
+  }, [runManifest]);
+
+  const hasRenderableSelection = Boolean(
+    model
+    && variable
+    && (selectedCapabilityVarMap.has(variable) || manifestVarIds.has(variable))
+  );
   const selectedVariableDefaultFh = selectedCapabilityVarMap.get(variable)?.defaultFh ?? null;
   const selectedVariableKind = selectedCapabilityVarMap.get(variable)?.kind ?? null;
   const selectedModelConstraints = (selectedModelCapability?.constraints ?? {}) as Record<string, unknown>;
