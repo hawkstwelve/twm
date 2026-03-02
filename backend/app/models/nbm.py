@@ -2,6 +2,8 @@
 
 Initial rollout scope:
   - tmp2m (2m temperature)
+  - precip_total (total precipitation, cumulative from APCP step)
+  - snowfall_total (10:1 total snowfall, cumulative from APCP step + CSNOW)
   - wspd10m (10m wind speed)
 
 Herbie wiring:
@@ -34,6 +36,16 @@ class NBMPlugin(BaseModelPlugin):
             "tmp2m": "tmp2m",
             "t2m": "tmp2m",
             "2t": "tmp2m",
+            "precip_total": "precip_total",
+            "total_precip": "precip_total",
+            "apcp": "precip_total",
+            "qpf": "precip_total",
+            "total_qpf": "precip_total",
+            "snowfall_total": "snowfall_total",
+            "asnow": "snowfall_total",
+            "snow10": "snowfall_total",
+            "total_snow": "snowfall_total",
+            "totalsnow": "snowfall_total",
             "wspd10m": "wspd10m",
             "wind10m": "10si",
             "10si": "10si",
@@ -144,6 +156,70 @@ NBM_VARS: dict[str, VarSpec] = {
             },
         ),
     ),
+    "apcp_step": VarSpec(
+        id="apcp_step",
+        name="APCP Step",
+        selectors=VarSelectors(
+            search=[":APCP:surface:"],
+            filter_by_keys={
+                "shortName": "apcp",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "apcp",
+                "cf_var": "apcp",
+                "short_name": "apcp",
+            },
+        ),
+    ),
+    "csnow": VarSpec(
+        id="csnow",
+        name="Categorical Snow",
+        selectors=VarSelectors(
+            search=[":CSNOW:surface:"],
+            filter_by_keys={
+                "shortName": "csnow",
+                "typeOfLevel": "surface",
+            },
+            hints={
+                "upstream_var": "csnow",
+                "cf_var": "csnow",
+                "short_name": "csnow",
+            },
+        ),
+    ),
+    "precip_total": VarSpec(
+        id="precip_total",
+        name="Total Precip",
+        selectors=VarSelectors(
+            hints={
+                "apcp_component": "apcp_step",
+                "step_hours": "6",
+            },
+        ),
+        derived=True,
+        derive="precip_total_cumulative",
+        kind="continuous",
+        units="in",
+    ),
+    "snowfall_total": VarSpec(
+        id="snowfall_total",
+        name="Total Snowfall (10:1)",
+        selectors=VarSelectors(
+            hints={
+                "apcp_component": "apcp_step",
+                "snow_component": "csnow",
+                "step_hours": "6",
+                "slr": "10",
+                "snow_mask_threshold": "0.5",
+                "min_step_lwe_kgm2": "0.01",
+            },
+        ),
+        derived=True,
+        derive="snowfall_total_10to1_cumulative",
+        kind="continuous",
+        units="in",
+    ),
     "wspd10m": VarSpec(
         id="wspd10m",
         name="10m Wind Speed",
@@ -164,17 +240,36 @@ NBM_VARS: dict[str, VarSpec] = {
 
 NBM_COLOR_MAP_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "tmp2m",
+    "precip_total": "precip_total",
+    "snowfall_total": "snowfall_total",
     "wspd10m": "wspd10m",
+}
+
+NBM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
+    "precip_total": 6,
+    "snowfall_total": 6,
 }
 
 NBM_ORDER_BY_VAR_KEY: dict[str, int] = {
     "tmp2m": 1,
-    "wspd10m": 2,
+    "precip_total": 2,
+    "snowfall_total": 3,
+    "wspd10m": 4,
 }
 
 NBM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
+    "precip_total": "kgm2_to_in",
     "wspd10m": "ms_to_mph",
+}
+
+NBM_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {
+    "precip_total": {
+        "min_fh": 6,
+    },
+    "snowfall_total": {
+        "min_fh": 6,
+    },
 }
 
 
@@ -192,10 +287,11 @@ def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapabi
         normalize_units=var_spec.normalize_units,
         scale=var_spec.scale,
         color_map_id=NBM_COLOR_MAP_BY_VAR_KEY.get(var_key),
+        default_fh=NBM_DEFAULT_FH_BY_VAR_KEY.get(var_key),
         buildable=is_buildable,
         order=NBM_ORDER_BY_VAR_KEY.get(var_key),
         conversion=NBM_CONVERSION_BY_VAR_KEY.get(var_key),
-        constraints={},
+        constraints=dict(NBM_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
     )
 
 

@@ -185,7 +185,7 @@ Use a dedicated env file for NBM so rollout scope stays isolated:
 
 | Variable | Recommended value | Description |
 |---|---|---|
-| `TWF_V3_SCHEDULER_VARS` | `tmp2m,wspd10m` | Initial NBM rollout vars |
+| `TWF_V3_SCHEDULER_VARS` | `tmp2m,precip_total,snowfall_total,wspd10m` | Initial NBM rollout vars |
 | `TWF_V3_SCHEDULER_PRIMARY_VARS` | `tmp2m` | Promotion/probe gate var |
 | `TWF_V3_SCHEDULER_PROBE_VAR` | `tmp2m` | Run-availability probe var |
 

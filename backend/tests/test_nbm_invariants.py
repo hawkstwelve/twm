@@ -29,6 +29,8 @@ def test_nbm_buildable_var_set_and_defaults_invariants() -> None:
     }
     assert buildable_var_keys == {
         "tmp2m",
+        "precip_total",
+        "snowfall_total",
         "wspd10m",
     }
 
@@ -66,6 +68,28 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     assert tmp2m["display_name"] == "Surface Temp"
     assert tmp2m["order"] == 1
 
+    precip_total = payload["variables"]["precip_total"]
+    assert precip_total["buildable"] is True
+    assert precip_total["derived"] is True
+    assert precip_total["derive_strategy_id"] == "precip_total_cumulative"
+    assert precip_total["kind"] == "continuous"
+    assert precip_total["units"] == "in"
+    assert precip_total["default_fh"] == 6
+    assert precip_total["constraints"] == {"min_fh": 6}
+    assert precip_total["display_name"] == "Total Precip"
+    assert precip_total["order"] == 2
+
+    snowfall_total = payload["variables"]["snowfall_total"]
+    assert snowfall_total["buildable"] is True
+    assert snowfall_total["derived"] is True
+    assert snowfall_total["derive_strategy_id"] == "snowfall_total_10to1_cumulative"
+    assert snowfall_total["kind"] == "continuous"
+    assert snowfall_total["units"] == "in"
+    assert snowfall_total["default_fh"] == 6
+    assert snowfall_total["constraints"] == {"min_fh": 6}
+    assert snowfall_total["display_name"] == "Total Snowfall (10:1)"
+    assert snowfall_total["order"] == 3
+
     wspd10m = payload["variables"]["wspd10m"]
     assert wspd10m["buildable"] is True
     assert wspd10m["derived"] is True
@@ -73,7 +97,7 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     assert wspd10m["kind"] == "continuous"
     assert wspd10m["units"] == "mph"
     assert wspd10m["display_name"] == "10m Wind Speed"
-    assert wspd10m["order"] == 2
+    assert wspd10m["order"] == 4
 
     u10 = payload["variables"]["10u"]
     assert u10["buildable"] is False
@@ -84,11 +108,39 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     si10 = payload["variables"]["10si"]
     assert si10["buildable"] is False
 
+    apcp_step = payload["variables"]["apcp_step"]
+    assert apcp_step["buildable"] is False
+
+    csnow = payload["variables"]["csnow"]
+    assert csnow["buildable"] is False
+
+    snowfall_spec = NBM_MODEL.get_var("snowfall_total")
+    assert snowfall_spec is not None
+    assert snowfall_spec.selectors.hints["apcp_component"] == "apcp_step"
+    assert snowfall_spec.selectors.hints["snow_component"] == "csnow"
+    assert snowfall_spec.selectors.hints["step_hours"] == "6"
+
+    apcp_component_spec = NBM_MODEL.get_var("apcp_step")
+    assert apcp_component_spec is not None
+    assert apcp_component_spec.selectors.search == [":APCP:surface:"]
+    assert apcp_component_spec.selectors.filter_by_keys["shortName"] == "apcp"
+
+    csnow_component_spec = NBM_MODEL.get_var("csnow")
+    assert csnow_component_spec is not None
+    assert csnow_component_spec.selectors.search == [":CSNOW:surface:"]
+    assert csnow_component_spec.selectors.filter_by_keys["shortName"] == "csnow"
+
 
 def test_nbm_aliases_normalize() -> None:
     assert NBM_MODEL.normalize_var_id("tmp2m") == "tmp2m"
     assert NBM_MODEL.normalize_var_id("t2m") == "tmp2m"
     assert NBM_MODEL.normalize_var_id("2t") == "tmp2m"
+    assert NBM_MODEL.normalize_var_id("precip_total") == "precip_total"
+    assert NBM_MODEL.normalize_var_id("apcp") == "precip_total"
+    assert NBM_MODEL.normalize_var_id("qpf") == "precip_total"
+    assert NBM_MODEL.normalize_var_id("snowfall_total") == "snowfall_total"
+    assert NBM_MODEL.normalize_var_id("asnow") == "snowfall_total"
+    assert NBM_MODEL.normalize_var_id("total_snow") == "snowfall_total"
     assert NBM_MODEL.normalize_var_id("wspd10m") == "wspd10m"
     assert NBM_MODEL.normalize_var_id("wind10m") == "10si"
     assert NBM_MODEL.normalize_var_id("10si") == "10si"
