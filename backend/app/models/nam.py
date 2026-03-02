@@ -113,7 +113,7 @@ NAM_INITIAL_FHS: tuple[int, ...] = tuple(range(0, 61))
 NAM_VARS: dict[str, VarSpec] = {
     "tmp2m": VarSpec(
         id="tmp2m",
-        name="2m Temp",
+        name="Surface Temp",
         selectors=VarSelectors(
             search=[":TMP:2 m above ground:"],
             filter_by_keys={
@@ -424,14 +424,14 @@ NAM_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
 }
 
 NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
-    "tmp2m": 0,
-    "dp2m": 1,
-    "tmp850": 2,
-    "wspd10m": 3,
-    "wgst10m": 4,
-    "precip_total": 5,
-    "snowfall_total": 6,
-    "radar_ptype": 7,
+    "radar_ptype": 0,
+    "tmp2m": 1,
+    "dp2m": 2,
+    "tmp850": 3,
+    "precip_total": 4,
+    "snowfall_total": 5,
+    "wspd10m": 6,
+    "wgst10m": 7,
 }
 
 NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
@@ -497,7 +497,7 @@ NAM_CAPABILITIES = ModelCapabilities(
         "fallback_lag_hours": 5,
     },
     ui_defaults={
-        "default_var_key": "tmp2m",
+        "default_var_key": "radar_ptype",
         "default_run": "latest",
     },
     ui_constraints={

@@ -127,7 +127,7 @@ GFS_VARS: dict[str, VarSpec] = {
     # ── Simple variables (Phase 1+) ─────────────────────────────────────────
     "tmp2m": VarSpec(
         id="tmp2m",
-        name="2m Temp",
+        name="Surface Temp",
         selectors=VarSelectors(
             search=[":TMP:2 m above ground:"],
             filter_by_keys={
@@ -446,16 +446,16 @@ GFS_DEFAULT_FH_BY_VAR_KEY: dict[str, int] = {
 }
 
 GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
-    "tmp2m": 0,
-    "dp2m": 1,
-    "tmp850": 2,
-    "refc": 3,
-    "wspd10m": 4,
-    "wgst10m": 5,
-    "precip_ptype": 6,
-    "precip_total": 7,
-    "snowfall_total": 8,
-    "qpf6h": 9,
+    "tmp2m": 1,
+    "dp2m": 2,
+    "tmp850": 3,
+    "precip_total": 4,
+    "snowfall_total": 5,
+    "wspd10m": 6,
+    "wgst10m": 7,
+    "precip_ptype": 8,
+    "refc": 9,
+    "qpf6h": 10,
 }
 
 GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {

@@ -57,6 +57,7 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert precip_ptype["derived"] is True
     assert precip_ptype["derive_strategy_id"] == "precip_ptype_blend"
     assert precip_ptype["units"] == "in/hr"
+    assert precip_ptype["order"] == 8
 
     precip_total = payload["variables"]["precip_total"]
     assert precip_total["buildable"] is True
@@ -64,21 +65,43 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert precip_total["derive_strategy_id"] == "precip_total_cumulative"
     assert precip_total["kind"] == "continuous"
     assert precip_total["constraints"]["min_fh"] == 6
+    assert precip_total["display_name"] == "Total Precip"
+    assert precip_total["order"] == 4
 
     tmp850 = payload["variables"]["tmp850"]
     assert tmp850["buildable"] is True
     assert tmp850["derived"] is False
     assert tmp850["units"] == "C"
+    assert tmp850["display_name"] == "850mb Temp"
+    assert tmp850["order"] == 3
 
     dp2m = payload["variables"]["dp2m"]
     assert dp2m["buildable"] is True
     assert dp2m["derived"] is False
     assert dp2m["units"] == "F"
+    assert dp2m["display_name"] == "Surface Dew Point"
+    assert dp2m["order"] == 2
+
+    tmp2m = payload["variables"]["tmp2m"]
+    assert tmp2m["buildable"] is True
+    assert tmp2m["derived"] is False
+    assert tmp2m["units"] == "F"
+    assert tmp2m["display_name"] == "Surface Temp"
+    assert tmp2m["order"] == 1
 
     wgst10m = payload["variables"]["wgst10m"]
     assert wgst10m["buildable"] is True
     assert wgst10m["derived"] is False
     assert wgst10m["units"] == "mph"
+    assert wgst10m["display_name"] == "10m Wind Gust"
+    assert wgst10m["order"] == 7
+
+    wspd10m = payload["variables"]["wspd10m"]
+    assert wspd10m["buildable"] is True
+    assert wspd10m["derived"] is True
+    assert wspd10m["units"] == "mph"
+    assert wspd10m["display_name"] == "10m Wind Speed"
+    assert wspd10m["order"] == 6
 
     snowfall_total = payload["variables"]["snowfall_total"]
     assert snowfall_total["buildable"] is True
@@ -87,6 +110,8 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert snowfall_total["units"] == "in"
     assert snowfall_total["constraints"]["min_fh"] == 6
     assert snowfall_total["default_fh"] == 6
+    assert snowfall_total["display_name"] == "Total Snowfall (10:1)"
+    assert snowfall_total["order"] == 5
 
     qpf6h = payload["variables"]["qpf6h"]
     assert qpf6h["buildable"] is False
