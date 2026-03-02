@@ -99,15 +99,36 @@ async function fetchRunManifest(model: string, run: string, signal?: AbortSignal
   return (await r.json()) as Manifest;
 }
 
-function classifyOverall(
-  readyVars: number,
-  totalVars: number,
-  frameRatio: number
-): { label: string; tone: "good" | "warn" | "bad" | "neutral" } {
-  if (totalVars <= 0) return { label: "Unknown", tone: "neutral" };
-  if (readyVars === totalVars && frameRatio >= 0.999) return { label: "Ready", tone: "good" };
-  if (readyVars > 0 || frameRatio > 0) return { label: "Ingesting", tone: "warn" };
-  return { label: "Not ready", tone: "bad" };
+function classifyOverall(args: {
+  latestReady?: boolean;
+  readyVars?: number;
+  totalVars?: number;
+  frameRatio?: number; // 0..1
+  availableFrames?: number;
+}) {
+  const { latestReady, readyVars, totalVars, frameRatio, availableFrames } = args;
+
+  // If backend says latest run ready, that's the state. Don't block on var totals.
+  if (latestReady === true) return { label: "Ready", tone: "good" as const };
+
+  if (Number.isFinite(frameRatio) && (frameRatio as number) >= 0.999) {
+  return { label: "Ready", tone: "good" as const };
+}
+
+  const tv = Number.isFinite(totalVars) ? (totalVars as number) : 0;
+  const rv = Number.isFinite(readyVars) ? (readyVars as number) : 0;
+  const fr = Number.isFinite(frameRatio) ? (frameRatio as number) : 0;
+
+  // If we have *some* evidence of progress, call it ingesting.
+  if (rv > 0) return { label: "Ingesting", tone: "warn" as const };
+  if (fr > 0) return { label: "Ingesting", tone: "warn" as const };
+  if ((availableFrames ?? 0) > 0) return { label: "Ingesting", tone: "warn" as const };
+
+  // If nothing is available and not ready, it's not ready (not unknown).
+  if (tv > 0) return { label: "Not ready", tone: "bad" as const };
+
+  // Truly unknown only if we cannot infer anything.
+  return { label: "Unknown", tone: "neutral" as const };
 }
 
 export default function Status() {
@@ -198,7 +219,18 @@ export default function Status() {
 
       const totalVars = Number.isFinite(readyVars) ? Math.max(readyVars ?? 0, varKeys.length) : varKeys.length;
 
-      const state = classifyOverall(readyVars ?? 0, totalVars || 0, frameRatio);
+      const state = classifyOverall({
+      latestReady,
+      readyVars,
+      totalVars: totalVars || undefined,
+      frameRatio,
+      availableFrames:
+      expectedTotal > 0
+        ? availableTotal
+        : Number.isFinite(readyFrames)
+        ? readyFrames
+        : 0,
+      });
 
       return {
         modelId,
