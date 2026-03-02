@@ -110,7 +110,7 @@ export default function Home() {
           <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
             Advanced weather models,
             <br />
-            simplified.
+            <span className="text-[#415a4f]">simplified.</span>
           </h1>
 
           <p className="mt-4 text-base md:text-lg text-white/70">
