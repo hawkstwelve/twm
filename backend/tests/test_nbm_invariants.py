@@ -121,8 +121,16 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
 
     apcp_component_spec = NBM_MODEL.get_var("apcp_step")
     assert apcp_component_spec is not None
-    assert apcp_component_spec.selectors.search == [":APCP:surface:"]
+    assert apcp_component_spec.selectors.search == [
+        ":APCP:surface:[0-9]+-[0-9]+ hour acc fcst:$",
+        ":APCP:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=1 hour\\):$",
+    ]
     assert apcp_component_spec.selectors.filter_by_keys["shortName"] == "apcp"
+
+    precip_spec = NBM_MODEL.get_var("precip_total")
+    assert precip_spec is not None
+    assert precip_spec.selectors.hints["apcp_component"] == "apcp_step"
+    assert precip_spec.selectors.hints["step_hours"] == "1"
 
     asnow_component_spec = NBM_MODEL.get_var("asnow_step")
     assert asnow_component_spec is not None

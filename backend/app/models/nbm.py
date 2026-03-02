@@ -160,7 +160,10 @@ NBM_VARS: dict[str, VarSpec] = {
         id="apcp_step",
         name="APCP Step",
         selectors=VarSelectors(
-            search=[":APCP:surface:"],
+            search=[
+                ":APCP:surface:[0-9]+-[0-9]+ hour acc fcst:$",
+                ":APCP:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=1 hour\\):$",
+            ],
             filter_by_keys={
                 "shortName": "apcp",
                 "typeOfLevel": "surface",
@@ -197,7 +200,7 @@ NBM_VARS: dict[str, VarSpec] = {
         selectors=VarSelectors(
             hints={
                 "apcp_component": "apcp_step",
-                "step_hours": "6",
+                "step_hours": "1",
             },
         ),
         derived=True,
