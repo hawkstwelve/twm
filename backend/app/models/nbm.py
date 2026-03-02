@@ -201,6 +201,8 @@ NBM_VARS: dict[str, VarSpec] = {
             hints={
                 "apcp_component": "apcp_step",
                 "step_hours": "1",
+                "step_transition_fh": "36",
+                "step_hours_after_fh": "3",
             },
         ),
         derived=True,
@@ -215,6 +217,8 @@ NBM_VARS: dict[str, VarSpec] = {
             hints={
                 "apcp_component": "asnow_step",
                 "step_hours": "1",
+                "step_transition_fh": "36",
+                "step_hours_after_fh": "3",
             }
         ),
         derived=True,

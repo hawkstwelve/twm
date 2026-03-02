@@ -380,17 +380,44 @@ def _derive_precip_total_cumulative(
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     apcp_component = hints.get("apcp_component", "apcp_step")
     step_hours_raw = hints.get("step_hours", "6")
+    step_transition_fh_raw = hints.get("step_transition_fh")
+    step_hours_after_fh_raw = hints.get("step_hours_after_fh")
     try:
         step_hours = max(1, int(step_hours_raw))
     except (TypeError, ValueError):
         step_hours = 6
+    try:
+        step_transition_fh = int(step_transition_fh_raw) if step_transition_fh_raw is not None else None
+    except (TypeError, ValueError):
+        step_transition_fh = None
+    try:
+        step_hours_after_fh = int(step_hours_after_fh_raw) if step_hours_after_fh_raw is not None else None
+    except (TypeError, ValueError):
+        step_hours_after_fh = None
+    if step_hours_after_fh is not None:
+        step_hours_after_fh = max(1, step_hours_after_fh)
 
     cumulative_kgm2: np.ndarray | None = None
     valid_mask: np.ndarray | None = None
     src_crs: rasterio.crs.CRS | None = None
     src_transform: rasterio.transform.Affine | None = None
 
-    for step_fh in range(step_hours, fh + 1, step_hours):
+    step_fhs: list[int]
+    if (
+        step_transition_fh is not None
+        and step_transition_fh > 0
+        and step_hours_after_fh is not None
+        and step_hours_after_fh > 0
+    ):
+        before_end = min(fh, step_transition_fh)
+        step_fhs = list(range(step_hours, before_end + 1, step_hours))
+        if fh > step_transition_fh:
+            after_start = step_transition_fh + step_hours_after_fh
+            step_fhs.extend(range(after_start, fh + 1, step_hours_after_fh))
+    else:
+        step_fhs = list(range(step_hours, fh + 1, step_hours))
+
+    for step_fh in step_fhs:
         step_data, step_crs, step_transform = _fetch_component(
             model_id=model_id,
             product=product,
