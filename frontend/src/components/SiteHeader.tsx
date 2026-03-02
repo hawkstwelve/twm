@@ -81,8 +81,8 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
             : "mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8"
         }
       >
-        <NavLink to="/" className="font-semibold tracking-tight text-white">
-          <img src="/assets/logo.png" alt="The Weather Models" className="h-12 w-auto" />
+        <NavLink to="/" className="flex items-center font-semibold tracking-tight text-white">
+          <img src="/assets/logo.png" alt="The Weather Models" className="h-auto w-48" />
         </NavLink>
 
         {isMarketingVariant ? (

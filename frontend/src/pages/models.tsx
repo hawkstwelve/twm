@@ -102,7 +102,7 @@ export default function Models() {
         modelId: "nam",
         domain: "CONUS",
         update: "Every 6 hours",
-        resolution: "~12 km",
+        resolution: "~5 km",
         forecast: "0–60h",
         notes: "Mesoscale (synoptic + regional)",
       },
@@ -261,7 +261,7 @@ export default function Models() {
             <div className="grid grid-cols-3 gap-3">
               <Pill>CONUS</Pill>
               <Pill>Every 6 hours</Pill>
-              <Pill>~12 km</Pill>
+              <Pill>~5 km</Pill>
             </div>
 
             <div className="mt-4 space-y-3 text-sm text-white/75">
