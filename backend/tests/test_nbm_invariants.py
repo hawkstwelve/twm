@@ -119,7 +119,7 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     assert snowfall_spec.selectors.hints["apcp_component"] == "asnow_step"
     assert snowfall_spec.selectors.hints["step_hours"] == "1"
     assert snowfall_spec.selectors.hints["step_transition_fh"] == "36"
-    assert snowfall_spec.selectors.hints["step_hours_after_fh"] == "3"
+    assert snowfall_spec.selectors.hints["step_hours_after_fh"] == "6"
 
     apcp_component_spec = NBM_MODEL.get_var("apcp_step")
     assert apcp_component_spec is not None
