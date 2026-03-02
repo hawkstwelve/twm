@@ -138,9 +138,9 @@ export default function Home() {
 
         {/* Feature pills */}
         <div className="mt-10 grid gap-4 md:grid-cols-3">
-          <GlassCard title="Smooth animation" desc="Buffer frames to avoid stutter and keep loops clean." />
-          <GlassCard title="Model catalog" desc="Know cadence, resolution, and coverage at a glance." />
-          <GlassCard title="Variable library" desc="Units, notes, and examples for each product." />
+          <GlassCard title="The Weather Forums Integration" desc="Login with your Weather Forums account to access personalized features." />
+          <GlassCard title="Model Catalog" desc="Know cadence, resolution, and coverage at a glance." />
+          <GlassCard title="Variable Library" desc="Units, notes, and examples for each product." />
         </div>
       </section>
 
