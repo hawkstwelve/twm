@@ -321,7 +321,7 @@ NBM_CAPABILITIES = ModelCapabilities(
         "probe_var_key": "tmp2m",
         "probe_enabled": True,
         "probe_attempts": 4,
-        "cycle_cadence_hours": 6,
+        "cycle_cadence_hours": 3,
         "fallback_lag_hours": 5,
     },
     ui_defaults={
