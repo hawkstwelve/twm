@@ -117,7 +117,7 @@ export default function Home() {
 
           <p className="mt-4 text-base md:text-lg text-white/70">
             Access the latest high-resolution weather models in an easy-to-use interactive map viewer.
-            Smooth frame animation, fast scrubbing, and clean legends.
+            Professional-grade performance in a streamlined experience.
           </p>
 
           <div className="mt-7 flex flex-wrap gap-3">
