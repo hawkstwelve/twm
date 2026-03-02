@@ -161,8 +161,9 @@ NBM_VARS: dict[str, VarSpec] = {
         name="APCP Step",
         selectors=VarSelectors(
             search=[
+                ":APCP:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=[0-9]+ hour\\),missing=0:$",
+                ":APCP:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=[0-9]+ hour\\):$",
                 ":APCP:surface:[0-9]+-[0-9]+ hour acc fcst:$",
-                ":APCP:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=1 hour\\):$",
             ],
             filter_by_keys={
                 "shortName": "apcp",
@@ -180,8 +181,9 @@ NBM_VARS: dict[str, VarSpec] = {
         name="ASNOW Step",
         selectors=VarSelectors(
             search=[
+                ":ASNOW:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=[0-9]+ hour\\),missing=0:$",
+                ":ASNOW:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=[0-9]+ hour\\):$",
                 ":ASNOW:surface:[0-9]+-[0-9]+ hour acc fcst:$",
-                ":ASNOW:surface:[0-9]+-[0-9]+ hour acc@\\(fcst,dt=1 hour\\):$",
             ],
             filter_by_keys={
                 "shortName": "asnow",
