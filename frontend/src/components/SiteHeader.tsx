@@ -77,12 +77,12 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
       <div
         className={
           isAppVariant
-            ? "flex h-14 items-center gap-3 px-4 md:px-5"
-            : "mx-auto flex h-16 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8"
+            ? "flex h-16 items-center gap-3 px-4 md:px-5"
+            : "mx-auto flex h-20 max-w-6xl items-center gap-3 md:gap-6 px-5 md:px-8"
         }
       >
         <NavLink to="/" className="flex items-center font-semibold tracking-tight text-white">
-          <img src="/assets/logo.png" alt="The Weather Models" className="h-10 w-auto" />
+          <img src="/assets/logo.png" alt="The Weather Models" className="h-16 w-auto" />
         </NavLink>
 
         {isMarketingVariant ? (
