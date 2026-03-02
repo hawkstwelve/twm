@@ -76,6 +76,10 @@ TARGET_GRID_METERS: dict[str, dict[str, float]] = {
         "conus": 5_000.0,
         "pnw": 5_000.0,
     },
+    "nbm": {
+        "conus": 13_000.0,
+        "pnw": 13_000.0,
+    },
     "ecmwf": {
         "conus": 9_000.0,
     },

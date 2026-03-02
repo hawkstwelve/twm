@@ -25,6 +25,12 @@ try:
 except ImportError as exc:
     logger.warning("NAM plugin unavailable (missing dependency): %s", exc)
 
+try:
+    from .nbm import NBM_MODEL
+    MODEL_REGISTRY[NBM_MODEL.id] = NBM_MODEL
+except ImportError as exc:
+    logger.warning("NBM plugin unavailable (missing dependency): %s", exc)
+
 
 def get_model(model_id: str) -> ModelPlugin:
     model = MODEL_REGISTRY.get(model_id)
