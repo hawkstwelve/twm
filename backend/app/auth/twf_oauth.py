@@ -215,6 +215,9 @@ async def twf_me(access_token: str) -> dict[str, Any]:
                         request=r.request,
                         response=r,
                     )
+                import logging
+                log = logging.getLogger("twm.twf")
+                log.warning("TWF_ME_STATUS=%s URL=%s BODY=%s", r.status_code, url, (r.text or "")[:8000])
                 return r.json()
             except Exception as e:
                 last_exc = e

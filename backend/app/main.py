@@ -185,9 +185,10 @@ async def twf_callback(
     display_name = "Linked"
     try:
         me = await twf_oauth.twf_me(access)
+        import json
         import logging
         log = logging.getLogger("twm.twf")
-        log.warning("TWF_ME_STATUS=%s URL=%s BODY=%s", r.status_code, url, (r.text or "")[:8000])
+        log.warning("TWF_ME_RESPONSE=%s", json.dumps(me)[:8000])
         member_id_raw = me.get("id") or (me.get("member", {}) or {}).get("id")
         name_raw = me.get("name") or (me.get("member", {}) or {}).get("name") or me.get("formattedName")
         if member_id_raw is not None:
