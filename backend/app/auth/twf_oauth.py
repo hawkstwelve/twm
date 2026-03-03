@@ -53,6 +53,7 @@ AUTHORIZE_ENDPOINT = f"{TWF_BASE.rstrip('/')}/oauth/authorize/"
 TOKEN_ENDPOINT = f"{TWF_BASE.rstrip('/')}/oauth/token/"
 API_ME_ENDPOINT = os.getenv("TWF_ME_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/core/me").strip()
 API_CREATE_TOPIC = os.getenv("TWF_TOPICS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/topics").strip()
+API_LIST_TOPICS = os.getenv("TWF_LIST_TOPICS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/topics").strip()
 API_LIST_FORUMS = os.getenv("TWF_FORUMS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/forums").strip()
 API_CREATE_POST = os.getenv("TWF_POSTS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/posts").strip()
 
@@ -467,9 +468,9 @@ async def list_topics(sess: TwfSession, forum_id: int, pinned: bool, per_page: i
     sess = await ensure_fresh_tokens(sess)
     headers = _auth_headers(sess.access_token)
 
-    # Reuse the same base endpoint + slash variants as topic creation.
-    base = API_CREATE_TOPIC
+    base = API_LIST_TOPICS
     urls = [base, base.rstrip("/"), base.rstrip("/") + "/"]
+    # IPS query parameter names can vary by install; these are the expected/default names.
     params = {
         "forum": str(forum_id),
         "pinned": "1" if pinned else "0",
@@ -477,6 +478,13 @@ async def list_topics(sess: TwfSession, forum_id: int, pinned: bool, per_page: i
         "sortDir": "desc",
         "perPage": str(per_page),
     }
+    logger.debug(
+        "TWF list_topics request forum_id=%s pinned=%s per_page=%s base_url=%s",
+        forum_id,
+        pinned,
+        per_page,
+        urls[0],
+    )
 
     return await _request_json_with_variants(
         method="GET",
