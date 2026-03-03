@@ -153,10 +153,18 @@ def _parse_ips_error_response(response: httpx.Response) -> tuple[str | None, str
         payload = response.json()
     except Exception:
         return None, None, upstream_body
+
     if not isinstance(payload, dict):
         return None, None, upstream_body
-    error_code = payload.get("errorCode")
-    error_message = payload.get("errorMessage")
+
+    # IPS commonly returns {errorCode, errorMessage} but some responses may nest under {error:{...}}
+    src: Any = payload
+    if isinstance(payload.get("error"), dict):
+        src = payload.get("error")
+
+    error_code = src.get("errorCode") if isinstance(src, dict) else None
+    error_message = src.get("errorMessage") if isinstance(src, dict) else None
+
     parsed_code = str(error_code) if isinstance(error_code, str) and error_code.strip() else None
     parsed_message = str(error_message) if isinstance(error_message, str) and error_message.strip() else None
     return parsed_code, parsed_message, upstream_body
@@ -179,9 +187,10 @@ def _map_upstream_error(upstream_status: int | None, error_message: str | None) 
 
 def _log_upstream_error(err: TwfUpstreamError) -> None:
     logger.warning(
-        "TWF upstream error code=%s upstream_status=%s upstream_message=%r",
+        "TWF upstream error code=%s upstream_status=%s upstream_code=%s upstream_message=%r",
         err.code,
         err.upstream_status,
+        err.upstream_code,
         err.upstream_message,
     )
 
@@ -204,11 +213,11 @@ def _raise_mapped_response_error(response: httpx.Response) -> NoReturn:
 
 
 def _raise_mapped_request_error(exc: httpx.RequestError, upstream_message: str | None = None) -> NoReturn:
-    status_code, code, message = _map_upstream_error(None, upstream_message)
+    # Network / transport failures: treat as upstream unavailable.
     err = TwfUpstreamError(
-        status_code=status_code,
-        code=code,
-        message=message,
+        status_code=502,
+        code="IPS_UPSTREAM_ERROR",
+        message="Forum API temporarily unavailable.",
         upstream_status=None,
         upstream_code=None,
         upstream_message=upstream_message or str(exc),
@@ -232,7 +241,11 @@ async def _request_json_with_variants(
                 return await _request_json(client, method, url, headers=headers, data=data)
             except TwfUpstreamError as exc:
                 last_error = exc
-                continue
+                # Only retry on 404 (slash/no-slash variant) or true transient upstream failures.
+                # For semantic 4xx (NO_TOPIC/UNAUTHORIZED/etc.), retrying other variants is noise.
+                if exc.upstream_status in (404, None) or (exc.upstream_status is not None and exc.upstream_status >= 500):
+                    continue
+                raise
 
     if last_error is not None:
         raise last_error
@@ -255,10 +268,6 @@ async def _request_json(client: httpx.AsyncClient, method: str, url: str, **kwar
             r = await client.post(url, **kwargs)
         else:
             raise RuntimeError(f"Unsupported method: {method}")
-    except httpx.HTTPStatusError as exc:
-        if exc.response is not None:
-            _raise_mapped_response_error(exc.response)
-        _raise_mapped_request_error(httpx.RequestError(str(exc), request=exc.request))
     except httpx.RequestError as exc:
         _raise_mapped_request_error(exc)
 
