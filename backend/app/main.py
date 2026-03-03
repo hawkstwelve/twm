@@ -8,6 +8,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import tempfile
 import threading
 import time
@@ -19,14 +20,17 @@ import numpy as np
 import rasterio
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from PIL import Image
 from pyproj import Transformer
 from rasterio.windows import Window
+from starlette.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
 
 from .config.regions import REGION_PRESETS
 from .models.registry import list_model_capabilities
 from .services.render_resampling import rasterio_resampling_for_loop
+from backend.app.auth import twf_oauth
 
 logger = logging.getLogger(__name__)
 
@@ -101,12 +105,175 @@ def _maybe_304(request: Request, *, etag: str, cache_control: str) -> Response |
 
 app = FastAPI(title="TWF API", version="4.0.0")
 
+origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["GET"],
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
+
+def _require_twf_session(request: Request) -> twf_oauth.TwfSession:
+    """Load the linked The Weather Forums OAuth session for the current browser session.
+
+    Uses the HttpOnly session cookie set by /auth/twf/callback and loads tokens from server-side storage.
+    """
+    sid = request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)
+    if not sid:
+        raise HTTPException(status_code=401, detail="Not logged in")
+    sess = twf_oauth.get_session(sid)
+    if not sess:
+        raise HTTPException(status_code=401, detail="Session not found")
+    return sess
+
+# ----------------------------
+# TWF OAuth + Share Routes
+# ----------------------------
+
+# NOTE: add these imports near your other imports if you don't already have them:
+# from pydantic import BaseModel, Field
+
+
+@app.get("/auth/twf/start")
+async def twf_start() -> RedirectResponse:
+    state = secrets.token_urlsafe(24)
+    verifier, challenge = twf_oauth.pkce_pair()
+    url = twf_oauth.build_authorize_url(state, challenge)
+
+    resp = RedirectResponse(url=url, status_code=302)
+    # Store only state + PKCE verifier (short-lived)
+    resp.set_cookie(
+        key=twf_oauth.OAUTH_COOKIE_NAME,
+        value=twf_oauth.pack_oauth_cookie(state, verifier),
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=10 * 60,
+        path="/",
+    )
+    return resp
+
+
+@app.get("/auth/twf/callback")
+async def twf_callback(
+    request: Request,
+    code: str | None = None,
+    state: str | None = None,
+) -> RedirectResponse:
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code/state")
+
+    cookie_val = request.cookies.get(twf_oauth.OAUTH_COOKIE_NAME)
+    if not cookie_val:
+        raise HTTPException(status_code=400, detail="Missing oauth cookie")
+
+    packed = twf_oauth.unpack_oauth_cookie(cookie_val)
+    if packed.get("state") != state:
+        raise HTTPException(status_code=400, detail="State mismatch")
+
+    tok = await twf_oauth.exchange_code_for_token(code, packed["verifier"])
+    access = tok.get("access_token")
+    refresh = tok.get("refresh_token")
+    if not isinstance(access, str) or not access:
+        raise HTTPException(status_code=500, detail="No access_token returned")
+    if not isinstance(refresh, str) or not refresh:
+        raise HTTPException(status_code=500, detail="No refresh_token returned")
+
+    expires_in = int(tok.get("expires_in", 3600))
+    me = await twf_oauth.twf_me(access)
+
+    # Invision payload shapes vary; handle common cases
+    member_id_raw = me.get("id") or (me.get("member", {}) or {}).get("id")
+    name_raw = me.get("name") or (me.get("member", {}) or {}).get("name") or me.get("formattedName")
+
+    try:
+        member_id = int(member_id_raw)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Unexpected /core/me payload: missing id ({exc})") from exc
+
+    display_name = str(name_raw) if isinstance(name_raw, str) and name_raw else "User"
+
+    sid = twf_oauth.new_session_id()
+    twf_oauth.upsert_session(
+        twf_oauth.TwfSession(
+            session_id=sid,
+            member_id=member_id,
+            display_name=display_name,
+            access_token=access,
+            refresh_token=refresh,
+            expires_at=int(time.time()) + expires_in,
+        )
+    )
+
+    resp = RedirectResponse(url=f"{twf_oauth.FRONTEND_RETURN}?twf=linked", status_code=302)
+
+    # App session cookie (separate from forum cookies)
+    resp.set_cookie(
+        key=twf_oauth.SESSION_COOKIE_NAME,
+        value=sid,
+        httponly=True,
+        secure=True,
+        samesite="none",
+        max_age=60 * 60 * 24 * 30,
+        path="/",
+    )
+
+    # Clear short-lived OAuth temp cookie
+    resp.delete_cookie(key=twf_oauth.OAUTH_COOKIE_NAME, path="/")
+    return resp
+
+
+@app.get("/auth/twf/status")
+async def twf_status(request: Request) -> dict[str, Any]:
+    sid = request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)
+    if not sid:
+        return {"linked": False}
+
+    sess = twf_oauth.get_session(sid)
+    if not sess:
+        return {"linked": False}
+
+    return {
+        "linked": True,
+        "member_id": sess.member_id,
+        "display_name": sess.display_name,
+    }
+
+
+@app.post("/auth/twf/disconnect")
+async def twf_disconnect(request: Request) -> JSONResponse:
+    sid = request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)
+
+    resp = JSONResponse({"ok": True})
+    if sid:
+        twf_oauth.delete_session(sid)
+
+    resp.delete_cookie(key=twf_oauth.SESSION_COOKIE_NAME, path="/")
+    return resp
+
+
+@app.get("/twf/forums")
+async def twf_forums(request: Request) -> dict[str, Any]:
+    sess = _require_twf_session(request)
+    return await twf_oauth.list_forums(sess)
+
+
+class ShareTopicIn(BaseModel):
+    forum_id: int = Field(..., ge=1)
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str = Field(..., min_length=1)
+
+
+@app.post("/twf/share/topic")
+async def twf_share_topic(request: Request, body: ShareTopicIn) -> dict[str, Any]:
+    sess = _require_twf_session(request)
+    return await twf_oauth.create_topic(
+        sess,
+        forum_id=body.forum_id,
+        title=body.title,
+        content=body.content,
+    )
 
 _wgs84_to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
 
