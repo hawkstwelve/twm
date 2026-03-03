@@ -6,3 +6,5 @@ rio-tiler
 herbie-data
 pyproj
 Pillow
+httpx
+cryptography
