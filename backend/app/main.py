@@ -15,6 +15,7 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,7 @@ _TWF_ERROR_PATHS = {
     "/auth/twf/status",
     "/auth/twf/disconnect",
     "/twf/forums",
+    "/twf/topics",
     "/twf/share/topic",
     "/twf/share/post",
 }
@@ -597,6 +599,150 @@ async def twf_disconnect(request: Request) -> JSONResponse:
 async def twf_forums(request: Request) -> dict[str, Any]:
     sess = _require_twf_session(request)
     return await twf_oauth.list_forums(sess)
+
+
+def _extract_topics(payload: dict[str, Any]) -> list[Any]:
+    results = payload.get("results")
+    if isinstance(results, list):
+        return results
+    topics = payload.get("topics")
+    if isinstance(topics, list):
+        return topics
+    items = payload.get("items")
+    if isinstance(items, list):
+        return items
+    return []
+
+
+def _is_truthy_topic_flag(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return int(value) != 0
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        return normalized in {"1", "true", "yes", "on"}
+    return False
+
+
+def _normalize_topic(raw_topic: Any, *, force_pinned: bool) -> dict[str, Any] | None:
+    if not isinstance(raw_topic, dict):
+        return None
+
+    raw_id = raw_topic.get("id")
+    try:
+        topic_id = int(raw_id)
+    except (TypeError, ValueError):
+        return None
+    if topic_id <= 0:
+        return None
+
+    raw_title = raw_topic.get("title")
+    title = str(raw_title).strip() if raw_title is not None else ""
+    raw_url = raw_topic.get("url")
+    url = str(raw_url).strip() if raw_url is not None else ""
+    if not title or not url:
+        return None
+
+    pinned = force_pinned or _is_truthy_topic_flag(raw_topic.get("pinned"))
+    normalized: dict[str, Any] = {
+        "id": topic_id,
+        "title": title,
+        "url": url,
+        "pinned": pinned,
+    }
+
+    updated = raw_topic.get("updated")
+    if updated is not None:
+        normalized["updated"] = str(updated) if not isinstance(updated, str) else updated
+
+    starter: str | None = None
+    raw_starter = raw_topic.get("starter")
+    if isinstance(raw_starter, dict):
+        for key in ("name", "display_name", "displayName"):
+            value = raw_starter.get(key)
+            if isinstance(value, str) and value.strip():
+                starter = value.strip()
+                break
+    if starter is None:
+        raw_author = raw_topic.get("author")
+        if isinstance(raw_author, dict):
+            for key in ("name", "display_name", "displayName"):
+                value = raw_author.get(key)
+                if isinstance(value, str) and value.strip():
+                    starter = value.strip()
+                    break
+    if starter is not None:
+        normalized["starter"] = starter
+
+    return normalized
+
+
+def _topic_updated_sort_key(updated: Any) -> tuple[int, float, str]:
+    if isinstance(updated, (int, float)):
+        return (2, float(updated), "")
+    if isinstance(updated, str):
+        text = updated.strip()
+        if not text:
+            return (0, 0.0, "")
+        iso_value = text.replace("Z", "+00:00")
+        try:
+            parsed = datetime.fromisoformat(iso_value)
+            return (2, parsed.timestamp(), "")
+        except ValueError:
+            pass
+        try:
+            return (2, float(text), "")
+        except ValueError:
+            return (1, 0.0, text.lower())
+    return (0, 0.0, "")
+
+
+@app.get("/twf/topics")
+async def twf_topics(
+    request: Request,
+    forum_id: int = Query(..., ge=1),
+    limit: int = Query(15, ge=1, le=25),
+) -> dict[str, Any]:
+    sess = _require_twf_session(request)
+
+    pinned_payload = await twf_oauth.list_topics(sess, forum_id=forum_id, pinned=True, per_page=min(5, limit))
+    regular_payload = await twf_oauth.list_topics(sess, forum_id=forum_id, pinned=False, per_page=limit)
+
+    merged_by_id: dict[int, dict[str, Any]] = {}
+    for raw_topic in _extract_topics(pinned_payload):
+        normalized = _normalize_topic(raw_topic, force_pinned=True)
+        if normalized is None:
+            continue
+        merged_by_id[normalized["id"]] = normalized
+
+    for raw_topic in _extract_topics(regular_payload):
+        normalized = _normalize_topic(raw_topic, force_pinned=False)
+        if normalized is None:
+            continue
+        topic_id = normalized["id"]
+        existing = merged_by_id.get(topic_id)
+        if existing is None:
+            merged_by_id[topic_id] = normalized
+            continue
+        if not existing.get("pinned", False) and normalized.get("pinned", False):
+            merged_by_id[topic_id] = normalized
+            continue
+        if "updated" not in existing and "updated" in normalized:
+            existing["updated"] = normalized["updated"]
+        if "starter" not in existing and "starter" in normalized:
+            existing["starter"] = normalized["starter"]
+
+    results = list(merged_by_id.values())
+    results.sort(
+        key=lambda item: (
+            1 if item.get("pinned") else 0,
+            *_topic_updated_sort_key(item.get("updated")),
+            int(item.get("id") or 0),
+        ),
+        reverse=True,
+    )
+    return {"forum_id": forum_id, "results": results}
 
 
 class ShareTopicIn(BaseModel):

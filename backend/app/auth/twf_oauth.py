@@ -218,12 +218,13 @@ async def _request_json_with_variants(
     headers: dict[str, str],
     timeout: float,
     data: dict[str, str] | None = None,
+    params: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     last_error: TwfUpstreamError | None = None
     async with httpx.AsyncClient(timeout=timeout) as client:
         for url in urls:
             try:
-                return await _request_json(client, method, url, headers=headers, data=data)
+                return await _request_json(client, method, url, headers=headers, data=data, params=params)
             except TwfUpstreamError as exc:
                 last_error = exc
                 # Only retry on 404 (slash/no-slash variant) or true transient upstream failures.
@@ -459,6 +460,30 @@ async def list_forums(sess: TwfSession) -> dict[str, Any]:
         urls=urls,
         headers=headers,
         timeout=20,
+    )
+
+
+async def list_topics(sess: TwfSession, forum_id: int, pinned: bool, per_page: int) -> dict[str, Any]:
+    sess = await ensure_fresh_tokens(sess)
+    headers = _auth_headers(sess.access_token)
+
+    # Reuse the same base endpoint + slash variants as topic creation.
+    base = API_CREATE_TOPIC
+    urls = [base, base.rstrip("/"), base.rstrip("/") + "/"]
+    params = {
+        "forum": str(forum_id),
+        "pinned": "1" if pinned else "0",
+        "sortBy": "updated",
+        "sortDir": "desc",
+        "perPage": str(per_page),
+    }
+
+    return await _request_json_with_variants(
+        method="GET",
+        urls=urls,
+        headers=headers,
+        timeout=20,
+        params=params,
     )
 
 

@@ -5,6 +5,7 @@ import { AlertCircle, Moon, Sun } from "lucide-react";
 import { BottomForecastControls } from "@/components/bottom-forecast-controls";
 import { MapCanvas, type BasemapMode } from "@/components/map-canvas";
 import { type LegendPayload, MapLegend } from "@/components/map-legend";
+import { TwfShareModal, type SharePayload } from "@/components/twf-share-modal";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
   buildContourUrl,
@@ -656,6 +657,7 @@ export default function App() {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [settledTileUrl, setSettledTileUrl] = useState<string | null>(null);
   const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
   const [frameStatusMessage, setFrameStatusMessage] = useState<string | null>(null);
@@ -2941,6 +2943,17 @@ export default function App() {
   const resolvedForecastHourPermalink = Number.isFinite(forecastHour)
     ? forecastHour
     : pendingInitialForecastHourRef.current;
+  const sharePayload = useMemo<SharePayload>(() => {
+    const runForSummary = run === "latest" ? (latestRunId ?? "latest") : run;
+    const mapView = mapViewRef.current;
+    const lat = Number.isFinite(mapView.lat) ? mapView.lat.toFixed(2) : "n/a";
+    const lon = Number.isFinite(mapView.lon) ? mapView.lon.toFixed(2) : "n/a";
+    const zoom = Number.isFinite(mapView.z) ? mapView.z.toFixed(1) : "n/a";
+    const fh = Number.isFinite(forecastHour) ? String(forecastHour) : "n/a";
+    const summary = `${model || "model"} • ${runForSummary || "latest"} • ${variable || "var"} • FH ${fh} • ${region || "region"} • ${lat},${lon} • z${zoom} • loop ${resolvedLoopPermalink ? "on" : "off"}`;
+    const permalink = typeof window !== "undefined" ? window.location.href : "";
+    return { permalink, summary };
+  }, [model, run, latestRunId, variable, forecastHour, region, resolvedLoopPermalink, mapViewTick]);
 
   const handleCopyLink = useCallback(() => {
     if (typeof window === "undefined") {
@@ -2958,6 +2971,10 @@ export default function App() {
       return;
     }
   }, [showTransientFrameStatus]);
+
+  const handleOpenShareModal = useCallback(() => {
+    setIsShareModalOpen(true);
+  }, []);
 
   useEffect(() => {
     if (!permalinkHydrated || typeof window === "undefined") {
@@ -3023,6 +3040,7 @@ export default function App() {
         variables={variables}
         disabled={loading || models.length === 0}
         onCopyLink={handleCopyLink}
+        onPostToTwf={handleOpenShareModal}
       />
 
       <div className="relative flex-1 min-h-0 overflow-hidden">
@@ -3144,6 +3162,12 @@ export default function App() {
           transientStatus={frameStatusMessage}
         />
       </div>
+
+      <TwfShareModal
+        open={isShareModalOpen}
+        onClose={() => setIsShareModalOpen(false)}
+        payload={sharePayload}
+      />
     </div>
   );
 }
