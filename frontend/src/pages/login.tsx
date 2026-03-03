@@ -301,9 +301,9 @@ export default function Login() {
       <section className="pt-6 md:pt-10">
         <div className="max-w-2xl">
           <h1 className="text-4xl md:text-5xl font-semibold tracking-tight leading-[1.04]">
-            The Weather Forums
+            The Weather Forums,
             <br />
-            <span className="text-[#577361]">account link</span>
+            <span className="text-[#577361]">Integrated.</span>
           </h1>
           <p className="mt-4 text-base md:text-lg text-white/70">
             Link your Weather Forums account to share maps and post directly from The Weather Models.
