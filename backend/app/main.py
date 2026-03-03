@@ -187,8 +187,7 @@ async def twf_callback(
         me = await twf_oauth.twf_me(access)
         import json
         import logging
-        log = logging.getLogger("twm.twf")
-        log.warning("TWF_ME_RESPONSE=%s", json.dumps(me)[:8000])
+        logging.getLogger("uvicorn.error").error("TWF_ME=%s", json.dumps(me)[:8000])
         member_id_raw = me.get("id") or (me.get("member", {}) or {}).get("id")
         name_raw = me.get("name") or (me.get("member", {}) or {}).get("name") or me.get("formattedName")
         if member_id_raw is not None:
