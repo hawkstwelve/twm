@@ -40,8 +40,7 @@ FERNET = Fernet(TOKEN_ENC_KEY.encode("utf-8"))
 
 AUTHORIZE_ENDPOINT = f"{TWF_BASE.rstrip('/')}/oauth/authorize/"
 TOKEN_ENDPOINT = f"{TWF_BASE.rstrip('/')}/oauth/token/"
-API_ME_ENDPOINT = os.getenv("TWF_ME_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/core/me/")
-# IPS REST routing differs by install (friendly vs index.php). Your site uses index.php routing.
+API_ME_ENDPOINT = os.getenv("TWF_ME_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/core/me").strip()
 API_CREATE_TOPIC = os.getenv("TWF_TOPICS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/topics").strip()
 API_LIST_FORUMS = os.getenv("TWF_FORUMS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/forums").strip()
 
