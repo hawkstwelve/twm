@@ -11,6 +11,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, NoReturn, Optional, Tuple
+from urllib.parse import urlencode
 
 import httpx
 from cryptography.fernet import Fernet
@@ -224,8 +225,17 @@ async def _request_json_with_variants(
     last_error: TwfUpstreamError | None = None
     async with httpx.AsyncClient(timeout=timeout) as client:
         for url in urls:
+            request_url = url
+            request_kwargs: dict[str, Any] = {"headers": headers, "data": data}
+            if params is not None:
+                if "index.php?/" in url:
+                    # IPS legacy endpoints can mis-handle http client params= on index.php?/ routes;
+                    # inline query params after '?&' for compatibility.
+                    request_url = f"{url}?&{urlencode(params)}"
+                else:
+                    request_kwargs["params"] = params
             try:
-                return await _request_json(client, method, url, headers=headers, data=data, params=params)
+                return await _request_json(client, method, request_url, **request_kwargs)
             except TwfUpstreamError as exc:
                 last_error = exc
                 # Only retry on 404 (slash/no-slash variant) or true transient upstream failures.

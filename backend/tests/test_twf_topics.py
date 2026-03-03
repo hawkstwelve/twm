@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -33,6 +34,54 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
     transport = httpx.ASGITransport(app=main_module.app)
     async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as test_client:
         yield test_client
+
+
+async def test_request_json_with_variants_inlines_params_for_index_php_routes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeAsyncClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            del args, kwargs
+
+        async def __aenter__(self) -> "FakeAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:  # type: ignore[no-untyped-def]
+            del exc_type, exc, tb
+            return None
+
+    async def fake_request_json(
+        client: object,
+        method: str,
+        url: str,
+        **kwargs: object,
+    ) -> dict[str, object]:
+        del client
+        captured["method"] = method
+        captured["url"] = url
+        captured["kwargs"] = kwargs
+        return {"ok": True}
+
+    monkeypatch.setattr(twf_oauth.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(twf_oauth, "_request_json", fake_request_json)
+
+    result = await twf_oauth._request_json_with_variants(
+        method="GET",
+        urls=["https://example.com/api/index.php?/forums/topics"],
+        headers={"Authorization": "Bearer token"},
+        timeout=5,
+        params={"forum": "4", "pinned": "1", "sortBy": "updated"},
+    )
+
+    assert result == {"ok": True}
+    sent_url = str(captured["url"])
+    sent_kwargs = captured["kwargs"]
+    assert sent_url.endswith("index.php?/forums/topics?&forum=4&pinned=1&sortBy=updated")
+    assert "index.php?/forums/topics?forum=4" not in sent_url
+    assert isinstance(sent_kwargs, dict)
+    assert "params" not in sent_kwargs
 
 
 async def test_twf_topics_without_session_returns_enveloped_401(client: httpx.AsyncClient) -> None:
@@ -96,10 +145,15 @@ async def test_twf_topics_merges_dedupes_and_orders_pinned_first(
             return None
 
         async def get(self, url: str, **kwargs: object) -> FakeResponse:
-            del url
+            resolved: dict[str, str] = {}
             params = kwargs.get("params")
-            resolved = params if isinstance(params, dict) else {}
-            calls.append({k: str(v) for k, v in resolved.items()})
+            if isinstance(params, dict):
+                resolved.update({k: str(v) for k, v in params.items()})
+            for key in ("forum", "pinned", "perPage"):
+                match = re.search(rf"[?&]{re.escape(key)}=([^&]+)", url)
+                if match and key not in resolved:
+                    resolved[key] = match.group(1)
+            calls.append(resolved)
             pinned = str(resolved.get("pinned", "0"))
             if pinned == "1":
                 return FakeResponse(
