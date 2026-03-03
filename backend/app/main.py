@@ -266,6 +266,15 @@ async def twf_share_guards(request: Request, call_next):
         if content_length is not None:
             try:
                 if int(content_length) > _TWF_SHARE_BODY_CAP_BYTES:
+                    logger.warning(
+                        "TWF payload too large request_id=%s path=%s method=%s ip=%s has_session=%s content_length=%s",
+                        request_id,
+                        request.url.path,
+                        request.method,
+                        _client_ip(request),
+                        bool(request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)),
+                        content_length,
+                    )
                     response = _error_response(
                         status_code=413,
                         code="PAYLOAD_TOO_LARGE",
@@ -288,6 +297,15 @@ async def twf_share_guards(request: Request, call_next):
         request = Request(request.scope, receive)
         request._body = body
         if len(body) > _TWF_SHARE_BODY_CAP_BYTES:
+            logger.warning(
+                "TWF payload too large request_id=%s path=%s method=%s ip=%s has_session=%s body_bytes=%s",
+                request_id,
+                request.url.path,
+                request.method,
+                _client_ip(request),
+                bool(request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)),
+                len(body),
+            )
             response = _error_response(
                 status_code=413,
                 code="PAYLOAD_TOO_LARGE",
