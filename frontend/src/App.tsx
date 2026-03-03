@@ -33,6 +33,7 @@ import {
   WEBP_RENDER_MODE_THRESHOLDS,
 } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
+import { buildShareSummary } from "@/lib/share-summary";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { buildPermalinkSearch, readPermalink, replaceUrlQuery } from "@/lib/permalink";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
@@ -2946,14 +2947,38 @@ export default function App() {
   const sharePayload = useMemo<SharePayload>(() => {
     const runForSummary = run === "latest" ? (latestRunId ?? "latest") : run;
     const mapView = mapViewRef.current;
-    const lat = Number.isFinite(mapView.lat) ? mapView.lat.toFixed(2) : "n/a";
-    const lon = Number.isFinite(mapView.lon) ? mapView.lon.toFixed(2) : "n/a";
-    const zoom = Number.isFinite(mapView.z) ? mapView.z.toFixed(1) : "n/a";
-    const fh = Number.isFinite(forecastHour) ? String(forecastHour) : "n/a";
-    const summary = `${model || "model"} • ${runForSummary || "latest"} • ${variable || "var"} • FH ${fh} • ${region || "region"} • ${lat},${lon} • z${zoom} • loop ${resolvedLoopPermalink ? "on" : "off"}`;
+    const capabilityVariableLabel = selectedCapabilityVarMap.get(variable)?.displayName ?? null;
+    const manifestVariable = runManifest?.variables?.[variable];
+    const manifestVariableLabel = manifestVariable?.display_name ?? manifestVariable?.name ?? manifestVariable?.label ?? null;
+    const preferredVariableLabel = capabilityVariableLabel ?? manifestVariableLabel;
+    const summaries = buildShareSummary({
+      modelId: model || "model",
+      runId: runForSummary || "latest",
+      variableId: variable || "var",
+      variableDisplayName: preferredVariableLabel,
+      regionId: region || "region",
+      regionLabel: regionPresets[region]?.label ?? null,
+      forecastHour: Number.isFinite(forecastHour) ? forecastHour : null,
+      centerLat: Number.isFinite(mapView.lat) ? mapView.lat : null,
+      centerLon: Number.isFinite(mapView.lon) ? mapView.lon : null,
+      zoom: Number.isFinite(mapView.z) ? mapView.z : null,
+      loopEnabled: resolvedLoopPermalink,
+    });
     const permalink = typeof window !== "undefined" ? window.location.href : "";
-    return { permalink, summary };
-  }, [model, run, latestRunId, variable, forecastHour, region, resolvedLoopPermalink, mapViewTick]);
+    return { permalink, summary: summaries.shortSummary, detailsSummary: summaries.detailsSummary };
+  }, [
+    model,
+    run,
+    latestRunId,
+    variable,
+    selectedCapabilityVarMap,
+    runManifest,
+    forecastHour,
+    region,
+    regionPresets,
+    resolvedLoopPermalink,
+    mapViewTick,
+  ]);
 
   const handleCopyLink = useCallback(() => {
     if (typeof window === "undefined") {

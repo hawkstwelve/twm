@@ -7,6 +7,7 @@ import { getSharePrefs, setSharePrefs, type SharePrefs } from "@/lib/share_prefs
 export type SharePayload = {
   permalink: string;
   summary: string;
+  detailsSummary?: string;
 };
 
 type TwfStatus =
@@ -284,6 +285,7 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
   const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<SharePostResult | null>(null);
   const [clipboardStatus, setClipboardStatus] = useState<string | null>(null);
+  const [showDetailsSummary, setShowDetailsSummary] = useState(false);
 
   const parsedTopicIdFromUrl = useMemo(() => parseTopicIdFromUrl(pastedTopicUrl), [pastedTopicUrl]);
   const pastedTopicUrlHasValue = pastedTopicUrl.trim().length > 0;
@@ -319,6 +321,7 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
     setSubmitSuccess(null);
     setRetryAfterSeconds(null);
     setClipboardStatus(null);
+    setShowDetailsSummary(false);
     setPastedTopicUrl("");
     setTopicSearch("");
   }, [open, defaultContent]);
@@ -598,7 +601,21 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
             </div>
             <div className="mt-2 text-xs text-white/65">
               <div className="truncate">Link to Viewer: {payload.permalink}</div>
-              <div className="line-clamp-2">Summary: {payload.summary}</div>
+              <div className={showDetailsSummary ? "" : "line-clamp-2"}>Summary: {payload.summary}</div>
+              {payload.detailsSummary ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setShowDetailsSummary((current) => !current)}
+                    className="mt-1 text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
+                  >
+                    {showDetailsSummary ? "Hide details" : "Show details"}
+                  </button>
+                  {showDetailsSummary ? (
+                    <div className="mt-1 text-[11px] text-white/60">{payload.detailsSummary}</div>
+                  ) : null}
+                </>
+              ) : null}
             </div>
           </div>
 
