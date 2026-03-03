@@ -258,16 +258,21 @@ def _client_ip(request: Request) -> str:
 
 @app.middleware("http")
 async def twf_share_guards(request: Request, call_next):
+    request_id = secrets.token_hex(8)
+    request.state.request_id = request_id
+
     if request.method == "POST" and request.url.path in _TWF_GUARDED_PATHS:
         content_length = request.headers.get("content-length")
         if content_length is not None:
             try:
                 if int(content_length) > _TWF_SHARE_BODY_CAP_BYTES:
-                    return _error_response(
+                    response = _error_response(
                         status_code=413,
                         code="PAYLOAD_TOO_LARGE",
                         message="Request body too large",
                     )
+                    response.headers["X-Request-ID"] = request_id
+                    return response
             except ValueError:
                 pass
 
@@ -283,11 +288,13 @@ async def twf_share_guards(request: Request, call_next):
         request = Request(request.scope, receive)
         request._body = body
         if len(body) > _TWF_SHARE_BODY_CAP_BYTES:
-            return _error_response(
+            response = _error_response(
                 status_code=413,
                 code="PAYLOAD_TOO_LARGE",
                 message="Request body too large",
             )
+            response.headers["X-Request-ID"] = request_id
+            return response
 
         now = time.monotonic()
         ip = _client_ip(request)
@@ -312,29 +319,44 @@ async def twf_share_guards(request: Request, call_next):
                 )
         if retry_after > 0:
             logger.warning(
-                "TWF rate limit exceeded path=%s ip=%s has_session=%s retry_after=%s",
-                request.url.path,
-                ip,
-                bool(session_id),
-                retry_after,
+                "TWF rate limit exceeded",
+                extra={
+                    "request_id": request_id,
+                    "path": request.url.path,
+                    "client_ip": ip,
+                    "has_session": bool(session_id),
+                    "retry_after": retry_after,
+                },
             )
-            return _error_response(
+            response = _error_response(
                 status_code=429,
                 code="RATE_LIMITED",
                 message=_TWF_RATE_LIMIT_MESSAGE,
                 headers={"Retry-After": str(retry_after)},
             )
+            response.headers["X-Request-ID"] = request_id
+            return response
 
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = request_id
+    return response
 
 
 @app.exception_handler(twf_oauth.TwfUpstreamError)
 async def twf_upstream_error_handler(request: Request, exc: twf_oauth.TwfUpstreamError) -> JSONResponse:
     logger.warning(
-        "TwfUpstreamError code=%s upstream_status=%s upstream_message=%r",
-        exc.code,
-        exc.upstream_status,
-        exc.upstream_message,
+        "TWF upstream error",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "path": request.url.path,
+            "method": request.method,
+            "client_ip": _client_ip(request),
+            "has_session": bool(request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)),
+            "error_code": exc.code,
+            "upstream_status": exc.upstream_status,
+            "upstream_code": exc.upstream_code,
+            "status_code": exc.status_code,
+        },
     )
     return _error_response(
         status_code=exc.status_code,
@@ -348,6 +370,18 @@ async def twf_upstream_error_handler(request: Request, exc: twf_oauth.TwfUpstrea
 
 @app.exception_handler(TwfApiError)
 async def twf_api_error_handler(request: Request, exc: TwfApiError) -> JSONResponse:
+    logger.warning(
+        "TWF API error",
+        extra={
+            "request_id": getattr(request.state, "request_id", None),
+            "path": request.url.path,
+            "method": request.method,
+            "client_ip": _client_ip(request),
+            "has_session": bool(request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)),
+            "error_code": exc.code,
+            "status_code": exc.status_code,
+        },
+    )
     return _error_response(
         status_code=exc.status_code,
         code=exc.code,
