@@ -34,11 +34,6 @@ type ApiErrorInfo = {
   message: string;
 };
 
-type ShareTarget = {
-  id: string;
-  label: string;
-};
-
 type SharePostResult = {
   postId: number;
   postUrl: string;
@@ -255,11 +250,6 @@ async function writeClipboard(text: string): Promise<boolean> {
 
 export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
   const initialSharePrefs = useMemo(() => getSharePrefs(), []);
-  const targets = useMemo<ShareTarget[]>(
-    () => [{ id: "twf", label: "The Weather Forums" }],
-    []
-  );
-  const [activeTargetId, setActiveTargetId] = useState<string>(targets[0].id);
   const [twfStatus, setTwfStatus] = useState<TwfStatus>({ linked: false });
   const [statusLoading, setStatusLoading] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -345,7 +335,7 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
   }, [open, onClose]);
 
   useEffect(() => {
-    if (!open || activeTargetId !== "twf") {
+    if (!open) {
       return;
     }
 
@@ -376,7 +366,7 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
       .finally(() => setStatusLoading(false));
 
     return () => controller.abort();
-  }, [open, activeTargetId]);
+  }, [open]);
 
   useEffect(() => {
     setSharePrefs({
@@ -575,7 +565,7 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
 
         <div className="space-y-4 px-4 py-4">
           <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/65">Payload</div>
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/65">Share Preview</div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
@@ -620,223 +610,200 @@ export function TwfShareModal({ open, onClose, payload }: TwfShareModalProps) {
           </div>
 
           <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/65">Target</div>
-            <div className="flex flex-wrap items-center gap-2">
-              {targets.map((target) => (
-                <button
-                  key={target.id}
-                  type="button"
-                  onClick={() => setActiveTargetId(target.id)}
-                  className={[
-                    "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                    activeTargetId === target.id
-                      ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
-                      : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
-                  ].join(" ")}
-                >
-                  {target.label}
-                </button>
-              ))}
-            </div>
-          </div>
+            <div className="mb-3 text-sm font-semibold text-white">Post to The Weather Forums</div>
 
-          {activeTargetId === "twf" ? (
-            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-              <div className="mb-3 text-sm font-semibold text-white">Post to The Weather Forums</div>
-
-              {statusLoading ? (
-                <div className="flex items-center gap-2 text-sm text-white/70">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Checking TWF connection...
+            {statusLoading ? (
+              <div className="flex items-center gap-2 text-sm text-white/70">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Checking TWF connection...
+              </div>
+            ) : twfStatus.linked !== true ? (
+              <div className="space-y-3">
+                <div className="text-sm text-white/70">
+                  Connect your TWF account to post directly. You can still copy the permalink and summary above.
                 </div>
-              ) : twfStatus.linked !== true ? (
-                <div className="space-y-3">
-                  <div className="text-sm text-white/70">
-                    Connect your TWF account to post directly. You can still copy the permalink and summary above.
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <a
-                      href={`${API_ORIGIN}/auth/twf/start`}
-                      className="inline-flex h-8 items-center rounded-md border border-emerald-300/25 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-2.5 text-xs font-semibold text-emerald-50 hover:brightness-110"
-                    >
-                      Connect TWF
-                    </a>
-                    {statusError ? <span className="text-xs text-red-200">{statusError}</span> : null}
-                  </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={`${API_ORIGIN}/auth/twf/start`}
+                    className="inline-flex h-8 items-center rounded-md border border-emerald-300/25 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-2.5 text-xs font-semibold text-emerald-50 hover:brightness-110"
+                  >
+                    Connect TWF
+                  </a>
+                  {statusError ? <span className="text-xs text-red-200">{statusError}</span> : null}
                 </div>
-              ) : submitSuccess ? (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-50">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Post created successfully.
-                  </div>
-                  <div className="text-xs text-white/70">
-                    Topic ID: {submitSuccess.topicId} - Post ID: {submitSuccess.postId}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <a
-                      href={submitSuccess.postUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
-                    >
-                      <ExternalLink className="h-3.5 w-3.5" />
-                      Open post
-                    </a>
-                    <button
-                      type="button"
-                      onClick={onClose}
-                      className="inline-flex h-8 items-center rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
-                    >
-                      Close
-                    </button>
-                  </div>
+              </div>
+            ) : submitSuccess ? (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-50">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Post created successfully.
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="grid gap-2">
-                    <div>
-                      <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Forum</div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {QUICK_FORUMS.map((forum) => (
-                          <button
-                            key={forum.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedForumId(forum.id);
-                              setShowOtherForums(false);
-                            }}
-                            className={[
-                              "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                              selectedForumId === forum.id && !showOtherForums
-                                ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
-                                : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
-                            ].join(" ")}
-                          >
-                            {forum.label}
-                          </button>
-                        ))}
+                <div className="text-xs text-white/70">
+                  Topic ID: {submitSuccess.topicId} - Post ID: {submitSuccess.postId}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <a
+                    href={submitSuccess.postUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5" />
+                    Open post
+                  </a>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="inline-flex h-8 items-center rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-2">
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Forum</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {QUICK_FORUMS.map((forum) => (
                         <button
+                          key={forum.id}
                           type="button"
-                          onClick={() => setShowOtherForums((current) => !current)}
+                          onClick={() => {
+                            setSelectedForumId(forum.id);
+                            setShowOtherForums(false);
+                          }}
                           className={[
                             "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                            showOtherForums
+                            selectedForumId === forum.id && !showOtherForums
                               ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
                               : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
                           ].join(" ")}
                         >
-                          Other forum...
+                          {forum.label}
                         </button>
+                      ))}
+                      <button
+                        type="button"
+                        onClick={() => setShowOtherForums((current) => !current)}
+                        className={[
+                          "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                          showOtherForums
+                            ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                            : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                        ].join(" ")}
+                      >
+                        Other forum...
+                      </button>
+                    </div>
+                    {showOtherForums ? (
+                      <div className="mt-2 space-y-1">
+                        {forumsLoading ? (
+                          <div className="text-xs text-white/65">Loading forums...</div>
+                        ) : forums.length > 0 ? (
+                          <select
+                            value={String(selectedForumId)}
+                            onChange={(event) => setSelectedForumId(Number(event.target.value))}
+                            className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                          >
+                            {forums.map((forum) => (
+                              <option key={forum.id} value={String(forum.id)}>
+                                {(forum.path ?? forum.name) + ` (ID ${forum.id})`}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="text-xs text-white/65">No accessible forums found.</div>
+                        )}
+                        {forumsError ? <div className="text-xs text-red-200">{forumsError}</div> : null}
                       </div>
-                      {showOtherForums ? (
-                        <div className="mt-2 space-y-1">
-                          {forumsLoading ? (
-                            <div className="text-xs text-white/65">Loading forums...</div>
-                          ) : forums.length > 0 ? (
-                            <select
-                              value={String(selectedForumId)}
-                              onChange={(event) => setSelectedForumId(Number(event.target.value))}
-                              className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                            >
-                              {forums.map((forum) => (
-                                <option key={forum.id} value={String(forum.id)}>
-                                  {(forum.path ?? forum.name) + ` (ID ${forum.id})`}
-                                </option>
-                              ))}
-                            </select>
-                          ) : (
-                            <div className="text-xs text-white/65">No accessible forums found.</div>
-                          )}
-                          {forumsError ? <div className="text-xs text-red-200">{forumsError}</div> : null}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Topic</div>
-                      <input
-                        value={topicSearch}
-                        onChange={(event) => setTopicSearch(event.target.value)}
-                        placeholder="Search loaded topics"
-                        className="mb-2 h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
-                      />
-                      {topicsLoading ? (
-                        <div className="flex items-center gap-2 text-xs text-white/70">
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                          Loading topics...
-                        </div>
-                      ) : topicOptions.length > 0 ? (
-                        <select
-                          value={selectedTopicId !== null ? String(selectedTopicId) : ""}
-                          onChange={(event) => setSelectedTopicId(Number(event.target.value))}
-                          className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                        >
-                          {topicOptions.map((topic) => (
-                            <option key={topic.id} value={String(topic.id)}>
-                              {(topic.pinned ? "[PIN] " : "") + topic.title}
-                            </option>
-                          ))}
-                        </select>
-                      ) : (
-                        <div className="text-xs text-white/65">No topics loaded for this forum.</div>
-                      )}
-                      {topicsError ? <div className="mt-1 text-xs text-red-200">{topicsError}</div> : null}
-                    </div>
-
-                    <div>
-                      <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Paste topic URL (optional)</div>
-                      <input
-                        value={pastedTopicUrl}
-                        onChange={(event) => setPastedTopicUrl(event.target.value)}
-                        placeholder="https://www.theweatherforums.com/topic/123..."
-                        className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
-                      />
-                      {pastedTopicUrlError ? <div className="mt-1 text-xs text-red-200">{pastedTopicUrlError}</div> : null}
-                      {parsedTopicIdFromUrl ? (
-                        <div className="mt-1 text-xs text-emerald-200/90">Using topic ID {parsedTopicIdFromUrl} from URL.</div>
-                      ) : null}
-                    </div>
-
-                    <div>
-                      <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Post content</div>
-                      <textarea
-                        value={content}
-                        onChange={(event) => setContent(event.target.value)}
-                        rows={6}
-                        className="w-full rounded-md border border-white/15 bg-black/35 px-2 py-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                      />
-                    </div>
+                    ) : null}
                   </div>
 
-                  {submitError ? (
-                    <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
-                      <div>{submitError.message}</div>
-                      {submitError.code ? <div className="mt-0.5 text-[11px] opacity-90">Code: {submitError.code}</div> : null}
-                      {retryAfterSeconds ? <div className="mt-0.5 text-[11px] opacity-90">Try again in {retryAfterSeconds}s.</div> : null}
-                    </div>
-                  ) : null}
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Topic</div>
+                    <input
+                      value={topicSearch}
+                      onChange={(event) => setTopicSearch(event.target.value)}
+                      placeholder="Search loaded topics"
+                      className="mb-2 h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                    />
+                    {topicsLoading ? (
+                      <div className="flex items-center gap-2 text-xs text-white/70">
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        Loading topics...
+                      </div>
+                    ) : topicOptions.length > 0 ? (
+                      <select
+                        value={selectedTopicId !== null ? String(selectedTopicId) : ""}
+                        onChange={(event) => setSelectedTopicId(Number(event.target.value))}
+                        className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                      >
+                        {topicOptions.map((topic) => (
+                          <option key={topic.id} value={String(topic.id)}>
+                            {(topic.pinned ? "[PIN] " : "") + topic.title}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="text-xs text-white/65">No topics loaded for this forum.</div>
+                    )}
+                    {topicsError ? <div className="mt-1 text-xs text-red-200">{topicsError}</div> : null}
+                  </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <div className="text-xs text-white/60">
-                      {effectiveTopicId ? `Posting to topic ID ${effectiveTopicId}` : "Select or paste a topic to post"}
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void handleSubmitPost();
-                      }}
-                      disabled={submitBusy}
-                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-300/25 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-2.5 text-xs font-semibold text-emerald-50 hover:brightness-110 disabled:opacity-60 disabled:hover:brightness-100"
-                    >
-                      {submitBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                      {submitBusy ? "Posting..." : "Post to TWF"}
-                    </button>
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Paste topic URL (optional)</div>
+                    <input
+                      value={pastedTopicUrl}
+                      onChange={(event) => setPastedTopicUrl(event.target.value)}
+                      placeholder="https://www.theweatherforums.com/topic/123..."
+                      className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                    />
+                    {pastedTopicUrlError ? <div className="mt-1 text-xs text-red-200">{pastedTopicUrlError}</div> : null}
+                    {parsedTopicIdFromUrl ? (
+                      <div className="mt-1 text-xs text-emerald-200/90">Using topic ID {parsedTopicIdFromUrl} from URL.</div>
+                    ) : null}
+                  </div>
+
+                  <div>
+                    <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Post content</div>
+                    <textarea
+                      value={content}
+                      onChange={(event) => setContent(event.target.value)}
+                      rows={6}
+                      className="w-full rounded-md border border-white/15 bg-black/35 px-2 py-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                    />
                   </div>
                 </div>
-              )}
-            </div>
-          ) : null}
+
+                {submitError ? (
+                  <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                    <div>{submitError.message}</div>
+                    {submitError.code ? <div className="mt-0.5 text-[11px] opacity-90">Code: {submitError.code}</div> : null}
+                    {retryAfterSeconds ? <div className="mt-0.5 text-[11px] opacity-90">Try again in {retryAfterSeconds}s.</div> : null}
+                  </div>
+                ) : null}
+
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-xs text-white/60">
+                    {effectiveTopicId ? `Posting to topic ID ${effectiveTopicId}` : "Select or paste a topic to post"}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void handleSubmitPost();
+                    }}
+                    disabled={submitBusy}
+                    className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-300/25 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-2.5 text-xs font-semibold text-emerald-50 hover:brightness-110 disabled:opacity-60 disabled:hover:brightness-100"
+                  >
+                    {submitBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                    {submitBusy ? "Posting..." : "Post to TWF"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
