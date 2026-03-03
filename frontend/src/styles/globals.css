@@ -150,6 +150,19 @@
     -webkit-backdrop-filter: blur(16px) saturate(1.8);
   }
 
+  /* Keep map controls above map overlays, but below top nav menus. */
+  .maplibregl-ctrl-top-left,
+  .maplibregl-ctrl-top-right,
+  .maplibregl-ctrl-bottom-left,
+  .maplibregl-ctrl-bottom-right {
+    z-index: 45;
+  }
+
+  /* Offset zoom control below the fixed viewer toolbar. */
+  .maplibregl-ctrl-top-left .maplibregl-ctrl {
+    margin: 7.5rem 0 0 1rem;
+  }
+
   .maplibregl-ctrl-top-left .maplibregl-ctrl-group button {
     width: 34px;
     height: 34px;
@@ -174,7 +187,8 @@
   }
 
   .maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib {
-    margin: 0 0 1rem 1rem;
+    /* Lift attribution above the fixed bottom timeline controls. */
+    margin: 0 0 7.25rem 1rem;
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.75rem;
     background-color: rgba(0, 0, 0, 0.38);
@@ -190,5 +204,11 @@
 
   .maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib-button:focus-visible {
     box-shadow: inset 0 0 0 1px hsl(var(--ring));
+  }
+
+  @media (min-width: 640px) {
+    .maplibregl-ctrl-bottom-left .maplibregl-ctrl-attrib {
+      margin-bottom: 6rem;
+    }
   }
 }
