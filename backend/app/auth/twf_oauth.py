@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -457,7 +458,26 @@ async def create_topic(sess: TwfSession, forum_id: int, title: str, content: str
 
 def _plain_text_to_ips_html(content: str) -> str:
     escaped = html.escape(content, quote=False)
-    return escaped.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+    with_breaks = escaped.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+    url_pattern = re.compile(r"""https?://[^\s<>"']+""")
+
+    def _trim_url(raw_url: str) -> tuple[str, str]:
+        core = raw_url
+        trailing = ""
+        while core and core[-1] in ".,!?:;)]":
+            trailing = core[-1] + trailing
+            core = core[:-1]
+        return core, trailing
+
+    def _replace(match: re.Match[str]) -> str:
+        matched_url = match.group(0)
+        url, trailing = _trim_url(matched_url)
+        if not url:
+            return matched_url
+        anchor = f'<a href="{url}" rel="nofollow noopener" target="_blank">{url}</a>'
+        return f"{anchor}{trailing}"
+
+    return url_pattern.sub(_replace, with_breaks)
 
 async def create_post(sess: TwfSession, topic_id: int, content: str) -> dict[str, Any]:
     sess = await ensure_fresh_tokens(sess)
