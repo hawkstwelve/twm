@@ -51,7 +51,7 @@ TOKEN_ENDPOINT = f"{TWF_BASE.rstrip('/')}/oauth/token/"
 API_ME_ENDPOINT = os.getenv("TWF_ME_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/core/me").strip()
 API_CREATE_TOPIC = os.getenv("TWF_TOPICS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/topics").strip()
 API_LIST_FORUMS = os.getenv("TWF_FORUMS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/forums").strip()
-API_CREATE_POST = os.getenv("TWF_POSTS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/forums/posts").strip()
+API_CREATE_POST = os.getenv("TWF_POSTS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/posts").strip()
 
 TWF_API_KEY = os.getenv("TWF_API_KEY", "").strip()
 
