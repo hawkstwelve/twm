@@ -132,6 +132,7 @@ class TwfUpstreamError(Exception):
     upstream_status: int | None = None
     upstream_code: str | None = None
     upstream_message: str | None = None
+    upstream_url: str | None = None
 
     def __str__(self) -> str:
         return f"{self.code}: {self.message}"
@@ -191,6 +192,8 @@ def _raise_mapped_response_error(response: httpx.Response) -> NoReturn:
     upstream_code, error_message, upstream_body = _parse_ips_error_response(response)
     status_code, code, message = _map_upstream_error(upstream_status, error_message)
     upstream_message = error_message or upstream_body
+    response_request = getattr(response, "request", None)
+    upstream_url = str(response_request.url) if response_request is not None else None
     err = TwfUpstreamError(
         status_code=status_code,
         code=code,
@@ -198,10 +201,15 @@ def _raise_mapped_response_error(response: httpx.Response) -> NoReturn:
         upstream_status=upstream_status,
         upstream_code=upstream_code,
         upstream_message=upstream_message,
+        upstream_url=upstream_url,
     )
     raise err
 
-def _raise_mapped_request_error(exc: httpx.RequestError, upstream_message: str | None = None) -> NoReturn:
+def _raise_mapped_request_error(
+    exc: httpx.RequestError,
+    upstream_message: str | None = None,
+    upstream_url: str | None = None,
+) -> NoReturn:
     # Network / transport failures: treat as upstream unavailable.
     err = TwfUpstreamError(
         status_code=502,
@@ -210,6 +218,7 @@ def _raise_mapped_request_error(exc: httpx.RequestError, upstream_message: str |
         upstream_status=None,
         upstream_code=None,
         upstream_message=upstream_message or str(exc),
+        upstream_url=upstream_url,
     )
     raise err from exc
 
@@ -246,6 +255,8 @@ async def _request_json_with_variants(
             try:
                 return await _request_json(client, method, request_url, **request_kwargs)
             except TwfUpstreamError as exc:
+                if exc.upstream_url is None:
+                    exc.upstream_url = request_url
                 last_error = exc
                 # Only retry on 404 (slash/no-slash variant) or true transient upstream failures.
                 # For semantic 4xx (NO_TOPIC/UNAUTHORIZED/etc.), retrying other variants is noise.
@@ -262,6 +273,7 @@ async def _request_json_with_variants(
         upstream_status=None,
         upstream_code=None,
         upstream_message=None,
+        upstream_url=None,
     )
 
 
@@ -275,7 +287,7 @@ async def _request_json(client: httpx.AsyncClient, method: str, url: str, **kwar
         else:
             raise RuntimeError(f"Unsupported method: {method}")
     except httpx.RequestError as exc:
-        _raise_mapped_request_error(exc)
+        _raise_mapped_request_error(exc, upstream_url=url)
 
     if r.status_code >= 400:
         _raise_mapped_response_error(r)

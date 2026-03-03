@@ -158,6 +158,7 @@ def _error_payload(
     upstream_status: int | None = None,
     upstream_code: str | None = None,
     upstream_message: str | None = None,
+    upstream_url: str | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"code": code, "message": message}
     if upstream_status is not None:
@@ -166,6 +167,8 @@ def _error_payload(
         payload["upstream_code"] = upstream_code
     if upstream_message is not None:
         payload["upstream_message"] = upstream_message
+    if upstream_url is not None:
+        payload["upstream_url"] = upstream_url
     return {"error": payload}
 
 
@@ -177,6 +180,7 @@ def _error_response(
     upstream_status: int | None = None,
     upstream_code: str | None = None,
     upstream_message: str | None = None,
+    upstream_url: str | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     return JSONResponse(
@@ -187,6 +191,7 @@ def _error_response(
             upstream_status=upstream_status,
             upstream_code=upstream_code,
             upstream_message=upstream_message,
+            upstream_url=upstream_url,
         ),
         headers=headers,
     )
@@ -364,7 +369,7 @@ async def twf_share_guards(request: Request, call_next):
 async def twf_upstream_error_handler(request: Request, exc: twf_oauth.TwfUpstreamError) -> JSONResponse:
     rid = getattr(request.state, "request_id", None)
     logger.warning(
-        "TWF upstream error request_id=%s path=%s method=%s ip=%s has_session=%s error_code=%s upstream_status=%s upstream_code=%s status_code=%s",
+        "TWF upstream error request_id=%s path=%s method=%s ip=%s has_session=%s error_code=%s upstream_status=%s upstream_code=%s upstream_message=%s upstream_url=%s status_code=%s",
         rid,
         request.url.path,
         request.method,
@@ -373,7 +378,22 @@ async def twf_upstream_error_handler(request: Request, exc: twf_oauth.TwfUpstrea
         exc.code,
         exc.upstream_status,
         exc.upstream_code,
+        exc.upstream_message,
+        exc.upstream_url,
         exc.status_code,
+        extra={
+            "request_id": rid,
+            "path": request.url.path,
+            "method": request.method,
+            "ip": _client_ip(request),
+            "has_session": bool(request.cookies.get(twf_oauth.SESSION_COOKIE_NAME)),
+            "error_code": exc.code,
+            "upstream_status": exc.upstream_status,
+            "upstream_code": exc.upstream_code,
+            "upstream_message": exc.upstream_message,
+            "upstream_url": exc.upstream_url,
+            "status_code": exc.status_code,
+        },
     )
     return _error_response(
         status_code=exc.status_code,
@@ -382,6 +402,7 @@ async def twf_upstream_error_handler(request: Request, exc: twf_oauth.TwfUpstrea
         upstream_status=exc.upstream_status,
         upstream_code=exc.upstream_code,
         upstream_message=exc.upstream_message,
+        upstream_url=exc.upstream_url,
     )
 
 
