@@ -8,6 +8,16 @@ type NavItemProps = {
   className?: string;
 };
 
+type TwfStatus =
+  | { linked: false }
+  | { linked: true; member_id: number; display_name: string; photo_url?: string | null };
+
+function getApiBase(): string {
+  const fromEnv = (import.meta as any)?.env?.VITE_API_BASE as string | undefined;
+  const base = (fromEnv ?? "https://api.theweathermodels.com").trim();
+  return base.replace(/\/$/, "");
+}
+
 function NavItem({ to, label, onClick, className }: NavItemProps) {
   return (
     <NavLink
@@ -30,6 +40,7 @@ function NavItem({ to, label, onClick, className }: NavItemProps) {
 
 export default function SiteHeader({ variant }: { variant: "marketing" | "app" }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [twfStatus, setTwfStatus] = useState<TwfStatus>({ linked: false });
   const location = useLocation();
   const menuRef = useRef<HTMLDivElement | null>(null);
   const isAppVariant = variant === "app";
@@ -38,6 +49,31 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
   const logoClassName = isMarketingVariant
     ? "block h-14 w-auto max-w-none"
     : "block h-12 w-auto max-w-none";
+  const accountLabel = twfStatus.linked ? twfStatus.display_name : "Login";
+  const accountPhotoUrl = twfStatus.linked ? twfStatus.photo_url : null;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    fetch(`${getApiBase()}/auth/twf/status`, {
+      method: "GET",
+      credentials: "include",
+      signal: controller.signal,
+    })
+      .then(async (r) => {
+        if (!r.ok) {
+          throw new Error(`Status request failed (${r.status})`);
+        }
+        return (await r.json()) as TwfStatus;
+      })
+      .then((status) => setTwfStatus(status))
+      .catch((e: unknown) => {
+        if ((e as any)?.name === "AbortError") return;
+        setTwfStatus({ linked: false });
+      });
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -98,7 +134,12 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
               to="/login"
               className="ml-1 rounded-md border border-white/20 bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-3 py-2 text-sm text-white shadow-[0_8px_18px_rgba(0,0,0,0.28)] transition-all duration-150 hover:brightness-110"
             >
-              Login
+              <span className="inline-flex items-center gap-2">
+                {accountPhotoUrl ? (
+                  <img src={accountPhotoUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+                ) : null}
+                <span>{accountLabel}</span>
+              </span>
             </NavLink>
           </nav>
         ) : null}
@@ -130,7 +171,12 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
                   hideInlineAuthOnMobile ? "hidden md:inline-flex" : "",
                 ].join(" ")}
               >
-                Login
+                <span className="inline-flex items-center gap-2">
+                  {accountPhotoUrl ? (
+                    <img src={accountPhotoUrl} alt="" className="h-5 w-5 rounded-full object-cover" />
+                  ) : null}
+                  <span>{accountLabel}</span>
+                </span>
               </NavLink>
               <NavLink
                 to="/login"
@@ -178,7 +224,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
                 <div className="my-1 h-px bg-white/10" />
                 <NavItem
                   to="/login"
-                  label="Login"
+                  label={accountLabel}
                   onClick={() => setMobileMenuOpen(false)}
                   className="text-white/90 hover:text-white"
                 />

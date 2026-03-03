@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import html
 import hashlib
 import json
 import os
@@ -28,7 +29,14 @@ TWF_BASE = _env("TWF_BASE")
 CLIENT_ID = _env("TWF_CLIENT_ID")
 CLIENT_SECRET = _env("TWF_CLIENT_SECRET")
 REDIRECT_URI = _env("TWF_REDIRECT_URI")
-SCOPES = _env("TWF_SCOPES", "profile").strip()
+def _resolved_scopes() -> str:
+    raw = _env("TWF_SCOPES", "profile").strip()
+    parts = [p for p in raw.split() if p]
+    if "forums_posts" not in parts:
+        parts.append("forums_posts")
+    return " ".join(parts)
+
+SCOPES = _resolved_scopes()
 FRONTEND_RETURN = _env("FRONTEND_RETURN")
 
 SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "twm_session")
@@ -43,6 +51,7 @@ TOKEN_ENDPOINT = f"{TWF_BASE.rstrip('/')}/oauth/token/"
 API_ME_ENDPOINT = os.getenv("TWF_ME_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/core/me").strip()
 API_CREATE_TOPIC = os.getenv("TWF_TOPICS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/topics").strip()
 API_LIST_FORUMS = os.getenv("TWF_FORUMS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/index.php?/forums/forums").strip()
+API_CREATE_POST = os.getenv("TWF_POSTS_ENDPOINT", f"{TWF_BASE.rstrip('/')}/api/forums/posts").strip()
 
 TWF_API_KEY = os.getenv("TWF_API_KEY", "").strip()
 
@@ -79,6 +88,7 @@ def _db() -> sqlite3.Connection:
             session_id TEXT PRIMARY KEY,
             member_id INTEGER NOT NULL,
             display_name TEXT NOT NULL,
+            photo_url TEXT,
             access_token_enc BLOB NOT NULL,
             refresh_token_enc BLOB NOT NULL,
             expires_at INTEGER NOT NULL,
@@ -87,6 +97,10 @@ def _db() -> sqlite3.Connection:
         )
         """
     )
+    # Backward-compatible migration for existing DBs created before photo_url existed.
+    cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(twf_sessions)").fetchall()}
+    if "photo_url" not in cols:
+        conn.execute("ALTER TABLE twf_sessions ADD COLUMN photo_url TEXT")
     return conn
 
 def _enc(s: str) -> bytes:
@@ -100,6 +114,7 @@ class TwfSession:
     session_id: str
     member_id: int
     display_name: str
+    photo_url: str | None
     access_token: str
     refresh_token: str
     expires_at: int
@@ -109,11 +124,12 @@ def upsert_session(sess: TwfSession) -> None:
     with _db() as conn:
         conn.execute(
             """
-            INSERT INTO twf_sessions(session_id, member_id, display_name, access_token_enc, refresh_token_enc, expires_at, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO twf_sessions(session_id, member_id, display_name, photo_url, access_token_enc, refresh_token_enc, expires_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
               member_id=excluded.member_id,
               display_name=excluded.display_name,
+              photo_url=excluded.photo_url,
               access_token_enc=excluded.access_token_enc,
               refresh_token_enc=excluded.refresh_token_enc,
               expires_at=excluded.expires_at,
@@ -123,6 +139,7 @@ def upsert_session(sess: TwfSession) -> None:
                 sess.session_id,
                 sess.member_id,
                 sess.display_name,
+                sess.photo_url,
                 _enc(sess.access_token),
                 _enc(sess.refresh_token),
                 sess.expires_at,
@@ -134,7 +151,7 @@ def upsert_session(sess: TwfSession) -> None:
 def get_session(session_id: str) -> Optional[TwfSession]:
     with _db() as conn:
         row = conn.execute(
-            "SELECT session_id, member_id, display_name, access_token_enc, refresh_token_enc, expires_at FROM twf_sessions WHERE session_id=?",
+            "SELECT session_id, member_id, display_name, photo_url, access_token_enc, refresh_token_enc, expires_at FROM twf_sessions WHERE session_id=?",
             (session_id,),
         ).fetchone()
     if not row:
@@ -143,9 +160,10 @@ def get_session(session_id: str) -> Optional[TwfSession]:
         session_id=row[0],
         member_id=int(row[1]),
         display_name=str(row[2]),
-        access_token=_dec(row[3]),
-        refresh_token=_dec(row[4]),
-        expires_at=int(row[5]),
+        photo_url=str(row[3]) if row[3] else None,
+        access_token=_dec(row[4]),
+        refresh_token=_dec(row[5]),
+        expires_at=int(row[6]),
     )
 
 def delete_session(session_id: str) -> None:
@@ -256,6 +274,41 @@ async def create_topic(sess: TwfSession, forum_id: int, title: str, content: str
         for url in urls:
             try:
                 r = await client.post(url, headers=headers, data=data)
+                if r.status_code >= 400:
+                    detail = (r.text or "")
+                    raise httpx.HTTPStatusError(
+                        f"{r.status_code} for {url}: {detail[:500]}",
+                        request=r.request,
+                        response=r,
+                    )
+                return r.json()
+            except Exception as e:
+                last_exc = e
+                continue
+
+    assert last_exc is not None
+    raise last_exc
+
+def _plain_text_to_ips_html(content: str) -> str:
+    escaped = html.escape(content, quote=False)
+    return escaped.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "<br>")
+
+async def create_post(sess: TwfSession, topic_id: int, content: str) -> dict[str, Any]:
+    sess = await ensure_fresh_tokens(sess)
+    headers = _auth_headers(sess.access_token)
+    payload = {
+        "topic": int(topic_id),
+        "post": _plain_text_to_ips_html(content),
+    }
+
+    base = API_CREATE_POST
+    urls = [base, base.rstrip("/"), base.rstrip("/") + "/"]
+
+    last_exc: Exception | None = None
+    async with httpx.AsyncClient(timeout=30) as client:
+        for url in urls:
+            try:
+                r = await client.post(url, headers=headers, json=payload)
                 if r.status_code >= 400:
                     detail = (r.text or "")
                     raise httpx.HTTPStatusError(

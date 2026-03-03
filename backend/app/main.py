@@ -184,6 +184,8 @@ async def twf_callback(
 
     member_id = int(me["id"])
     display_name = str(me.get("name") or f"member-{member_id}")
+    photo_url_raw = me.get("photoUrl")
+    photo_url = str(photo_url_raw) if isinstance(photo_url_raw, str) and photo_url_raw.strip() else None
 
     sid = twf_oauth.new_session_id()
     twf_oauth.upsert_session(
@@ -191,6 +193,7 @@ async def twf_callback(
             session_id=sid,
             member_id=member_id,
             display_name=display_name,
+            photo_url=photo_url,
             access_token=access,
             refresh_token=refresh,
             expires_at=int(time.time()) + expires_in,
@@ -225,11 +228,14 @@ async def twf_status(request: Request) -> dict[str, Any]:
     if not sess:
         return {"linked": False}
 
-    return {
+    payload: dict[str, Any] = {
         "linked": True,
         "member_id": sess.member_id,
         "display_name": sess.display_name,
     }
+    if sess.photo_url:
+        payload["photo_url"] = sess.photo_url
+    return payload
 
 
 @app.post("/auth/twf/disconnect")
@@ -283,6 +289,37 @@ async def twf_share_topic(request: Request, body: ShareTopicIn) -> dict[str, Any
         "topicUrl": str(topic_url),
         "forumId": int(forum_id),
         "title": str(topic.get("title") or body.title),
+    }
+
+
+class SharePostIn(BaseModel):
+    topic_id: int = Field(..., ge=1)
+    content: str = Field(..., min_length=1)
+
+
+@app.post("/twf/share/post")
+async def twf_share_post(request: Request, body: SharePostIn) -> dict[str, Any]:
+    sess = _require_twf_session(request)
+
+    post = await twf_oauth.create_post(
+        sess,
+        topic_id=body.topic_id,
+        content=body.content,
+    )
+
+    post_id = post.get("id")
+    post_url = post.get("url")
+    topic_id = post.get("topic", {}).get("id") if isinstance(post.get("topic"), dict) else post.get("topic")
+    if not topic_id:
+        topic_id = body.topic_id
+
+    if not post_id or not post_url:
+        raise HTTPException(status_code=502, detail="Unexpected response from TWF create post")
+
+    return {
+        "postId": int(post_id),
+        "postUrl": str(post_url),
+        "topicId": int(topic_id),
     }
 
 _wgs84_to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)

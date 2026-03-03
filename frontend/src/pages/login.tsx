@@ -2,13 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 
 type TwfStatus =
   | { linked: false }
-  | { linked: true; member_id: number; display_name: string };
+  | { linked: true; member_id: number; display_name: string; photo_url?: string | null };
 
 type ShareResult = {
   topicId: number;
   topicUrl: string;
   forumId: number;
   title: string;
+};
+
+type ReplyResult = {
+  postId: number;
+  postUrl: string;
+  topicId: number;
 };
 
 type TwfForum = {
@@ -65,6 +71,11 @@ export default function Login() {
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
   const [shareResult, setShareResult] = useState<ShareResult | null>(null);
+  const [replyTopicId, setReplyTopicId] = useState<string>("");
+  const [replyContent, setReplyContent] = useState<string>("Reply from The Weather Models.");
+  const [replyBusy, setReplyBusy] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
+  const [replyResult, setReplyResult] = useState<ReplyResult | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -223,6 +234,46 @@ export default function Login() {
       setShareError((e as Error).message || "Share failed");
     } finally {
       setShareBusy(false);
+    }
+  }
+
+  async function shareReply() {
+    setReplyError(null);
+    setReplyResult(null);
+
+    const topicIdNum = Number(replyTopicId);
+    if (!Number.isFinite(topicIdNum) || topicIdNum <= 0) {
+      setReplyError("Enter a valid topic_id (numeric)");
+      return;
+    }
+    if (!replyContent.trim()) {
+      setReplyError("Reply content is required");
+      return;
+    }
+
+    setReplyBusy(true);
+    try {
+      const r = await fetch(`${apiBase}/twf/share/post`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          topic_id: topicIdNum,
+          content: replyContent.trim(),
+        }),
+      });
+
+      if (!r.ok) {
+        const text = await r.text().catch(() => "");
+        throw new Error(text || `Reply failed (${r.status})`);
+      }
+
+      const data = (await r.json()) as ReplyResult;
+      setReplyResult(data);
+    } catch (e: unknown) {
+      setReplyError((e as Error).message || "Reply failed");
+    } finally {
+      setReplyBusy(false);
     }
   }
 
@@ -398,6 +449,67 @@ export default function Login() {
                     className="inline-block mt-1 text-sm text-[#8fb3a7] hover:underline"
                   >
                     Open topic →
+                  </a>
+                </div>
+              ) : null}
+
+              <div className="my-1 h-px bg-white/10" />
+
+              <div className="grid gap-3">
+                <div className="text-xs uppercase tracking-wider text-white/60">Reply to topic</div>
+
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-white/60">Topic ID</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={replyTopicId}
+                    onChange={(e) => setReplyTopicId(e.target.value)}
+                    className="mt-2 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-white/20"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs uppercase tracking-wider text-white/60">Reply content</label>
+                  <textarea
+                    value={replyContent}
+                    onChange={(e) => setReplyContent(e.target.value)}
+                    rows={4}
+                    className="mt-2 w-full resize-none rounded-lg border border-white/10 bg-black/20 px-3 py-2 text-sm text-white outline-none focus:border-white/20"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={shareReply}
+                  disabled={replyBusy}
+                  className="rounded-lg bg-[linear-gradient(to_top_right,#1f342f_0%,#526d5c_100%)] px-4 py-2.5 text-sm font-medium text-white border border-white/20 shadow-[0_8px_18px_rgba(0,0,0,0.28)] transition-all duration-150 hover:brightness-110 disabled:opacity-60 disabled:hover:brightness-100"
+                >
+                  {replyBusy ? "Posting…" : "Reply"}
+                </button>
+              </div>
+
+              {replyError ? (
+                <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-100">
+                  {replyError}
+                </div>
+              ) : null}
+
+              {replyResult ? (
+                <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 text-sm text-white/80 space-y-2">
+                  <div className="text-xs uppercase tracking-wider text-white/60">Reply posted</div>
+                  <div className="text-xs text-white/60">
+                    Topic ID: {replyResult.topicId} • Post ID: {replyResult.postId}
+                  </div>
+                  <a
+                    href={replyResult.postUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block mt-1 text-sm text-[#8fb3a7] hover:underline"
+                  >
+                    Open post →
                   </a>
                 </div>
               ) : null}
