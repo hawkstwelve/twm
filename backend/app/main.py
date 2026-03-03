@@ -198,22 +198,10 @@ async def twf_callback(
         raise HTTPException(status_code=500, detail="No refresh_token returned")
 
     expires_in = int(tok.get("expires_in", 3600))
-    member_id = 0
-    display_name = "Linked"
-    try:
-        me = await twf_oauth.twf_me(access)
-        import json
-        import logging
-        logging.getLogger("uvicorn.error").error("TWF_ME=%s", json.dumps(me)[:8000])
-        member_id_raw = me.get("id") or (me.get("member", {}) or {}).get("id")
-        name_raw = me.get("name") or (me.get("member", {}) or {}).get("name") or me.get("formattedName")
-        if member_id_raw is not None:
-            member_id = int(member_id_raw)
-        if isinstance(name_raw, str) and name_raw:
-            display_name = str(name_raw)
-    except Exception:
-    # Some IPS installs don't expose /api/core/me to OAuth tokens (404/403). Linking can still work for posting.
-        pass
+    me = await twf_oauth.twf_me(access)
+
+    member_id = int(me["id"])
+    display_name = str(me.get("name") or f"member-{member_id}")
 
     sid = twf_oauth.new_session_id()
     twf_oauth.upsert_session(
