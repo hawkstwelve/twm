@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Map as MapLibreMap } from "maplibre-gl";
 import { AlertCircle, Moon, Sun } from "lucide-react";
 
 import { BottomForecastControls } from "@/components/bottom-forecast-controls";
@@ -32,6 +33,7 @@ import {
 } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
+import { buildPermalinkSearch, readPermalink, replaceUrlQuery } from "@/lib/permalink";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
 
 const AUTOPLAY_TICK_MS = 250;
@@ -53,6 +55,7 @@ const MAX_CONCURRENT_DECODES = 1;
 const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 const EMPTY_TILE_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+const PERMALINK_SYNC_DEBOUNCE_MS = 200;
 
 type RenderModeState = "webp_tier0" | "webp_tier1" | "tiles";
 
@@ -601,6 +604,21 @@ function buildLegend(meta: LegendMeta | null | undefined, opacity: number): Lege
 
 export default function App() {
   const webpDefaultEnabled = isWebpDefaultRenderEnabled();
+  const initialPermalink = useMemo(() => readPermalink(), []);
+  const initialPermalinkMapView = useMemo(() => {
+    if (
+      Number.isFinite(initialPermalink.lat)
+      && Number.isFinite(initialPermalink.lon)
+      && Number.isFinite(initialPermalink.z)
+    ) {
+      return {
+        lat: Number(initialPermalink.lat),
+        lon: Number(initialPermalink.lon),
+        z: Number(initialPermalink.z),
+      };
+    }
+    return null;
+  }, [initialPermalink]);
   const [capabilities, setCapabilities] = useState<CapabilitiesResponse | null>(null);
   const [models, setModels] = useState<Option[]>([]);
   const [regions, setRegions] = useState<Option[]>([]);
@@ -642,6 +660,10 @@ export default function App() {
   const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
   const [frameStatusMessage, setFrameStatusMessage] = useState<string | null>(null);
   const [showZoomHint, setShowZoomHint] = useState(false);
+  const [mapViewTick, setMapViewTick] = useState(0);
+  const [isMapReady, setIsMapReady] = useState(false);
+  const [bootstrapHydrated, setBootstrapHydrated] = useState(false);
+  const [permalinkHydrated, setPermalinkHydrated] = useState(false);
   const [bufferSnapshot, setBufferSnapshot] = useState<BufferSnapshot>({
     totalFrames: 0,
     bufferedCount: 0,
@@ -696,6 +718,21 @@ export default function App() {
   const loopDecodeOnlySamplesRef = useRef<number[]>([]);
   const tierFailoverCycleRef = useRef<{ key: string; emitted: boolean }>({ key: "", emitted: false });
   const runsLoadedForModelRef = useRef<string>("");
+  const mapInstanceRef = useRef<MapLibreMap | null>(null);
+  const mapViewRef = useRef({
+    lat: MAP_VIEW_DEFAULTS.center[0],
+    lon: MAP_VIEW_DEFAULTS.center[1],
+    z: MAP_VIEW_DEFAULTS.zoom,
+  });
+  const pendingMapViewRef = useRef(initialPermalinkMapView);
+  const mapViewHydratedRef = useRef(initialPermalinkMapView === null);
+  const pendingInitialForecastHourRef = useRef(
+    Number.isFinite(initialPermalink.fh) ? Number(initialPermalink.fh) : null
+  );
+  const pendingInitialLoopRef = useRef<boolean | undefined>(initialPermalink.loop);
+  const permalinkHydratedRef = useRef(false);
+  const lastSyncedPermalinkSearchRef = useRef("");
+  const suppressNextUrlSyncRef = useRef(true);
   // Pre-built Set of valid forecast hours, kept in sync with frameHours.
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
@@ -754,6 +791,17 @@ export default function App() {
     () => selectableFramesForVariable(frameHours, selectedVariableDefaultFh),
     [frameHours, selectedVariableDefaultFh]
   );
+
+  useEffect(() => {
+    const pendingForecastHour = pendingInitialForecastHourRef.current;
+    if (!Number.isFinite(pendingForecastHour) || frameHours.length === 0) {
+      return;
+    }
+    const resolved = resolveForecastHour(frameHours, Number(pendingForecastHour), selectedVariableDefaultFh);
+    setForecastHour(resolved);
+    setTargetForecastHour(resolved);
+    pendingInitialForecastHourRef.current = null;
+  }, [frameHours, selectedVariableDefaultFh]);
 
   // Keep frameSetRef in sync so updateBufferSnapshot never allocates a one-off Set.
   useEffect(() => {
@@ -1038,6 +1086,55 @@ export default function App() {
   useEffect(() => {
     mapZoomRef.current = mapZoom;
   }, [mapZoom]);
+
+  useEffect(() => {
+    const targetView = pendingMapViewRef.current;
+    const map = mapInstanceRef.current;
+    if (!targetView || !map || !isMapReady || mapViewHydratedRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    const applyHydratedView = () => {
+      if (cancelled || mapViewHydratedRef.current) {
+        return;
+      }
+      map.jumpTo({
+        center: [targetView.lon, targetView.lat],
+        zoom: targetView.z,
+      });
+      const center = map.getCenter();
+      mapViewRef.current = {
+        lat: center.lat,
+        lon: center.lng,
+        z: map.getZoom(),
+      };
+      mapViewHydratedRef.current = true;
+      pendingMapViewRef.current = null;
+      setMapViewTick((current) => current + 1);
+    };
+
+    const fallbackTimer = window.setTimeout(applyHydratedView, 800);
+    map.once("idle", applyHydratedView);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(fallbackTimer);
+      map.off("idle", applyHydratedView);
+    };
+  }, [isMapReady, region, regionPresets]);
+
+  useEffect(() => {
+    if (permalinkHydratedRef.current || !bootstrapHydrated || !mapViewHydratedRef.current) {
+      return;
+    }
+    permalinkHydratedRef.current = true;
+    suppressNextUrlSyncRef.current = true;
+    setPermalinkHydrated(true);
+    if (typeof window !== "undefined") {
+      lastSyncedPermalinkSearchRef.current = window.location.search;
+    }
+  }, [bootstrapHydrated, mapViewTick]);
 
   useEffect(() => {
     if (!webpDefaultEnabled || renderMode !== "webp_tier1") {
@@ -2169,6 +2266,11 @@ export default function App() {
       setLoading(true);
       setError(null);
       try {
+        const requestedModel = initialPermalink.model?.trim();
+        const requestedVariable = initialPermalink.var?.trim();
+        const requestedRegion = initialPermalink.region?.trim();
+        const requestedRun = initialPermalink.run?.trim();
+
         const [capabilitiesData, regionPresetData] = await Promise.all([
           fetchCapabilities({ signal: controller.signal }),
           fetchRegionPresets({ signal: controller.signal }),
@@ -2190,7 +2292,9 @@ export default function App() {
           const availability = capabilitiesData.availability?.[modelId];
           return Boolean(availability?.latest_run);
         });
-        const nextModel = preferredDefaultModel || availableModelId || orderedVisibleModelIds[0] || "";
+        const nextModel = requestedModel && orderedVisibleModelIds.includes(requestedModel)
+          ? requestedModel
+          : (preferredDefaultModel || availableModelId || orderedVisibleModelIds[0] || "");
         const modelOptions = modelRows.map((entry) => ({
           value: entry.id,
           label: entry.displayName || entry.id,
@@ -2203,9 +2307,9 @@ export default function App() {
         const variableOptions = makeVariableOptions(capabilityVars);
         const variableIds = variableOptions.map((opt) => opt.value);
         const defaultVarKey = String(modelCapability?.defaults?.default_var_key ?? "").trim();
-        const nextVariable = variableIds.includes(defaultVarKey)
-          ? defaultVarKey
-          : (variableIds[0] ?? "");
+        const nextVariable = requestedVariable && variableIds.includes(requestedVariable)
+          ? requestedVariable
+          : (variableIds.includes(defaultVarKey) ? defaultVarKey : (variableIds[0] ?? ""));
         setVariables(variableOptions);
         setVariable(nextVariable);
 
@@ -2221,10 +2325,12 @@ export default function App() {
           ?? modelCapability?.canonical_region
           ?? MAP_VIEW_DEFAULTS.region
         ).trim();
-        const nextRegion = pickPreferred(regionIds, canonicalRegion || MAP_VIEW_DEFAULTS.region);
+        const nextRegion = requestedRegion && regionIds.includes(requestedRegion)
+          ? requestedRegion
+          : pickPreferred(regionIds, canonicalRegion || MAP_VIEW_DEFAULTS.region);
         setRegion(nextRegion);
 
-        setRun("latest");
+        setRun(requestedRun || "latest");
         setRuns([]);
         setRunManifest(null);
         setFrameRows([]);
@@ -2237,6 +2343,7 @@ export default function App() {
       } finally {
         if (!controller.signal.aborted) {
           setLoading(false);
+          setBootstrapHydrated(true);
         }
       }
     }
@@ -2245,7 +2352,7 @@ export default function App() {
     return () => {
       controller.abort();
     };
-  }, []);
+  }, [initialPermalink]);
 
   useEffect(() => {
     if (!model) return;
@@ -2699,9 +2806,53 @@ export default function App() {
     showTransientFrameStatus,
   ]);
 
+  useEffect(() => {
+    const pendingLoop = pendingInitialLoopRef.current;
+    if (typeof pendingLoop === "undefined") {
+      return;
+    }
+
+    if (!pendingLoop) {
+      handleSetIsPlaying(false);
+      pendingInitialLoopRef.current = undefined;
+      return;
+    }
+
+    if (!bootstrapHydrated || loading || selectableFrameHours.length === 0) {
+      return;
+    }
+
+    handleSetIsPlaying(true);
+    pendingInitialLoopRef.current = undefined;
+  }, [bootstrapHydrated, loading, selectableFrameHours.length, handleSetIsPlaying]);
+
   const handleZoomRoutingSignal = useCallback((payload: { zoom: number; gestureActive: boolean }) => {
     setMapZoom(payload.zoom);
     setZoomGestureActive(payload.gestureActive);
+  }, []);
+
+  const handleMapReady = useCallback((map: MapLibreMap) => {
+    mapInstanceRef.current = map;
+    const center = map.getCenter();
+    mapViewRef.current = {
+      lat: center.lat,
+      lon: center.lng,
+      z: map.getZoom(),
+    };
+    setMapViewTick((current) => current + 1);
+    setIsMapReady(true);
+  }, []);
+
+  const handleViewportChange = useCallback((payload: { lat: number; lon: number; z: number }) => {
+    if (!Number.isFinite(payload.lat) || !Number.isFinite(payload.lon) || !Number.isFinite(payload.z)) {
+      return;
+    }
+    mapViewRef.current = {
+      lat: payload.lat,
+      lon: payload.lon,
+      z: payload.z,
+    };
+    setMapViewTick((current) => current + 1);
   }, []);
 
   const handleTileViewportReady = useCallback((readyTileUrl: string) => {
@@ -2738,6 +2889,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearFrameStatusTimer();
+      mapInstanceRef.current = null;
       if (scrubRafRef.current !== null) {
         window.cancelAnimationFrame(scrubRafRef.current);
       }
@@ -2782,6 +2934,77 @@ export default function App() {
     : `Loading frames ${preloadBufferedCount}/${preloadTotal}`;
   const activeLoopHour = loopDisplayHour ?? forecastHour;
   const activeLoopUrl = isLoopDisplayActive ? resolveLoopUrlForHour(activeLoopHour, visibleRenderMode) : null;
+  const permalinkLoopActive = controlsIsPlaying || isLoopAutoplayBuffering;
+  const resolvedLoopPermalink = typeof pendingInitialLoopRef.current === "boolean"
+    ? pendingInitialLoopRef.current
+    : permalinkLoopActive;
+  const resolvedForecastHourPermalink = Number.isFinite(forecastHour)
+    ? forecastHour
+    : pendingInitialForecastHourRef.current;
+
+  const handleCopyLink = useCallback(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    const href = window.location.href;
+    if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(href)
+        .then(() => {
+          showTransientFrameStatus("Link copied");
+        })
+        .catch(() => {
+          // Ignore clipboard errors.
+        });
+      return;
+    }
+  }, [showTransientFrameStatus]);
+
+  useEffect(() => {
+    if (!permalinkHydrated || typeof window === "undefined") {
+      return;
+    }
+    if (suppressNextUrlSyncRef.current) {
+      suppressNextUrlSyncRef.current = false;
+      lastSyncedPermalinkSearchRef.current = window.location.search;
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      const mapView = mapViewRef.current;
+      const search = buildPermalinkSearch({
+        model: model || undefined,
+        run: run || undefined,
+        var: variable || undefined,
+        fh: Number.isFinite(resolvedForecastHourPermalink)
+          ? Number(resolvedForecastHourPermalink)
+          : undefined,
+        region: region || undefined,
+        lat: mapView.lat,
+        lon: mapView.lon,
+        z: mapView.z,
+        loop: resolvedLoopPermalink,
+      });
+      if (search === lastSyncedPermalinkSearchRef.current || search === window.location.search) {
+        lastSyncedPermalinkSearchRef.current = search;
+        return;
+      }
+      replaceUrlQuery(search);
+      lastSyncedPermalinkSearchRef.current = search;
+    }, PERMALINK_SYNC_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    permalinkHydrated,
+    model,
+    run,
+    variable,
+    resolvedForecastHourPermalink,
+    region,
+    resolvedLoopPermalink,
+    mapViewTick,
+  ]);
 
   return (
     <div className="relative flex min-h-svh flex-col">
@@ -2799,6 +3022,7 @@ export default function App() {
         runs={runOptions}
         variables={variables}
         disabled={loading || models.length === 0}
+        onCopyLink={handleCopyLink}
       />
 
       <div className="relative flex-1 min-h-0 overflow-hidden">
@@ -2825,6 +3049,8 @@ export default function App() {
           onZoomHint={setShowZoomHint}
           onZoomBucketChange={setZoomBucket}
           onZoomRoutingSignal={handleZoomRoutingSignal}
+          onViewportChange={handleViewportChange}
+          onMapReady={handleMapReady}
           onMapHover={onHover}
           onMapHoverEnd={onHoverEnd}
         />

@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { MapPin, Layers, CalendarClock, Boxes } from "lucide-react";
+import { MapPin, Layers, CalendarClock, Boxes, Link as LinkIcon } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -26,6 +26,7 @@ type WeatherToolbarProps = {
   runs: Option[];
   variables: Option[];
   disabled?: boolean;
+  onCopyLink?: () => void;
 };
 
 function ToolbarSelect(props: {
@@ -77,6 +78,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     runs,
     variables,
     disabled = false,
+    onCopyLink,
   } = props;
 
   return (
@@ -125,6 +127,24 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
           disabled={disabled}
           placeholder="Variable"
         />
+
+        {onCopyLink ? (
+          <div className="ml-auto flex flex-col gap-1">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+              Share
+            </span>
+            <button
+              type="button"
+              onClick={onCopyLink}
+              className="inline-flex h-8 items-center gap-1.5 rounded-md border border-border/50 bg-secondary/45 px-2.5 text-xs font-medium text-foreground shadow-sm transition-all duration-150 hover:border-border hover:bg-secondary/65 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/35"
+              title="Copy link"
+              aria-label="Copy link"
+            >
+              <LinkIcon className="h-3.5 w-3.5" />
+              Copy link
+            </button>
+          </div>
+        ) : null}
       </div>
     </header>
   );

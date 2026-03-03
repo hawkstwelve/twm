@@ -539,6 +539,8 @@ type MapCanvasProps = {
   onZoomHint?: (show: boolean) => void;
   onZoomBucketChange?: (bucket: number) => void;
   onZoomRoutingSignal?: (payload: { zoom: number; gestureActive: boolean }) => void;
+  onViewportChange?: (payload: { lat: number; lon: number; z: number }) => void;
+  onMapReady?: (map: maplibregl.Map) => void;
   onMapHover?: (lat: number, lon: number, x: number, y: number) => void;
   onMapHoverEnd?: () => void;
 };
@@ -566,6 +568,8 @@ export function MapCanvas({
   onZoomHint,
   onZoomBucketChange,
   onZoomRoutingSignal,
+  onViewportChange,
+  onMapReady,
   onMapHover,
   onMapHoverEnd,
 }: MapCanvasProps) {
@@ -592,6 +596,10 @@ export function MapCanvas({
   const loopToTileTokenRef = useRef(0);
   const previousLoopActiveRef = useRef(loopActive);
   const isLoopToTileTransitioningRef = useRef(false);
+  const onMapReadyRef = useRef(onMapReady);
+  onMapReadyRef.current = onMapReady;
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
 
   const view = useMemo(() => {
     return regionViews?.[region] ?? {
@@ -1006,6 +1014,7 @@ export function MapCanvas({
       initializeSourceTracking(tileUrl);
       lastAppliedBasemapModeRef.current = basemapMode;
       enforceLayerOrder(map);
+      onMapReadyRef.current?.(map);
     });
 
     mapRef.current = map;
@@ -1185,6 +1194,18 @@ export function MapCanvas({
       });
     };
 
+    const emitViewportChange = () => {
+      if (!onViewportChangeRef.current) {
+        return;
+      }
+      const center = map.getCenter();
+      onViewportChangeRef.current({
+        lat: center.lat,
+        lon: center.lng,
+        z: map.getZoom(),
+      });
+    };
+
     const checkZoom = () => {
       const zoom = map.getZoom();
       const bucket = Math.max(0, Math.floor(zoom));
@@ -1213,19 +1234,26 @@ export function MapCanvas({
       const bucket = Math.max(0, Math.floor(zoom));
       console.debug("[map] zoom", { zoom: Number(zoom.toFixed(2)), bucket });
       emitRoutingSignal();
+      emitViewportChange();
+    };
+
+    const handleMoveEnd = () => {
+      checkZoom();
+      emitViewportChange();
     };
 
     map.on("zoomstart", handleZoomStart);
     map.on("zoomend", handleZoomEnd);
-    map.on("moveend", checkZoom);
+    map.on("moveend", handleMoveEnd);
     map.on("zoom", checkZoom);
     checkZoom();
     emitRoutingSignal();
+    emitViewportChange();
 
     return () => {
       map.off("zoomstart", handleZoomStart);
       map.off("zoomend", handleZoomEnd);
-      map.off("moveend", checkZoom);
+      map.off("moveend", handleMoveEnd);
       map.off("zoom", checkZoom);
       if (rafId !== null) {
         window.cancelAnimationFrame(rafId);
