@@ -184,17 +184,6 @@ def _map_upstream_error(upstream_status: int | None, error_message: str | None) 
         return 502, "IPS_UPSTREAM_ERROR", "Forum API temporarily unavailable."
     return 502, "IPS_UPSTREAM_ERROR", "Forum API temporarily unavailable."
 
-
-def _log_upstream_error(err: TwfUpstreamError) -> None:
-    logger.warning(
-        "TWF upstream error code=%s upstream_status=%s upstream_code=%s upstream_message=%r",
-        err.code,
-        err.upstream_status,
-        err.upstream_code,
-        err.upstream_message,
-    )
-
-
 def _raise_mapped_response_error(response: httpx.Response) -> NoReturn:
     upstream_status = response.status_code
     upstream_code, error_message, upstream_body = _parse_ips_error_response(response)
@@ -208,9 +197,7 @@ def _raise_mapped_response_error(response: httpx.Response) -> NoReturn:
         upstream_code=upstream_code,
         upstream_message=upstream_message,
     )
-    _log_upstream_error(err)
     raise err
-
 
 def _raise_mapped_request_error(exc: httpx.RequestError, upstream_message: str | None = None) -> NoReturn:
     # Network / transport failures: treat as upstream unavailable.
@@ -222,9 +209,7 @@ def _raise_mapped_request_error(exc: httpx.RequestError, upstream_message: str |
         upstream_code=None,
         upstream_message=upstream_message or str(exc),
     )
-    _log_upstream_error(err)
     raise err from exc
-
 
 async def _request_json_with_variants(
     *,
