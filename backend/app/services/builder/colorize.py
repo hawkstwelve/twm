@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 
-from app.services.colormaps import (
+from ..colormaps import (
     build_continuous_lut,
     build_continuous_lut_from_stops,
     build_discrete_lut,
