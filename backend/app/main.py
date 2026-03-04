@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from PIL import Image
 from pyproj import Transformer
+from rasterio.enums import Resampling
 from rasterio.windows import Window
 from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -37,6 +38,9 @@ from .config.regions import REGION_PRESETS
 from .models.registry import list_model_capabilities
 from .services.builder.colorize import float_to_rgba
 from .services.render_resampling import (
+    compute_loop_output_shape,
+    high_quality_loop_resampling,
+    log_fixed_loop_size_once,
     rasterio_resampling_for_loop,
     use_value_render_for_variable,
     variable_color_map_id,
@@ -57,6 +61,8 @@ LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
 LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "86"))
 LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
+LOOP_WEBP_TIER0_FIXED_W = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER0_FIXED_W", "1600"))
+LOOP_WEBP_TIER1_FIXED_W = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_FIXED_W", "2400"))
 SAMPLE_CACHE_TTL_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_CACHE_TTL_SECONDS", "2.0"))
 SAMPLE_INFLIGHT_WAIT_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_INFLIGHT_WAIT_SECONDS", "0.2"))
 SAMPLE_RATE_LIMIT_WINDOW_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_RATE_LIMIT_WINDOW_SECONDS", "1.0"))
@@ -66,10 +72,12 @@ LOOP_TIER_CONFIG: dict[int, dict[str, int]] = {
     0: {
         "max_dim": LOOP_WEBP_MAX_DIM,
         "quality": LOOP_WEBP_QUALITY,
+        "fixed_w": LOOP_WEBP_TIER0_FIXED_W,
     },
     1: {
         "max_dim": LOOP_WEBP_TIER1_MAX_DIM,
         "quality": LOOP_WEBP_TIER1_QUALITY,
+        "fixed_w": LOOP_WEBP_TIER1_FIXED_W,
     },
 }
 
@@ -1444,18 +1452,24 @@ def _render_loop_rgba_hwc(
     out_h: int,
     out_w: int,
     blur_sigma: float | None = None,
+    prefer_high_quality_resize: bool = False,
 ) -> np.ndarray | None:
+    base_resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
+    if prefer_high_quality_resize and base_resampling != Resampling.nearest:
+        render_resampling = high_quality_loop_resampling()
+    else:
+        render_resampling = base_resampling
+
     use_value_render = use_value_render_for_variable(model_id=model_id, var_key=var_key)
     if use_value_render and value_cog_path is not None and value_cog_path.is_file():
         color_map_id = variable_color_map_id(model_id, var_key)
         if color_map_id:
             try:
-                resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
                 with rasterio.open(value_cog_path) as value_ds:
                     sampled_values = value_ds.read(
                         1,
                         out_shape=(out_h, out_w),
-                        resampling=resampling,
+                        resampling=render_resampling,
                     ).astype(np.float32, copy=False)
                 sampled_values = _maybe_blur_loop_values(sampled_values, sigma=blur_sigma)
                 rgba, _ = float_to_rgba(
@@ -1479,13 +1493,25 @@ def _render_loop_rgba_hwc(
                 var_key,
             )
 
-    resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
     with rasterio.open(cog_path) as ds:
-        data = ds.read(
-            indexes=(1, 2, 3, 4),
-            out_shape=(4, out_h, out_w),
-            resampling=resampling,
-        )
+        if render_resampling == Resampling.nearest:
+            data = ds.read(
+                indexes=(1, 2, 3, 4),
+                out_shape=(4, out_h, out_w),
+                resampling=render_resampling,
+            )
+        else:
+            rgb = ds.read(
+                indexes=(1, 2, 3),
+                out_shape=(3, out_h, out_w),
+                resampling=render_resampling,
+            )
+            alpha = ds.read(
+                indexes=4,
+                out_shape=(out_h, out_w),
+                resampling=Resampling.nearest,
+            )
+            data = np.concatenate((rgb, alpha[np.newaxis, :, :]), axis=0)
     return np.moveaxis(data, 0, -1)
 
 
@@ -1497,6 +1523,7 @@ def _ensure_loop_webp(
     var_key: str,
     tier: int,
     value_cog_path: Path | None = None,
+    run_id: str | None = None,
 ) -> bool:
     if out_path.is_file():
         return True
@@ -1506,6 +1533,7 @@ def _ensure_loop_webp(
         return False
 
     max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
+    fixed_w_cfg = max(1, int(tier_cfg.get("fixed_w", max_dim_cfg)))
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1516,13 +1544,27 @@ def _ensure_loop_webp(
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
-            max_dim = max(src_h, src_w)
-            if max_dim <= 0:
+            out_h, out_w, fixed_applied = compute_loop_output_shape(
+                model_id=model_id,
+                var_key=var_key,
+                src_h=src_h,
+                src_w=src_w,
+                max_dim=max_dim_cfg,
+                fixed_width=fixed_w_cfg,
+            )
+            if out_h <= 0 or out_w <= 0:
                 return False
-
-            scale = min(1.0, float(max_dim_cfg) / float(max_dim))
-            out_h = max(1, int(round(src_h * scale)))
-            out_w = max(1, int(round(src_w * scale)))
+            if fixed_applied:
+                log_fixed_loop_size_once(
+                    model_id=model_id,
+                    run_id=run_id,
+                    var_key=var_key,
+                    tier=tier,
+                    src_h=src_h,
+                    src_w=src_w,
+                    out_h=out_h,
+                    out_w=out_w,
+                )
 
         rgba = _render_loop_rgba_hwc(
             cog_path=cog_path,
@@ -1532,6 +1574,7 @@ def _ensure_loop_webp(
             out_h=out_h,
             out_w=out_w,
             blur_sigma=None,
+            prefer_high_quality_resize=fixed_applied,
         )
         if rgba is None:
             return False
@@ -1556,25 +1599,41 @@ def _render_loop_webp_bytes(
     var_key: str,
     tier: int,
     value_cog_path: Path | None = None,
+    run_id: str | None = None,
 ) -> bytes | None:
     tier_cfg = LOOP_TIER_CONFIG.get(tier)
     if tier_cfg is None:
         return None
 
     max_dim_cfg = max(1, int(tier_cfg.get("max_dim", LOOP_WEBP_MAX_DIM)))
+    fixed_w_cfg = max(1, int(tier_cfg.get("fixed_w", max_dim_cfg)))
     quality_cfg = max(1, min(100, int(tier_cfg.get("quality", LOOP_WEBP_QUALITY))))
 
     try:
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
-            max_dim = max(src_h, src_w)
-            if max_dim <= 0:
+            out_h, out_w, fixed_applied = compute_loop_output_shape(
+                model_id=model_id,
+                var_key=var_key,
+                src_h=src_h,
+                src_w=src_w,
+                max_dim=max_dim_cfg,
+                fixed_width=fixed_w_cfg,
+            )
+            if out_h <= 0 or out_w <= 0:
                 return None
-
-            scale = min(1.0, float(max_dim_cfg) / float(max_dim))
-            out_h = max(1, int(round(src_h * scale)))
-            out_w = max(1, int(round(src_w * scale)))
+            if fixed_applied:
+                log_fixed_loop_size_once(
+                    model_id=model_id,
+                    run_id=run_id,
+                    var_key=var_key,
+                    tier=tier,
+                    src_h=src_h,
+                    src_w=src_w,
+                    out_h=out_h,
+                    out_w=out_w,
+                )
 
         rgba = _render_loop_rgba_hwc(
             cog_path=cog_path,
@@ -1584,6 +1643,7 @@ def _render_loop_webp_bytes(
             out_h=out_h,
             out_w=out_w,
             blur_sigma=None,
+            prefer_high_quality_resize=fixed_applied,
         )
         if rgba is None:
             return None
@@ -2011,6 +2071,7 @@ def get_loop_webp(
         var_key=var,
         tier=tier,
         value_cog_path=value_cog_path,
+        run_id=resolved,
     ):
         # Graceful degradation path: avoid surfacing hard 500s to clients when
         # cache writes fail (permissions/disk), and allow tier-1 to fall back.
@@ -2031,6 +2092,7 @@ def get_loop_webp(
                 var_key=var,
                 tier=0,
                 value_cog_path=value_cog_path,
+                run_id=resolved,
             ):
                 return FileResponse(
                     path=str(tier0_out),
@@ -2044,6 +2106,7 @@ def get_loop_webp(
                 var_key=var,
                 tier=0,
                 value_cog_path=value_cog_path,
+                run_id=resolved,
             )
             if tier0_bytes is not None:
                 return Response(content=tier0_bytes, media_type="image/webp", headers={"Cache-Control": CACHE_MISS})
@@ -2054,6 +2117,7 @@ def get_loop_webp(
             var_key=var,
             tier=tier,
             value_cog_path=value_cog_path,
+            run_id=resolved,
         )
         if content is not None:
             return Response(content=content, media_type="image/webp", headers={"Cache-Control": CACHE_MISS})

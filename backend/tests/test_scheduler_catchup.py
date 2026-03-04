@@ -78,8 +78,10 @@ def test_process_run_catches_up_consecutive_available_hours(
         loop_workers=1,
         loop_tier0_quality=82,
         loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
         loop_tier1_quality=86,
         loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
     )
 
     assert processed_run_id == run_id

@@ -15,11 +15,15 @@ from typing import Any, Iterable
 import numpy as np
 import rasterio
 from PIL import Image
+from rasterio.enums import Resampling
 
 from app.models.registry import MODEL_REGISTRY
 from app.services.builder.colorize import float_to_rgba
 from app.services.builder.pipeline import build_frame
 from app.services.render_resampling import (
+    compute_loop_output_shape,
+    high_quality_loop_resampling,
+    log_fixed_loop_size_once,
     rasterio_resampling_for_loop,
     use_value_render_for_variable,
     variable_color_map_id,
@@ -49,6 +53,8 @@ ENV_LOOP_WEBP_QUALITY = "TWF_V3_LOOP_WEBP_QUALITY"
 ENV_LOOP_WEBP_MAX_DIM = "TWF_V3_LOOP_WEBP_MAX_DIM"
 ENV_LOOP_WEBP_TIER1_QUALITY = "TWF_V3_LOOP_WEBP_TIER1_QUALITY"
 ENV_LOOP_WEBP_TIER1_MAX_DIM = "TWF_V3_LOOP_WEBP_TIER1_MAX_DIM"
+ENV_LOOP_WEBP_TIER0_FIXED_W = "TWF_V3_LOOP_WEBP_TIER0_FIXED_W"
+ENV_LOOP_WEBP_TIER1_FIXED_W = "TWF_V3_LOOP_WEBP_TIER1_FIXED_W"
 
 DEFAULT_LOOP_PREGENERATE_ENABLED = True
 DEFAULT_LOOP_CACHE_ROOT = Path("/tmp/twf_v3_loop_webp_cache")
@@ -57,6 +63,8 @@ DEFAULT_LOOP_WEBP_QUALITY = 82
 DEFAULT_LOOP_WEBP_MAX_DIM = 1600
 DEFAULT_LOOP_WEBP_TIER1_QUALITY = 86
 DEFAULT_LOOP_WEBP_TIER1_MAX_DIM = 2400
+DEFAULT_LOOP_WEBP_TIER0_FIXED_W = 1600
+DEFAULT_LOOP_WEBP_TIER1_FIXED_W = 2400
 
 
 class SchedulerConfigError(RuntimeError):
@@ -571,12 +579,15 @@ def _enforce_run_retention(root: Path, keep_runs: int) -> None:
 def _convert_rgba_cog_to_loop_webp(
     *,
     model_id: str,
+    run_id: str | None,
     var_key: str,
     cog_path: Path,
     value_cog_path: Path | None,
     out_path: Path,
     quality: int,
     max_dim: int,
+    fixed_width: int,
+    tier: int,
 ) -> tuple[bool, str]:
     mode_used = "rgba"
 
@@ -597,25 +608,44 @@ def _convert_rgba_cog_to_loop_webp(
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
-            max_side = max(src_h, src_w)
-            if max_side <= 0:
+            out_h, out_w, fixed_applied = compute_loop_output_shape(
+                model_id=model_id,
+                var_key=var_key,
+                src_h=src_h,
+                src_w=src_w,
+                max_dim=max_dim,
+                fixed_width=fixed_width,
+            )
+            if out_h <= 0 or out_w <= 0:
                 return False, mode_used
+            if fixed_applied:
+                log_fixed_loop_size_once(
+                    model_id=model_id,
+                    run_id=run_id,
+                    var_key=var_key,
+                    tier=tier,
+                    src_h=src_h,
+                    src_w=src_w,
+                    out_h=out_h,
+                    out_w=out_w,
+                )
 
-            scale = min(1.0, float(max_dim) / float(max_side))
-            out_h = max(1, int(round(src_h * scale)))
-            out_w = max(1, int(round(src_w * scale)))
+            base_resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
+            if fixed_applied and base_resampling != Resampling.nearest:
+                render_resampling = high_quality_loop_resampling()
+            else:
+                render_resampling = base_resampling
 
             use_value_render = use_value_render_for_variable(model_id=model_id, var_key=var_key)
             if use_value_render and value_cog_path is not None and value_cog_path.is_file():
                 color_map_id = variable_color_map_id(model_id, var_key)
                 if color_map_id:
                     try:
-                        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
                         with rasterio.open(value_cog_path) as value_ds:
                             sampled_values = value_ds.read(
                                 1,
                                 out_shape=(out_h, out_w),
-                                resampling=resampling,
+                                resampling=render_resampling,
                             ).astype(np.float32, copy=False)
                         sampled_values = _maybe_blur_value_frame(sampled_values, sigma=None)
                         rgba, _ = float_to_rgba(
@@ -643,8 +673,24 @@ def _convert_rgba_cog_to_loop_webp(
                         var_key,
                     )
 
-            resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
-            data = ds.read(indexes=(1, 2, 3, 4), out_shape=(4, out_h, out_w), resampling=resampling)
+            if render_resampling == Resampling.nearest:
+                data = ds.read(
+                    indexes=(1, 2, 3, 4),
+                    out_shape=(4, out_h, out_w),
+                    resampling=render_resampling,
+                )
+            else:
+                rgb = ds.read(
+                    indexes=(1, 2, 3),
+                    out_shape=(3, out_h, out_w),
+                    resampling=render_resampling,
+                )
+                alpha = ds.read(
+                    indexes=4,
+                    out_shape=(out_h, out_w),
+                    resampling=Resampling.nearest,
+                )
+                data = np.concatenate((rgb, alpha[np.newaxis, :, :]), axis=0)
 
         rgba = np.moveaxis(data, 0, -1)
         image = Image.fromarray(rgba, mode="RGBA")
@@ -664,29 +710,31 @@ def _pregenerate_loop_webp_for_run(
     workers: int,
     tier0_quality: int,
     tier0_max_dim: int,
+    tier0_fixed_w: int,
     tier1_quality: int,
     tier1_max_dim: int,
+    tier1_fixed_w: int,
 ) -> tuple[int, int]:
     published_run = data_root / "published" / model / run_id
     if not published_run.is_dir():
         return 0, 0
 
     tier_specs = (
-        (0, int(tier0_quality), int(tier0_max_dim)),
-        (1, int(tier1_quality), int(tier1_max_dim)),
+        (0, int(tier0_quality), int(tier0_max_dim), int(tier0_fixed_w)),
+        (1, int(tier1_quality), int(tier1_max_dim), int(tier1_fixed_w)),
     )
 
-    jobs: list[tuple[str, Path, Path | None, Path, int, int, int]] = []
+    jobs: list[tuple[str, Path, Path | None, Path, int, int, int, int]] = []
     for var_dir in sorted([p for p in published_run.iterdir() if p.is_dir()]):
         variable = var_dir.name
         for cog_path in sorted(var_dir.glob("fh*.rgba.cog.tif")):
             fh = cog_path.name.split(".")[0]
             value_cog_path = var_dir / f"{fh}.val.cog.tif"
-            for tier, quality, max_dim in tier_specs:
+            for tier, quality, max_dim, fixed_w in tier_specs:
                 out_path = loop_cache_root / model / run_id / variable / f"tier{tier}" / f"{fh}.loop.webp"
                 if out_path.is_file():
                     continue
-                jobs.append((variable, cog_path, value_cog_path, out_path, quality, max_dim, tier))
+                jobs.append((variable, cog_path, value_cog_path, out_path, quality, max_dim, fixed_w, tier))
 
     if not jobs:
         return 0, 0
@@ -709,16 +757,19 @@ def _pregenerate_loop_webp_for_run(
     mode_counts: dict[tuple[str, str], int] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         future_to_var: dict[concurrent.futures.Future[tuple[bool, str]], str] = {}
-        for variable, cog_path, value_cog_path, out_path, quality, max_dim, _tier in jobs:
+        for variable, cog_path, value_cog_path, out_path, quality, max_dim, fixed_w, tier in jobs:
             future = pool.submit(
                 _convert_rgba_cog_to_loop_webp,
                 model_id=model,
+                run_id=run_id,
                 var_key=variable,
                 cog_path=cog_path,
                 value_cog_path=value_cog_path,
                 out_path=out_path,
                 quality=quality,
                 max_dim=max_dim,
+                fixed_width=fixed_w,
+                tier=tier,
             )
             future_to_var[future] = variable
 
@@ -758,8 +809,10 @@ def _process_run(
     loop_workers: int,
     loop_tier0_quality: int,
     loop_tier0_max_dim: int,
+    loop_tier0_fixed_w: int,
     loop_tier1_quality: int,
     loop_tier1_max_dim: int,
+    loop_tier1_fixed_w: int,
 ) -> tuple[str, int, int]:
     run_id = _run_id_from_dt(run_dt)
     cycle_hour = run_dt.hour
@@ -853,8 +906,10 @@ def _process_run(
                 workers=loop_workers,
                 tier0_quality=loop_tier0_quality,
                 tier0_max_dim=loop_tier0_max_dim,
+                tier0_fixed_w=loop_tier0_fixed_w,
                 tier1_quality=loop_tier1_quality,
                 tier1_max_dim=loop_tier1_max_dim,
+                tier1_fixed_w=loop_tier1_fixed_w,
             )
 
     _enforce_run_retention(data_root / "staging" / model_id, keep_runs)
@@ -885,8 +940,10 @@ def run_scheduler(
     loop_workers: int,
     loop_tier0_quality: int,
     loop_tier0_max_dim: int,
+    loop_tier0_fixed_w: int,
     loop_tier1_quality: int,
     loop_tier1_max_dim: int,
+    loop_tier1_fixed_w: int,
 ) -> int:
     plugin = _resolve_model(model)
     if plugin.get_region(CANONICAL_COVERAGE) is None:
@@ -960,8 +1017,10 @@ def run_scheduler(
             loop_workers=loop_workers,
             loop_tier0_quality=loop_tier0_quality,
             loop_tier0_max_dim=loop_tier0_max_dim,
+            loop_tier0_fixed_w=loop_tier0_fixed_w,
             loop_tier1_quality=loop_tier1_quality,
             loop_tier1_max_dim=loop_tier1_max_dim,
+            loop_tier1_fixed_w=loop_tier1_fixed_w,
         )
         last_run_id = processed_run_id
         last_run_available = available
@@ -1036,9 +1095,19 @@ def main(argv: list[str] | None = None) -> int:
     loop_tier0_quality = _int_from_env(ENV_LOOP_WEBP_QUALITY, DEFAULT_LOOP_WEBP_QUALITY, min_value=1)
     loop_tier0_quality = max(1, min(100, loop_tier0_quality))
     loop_tier0_max_dim = _int_from_env(ENV_LOOP_WEBP_MAX_DIM, DEFAULT_LOOP_WEBP_MAX_DIM, min_value=64)
+    loop_tier0_fixed_w = _int_from_env(
+        ENV_LOOP_WEBP_TIER0_FIXED_W,
+        DEFAULT_LOOP_WEBP_TIER0_FIXED_W,
+        min_value=64,
+    )
     loop_tier1_quality = _int_from_env(ENV_LOOP_WEBP_TIER1_QUALITY, DEFAULT_LOOP_WEBP_TIER1_QUALITY, min_value=1)
     loop_tier1_quality = max(1, min(100, loop_tier1_quality))
     loop_tier1_max_dim = _int_from_env(ENV_LOOP_WEBP_TIER1_MAX_DIM, DEFAULT_LOOP_WEBP_TIER1_MAX_DIM, min_value=64)
+    loop_tier1_fixed_w = _int_from_env(
+        ENV_LOOP_WEBP_TIER1_FIXED_W,
+        DEFAULT_LOOP_WEBP_TIER1_FIXED_W,
+        min_value=64,
+    )
 
     vars_list = _parse_vars(vars_raw)
     primary_list = _parse_vars(primary_raw)
@@ -1060,8 +1129,10 @@ def main(argv: list[str] | None = None) -> int:
             loop_workers=loop_workers,
             loop_tier0_quality=loop_tier0_quality,
             loop_tier0_max_dim=loop_tier0_max_dim,
+            loop_tier0_fixed_w=loop_tier0_fixed_w,
             loop_tier1_quality=loop_tier1_quality,
             loop_tier1_max_dim=loop_tier1_max_dim,
+            loop_tier1_fixed_w=loop_tier1_fixed_w,
         )
     except SchedulerConfigError as exc:
         logger.error("Scheduler configuration error: %s", exc)

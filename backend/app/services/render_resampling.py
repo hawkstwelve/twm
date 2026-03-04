@@ -6,6 +6,7 @@ This module keeps tile extraction and loop WebP downscaling behavior aligned.
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Mapping
 from functools import lru_cache
 from typing import Any
@@ -20,11 +21,14 @@ _DISCRETE_KINDS = {"discrete", "indexed", "categorical"}
 _VALUE_RENDER_MIN_MODEL_KM = 10.0
 # First-pass rollout guard. Keep generic km/kind checks, but only allow GFS now.
 _VALUE_RENDER_MODEL_ALLOWLIST = {"gfs"}
+_FIXED_LOOP_SIZE_MODEL_ALLOWLIST = {"gfs"}
 _MODEL_GRID_KM_FALLBACK: dict[str, float] = {
     "gfs": 25.0,
 }
 _warned_unknown_kind: set[tuple[str, str]] = set()
 _unknown_kind_hits: dict[tuple[str, str], int] = {}
+_fixed_loop_size_log_lock = threading.Lock()
+_fixed_loop_size_logged: set[tuple[str, str, str, int]] = set()
 
 
 def _normalize_kind(kind: Any) -> str:
@@ -174,6 +178,99 @@ def use_value_render_for_variable(
     if model_norm not in _VALUE_RENDER_MODEL_ALLOWLIST:
         return False
     return True
+
+
+def use_fixed_loop_size_for_variable(
+    *,
+    model_id: str,
+    var_key: str,
+    kind: str | None = None,
+) -> bool:
+    model_norm = str(model_id or "").strip().lower()
+    var_norm = str(var_key or "").strip().lower()
+    if not model_norm or not var_norm:
+        return False
+
+    resolved_kind = _normalize_kind(kind) or _normalize_kind(variable_kind(model_norm, var_norm))
+    if resolved_kind != "continuous":
+        return False
+
+    if model_norm not in _FIXED_LOOP_SIZE_MODEL_ALLOWLIST:
+        return False
+
+    model_km = model_grid_km(model_norm)
+    if model_km is None:
+        return True
+    return model_km >= _VALUE_RENDER_MIN_MODEL_KM
+
+
+def compute_loop_output_shape(
+    *,
+    model_id: str,
+    var_key: str,
+    src_h: int,
+    src_w: int,
+    max_dim: int,
+    fixed_width: int,
+    kind: str | None = None,
+) -> tuple[int, int, bool]:
+    if src_h <= 0 or src_w <= 0:
+        return 0, 0, False
+
+    if use_fixed_loop_size_for_variable(model_id=model_id, var_key=var_key, kind=kind):
+        out_w = max(1, int(fixed_width))
+        ratio = float(out_w) / float(src_w)
+        out_h = max(1, int(round(float(src_h) * ratio)))
+        return out_h, out_w, True
+
+    max_side = max(src_h, src_w)
+    safe_max_dim = max(1, int(max_dim))
+    scale = min(1.0, float(safe_max_dim) / float(max_side))
+    out_h = max(1, int(round(src_h * scale)))
+    out_w = max(1, int(round(src_w * scale)))
+    return out_h, out_w, False
+
+
+def log_fixed_loop_size_once(
+    *,
+    model_id: str,
+    run_id: str | None,
+    var_key: str,
+    tier: int,
+    src_h: int,
+    src_w: int,
+    out_h: int,
+    out_w: int,
+) -> None:
+    model_norm = str(model_id or "").strip().lower() or "<unknown-model>"
+    run_norm = str(run_id or "").strip() or "<unknown-run>"
+    var_norm = str(var_key or "").strip().lower() or "<unknown-var>"
+    key = (run_norm, model_norm, var_norm, int(tier))
+    with _fixed_loop_size_log_lock:
+        if key in _fixed_loop_size_logged:
+            return
+        _fixed_loop_size_logged.add(key)
+    logger.info(
+        "Loop fixed sizing applied: run=%s model=%s var=%s tier=%d src=%dx%d out=%dx%d",
+        run_norm,
+        model_norm,
+        var_norm,
+        int(tier),
+        int(src_w),
+        int(src_h),
+        int(out_w),
+        int(out_h),
+    )
+
+
+def high_quality_loop_resampling() -> Resampling:
+    lanczos = getattr(Resampling, "lanczos", None)
+    if lanczos is not None:
+        return lanczos
+    cubic = getattr(Resampling, "cubic", None)
+    if cubic is not None:
+        return cubic
+    return Resampling.bilinear
 
 
 def rio_tiler_resampling_kwargs(
