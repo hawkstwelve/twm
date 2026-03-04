@@ -65,13 +65,25 @@ def test_derive_bundle_reuses_fetch_and_warp_cache(monkeypatch) -> None:
     }
     token_to_key: dict[float, tuple[str, int]] = {}
 
-    def _fake_fetch_variable(*, model_id, product, search_pattern, run_date, fh, herbie_kwargs=None):
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
         del model_id, product, run_date, herbie_kwargs
         key = (str(search_pattern), int(fh))
         fetch_calls.append(key)
         value = value_by_key[key]
         token_to_key[round(value, 4)] = key
-        return np.full((2, 2), value, dtype=np.float32), crs, transform
+        data = np.full((2, 2), value, dtype=np.float32)
+        if return_meta:
+            return data, crs, transform, {"inventory_line": f"{search_pattern}:{fh}"}
+        return data, crs, transform
 
     def _fake_warp_to_target_grid(
         data: np.ndarray,
@@ -210,13 +222,25 @@ def test_derive_bundle_reuses_apcp_warp_cache_with_kuchera(monkeypatch) -> None:
     }
     token_to_key: dict[float, tuple[str, int]] = {}
 
-    def _fake_fetch_variable(*, model_id, product, search_pattern, run_date, fh, herbie_kwargs=None):
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
         del model_id, product, run_date, herbie_kwargs
         key = (str(search_pattern), int(fh))
         fetch_calls.append(key)
         value = value_by_key[key]
         token_to_key[round(value, 4)] = key
-        return np.full((2, 2), value, dtype=np.float32), crs, transform
+        data = np.full((2, 2), value, dtype=np.float32)
+        if return_meta:
+            return data, crs, transform, {"inventory_line": f"{search_pattern}:{fh}"}
+        return data, crs, transform
 
     def _fake_warp_to_target_grid(
         data: np.ndarray,

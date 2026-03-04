@@ -53,14 +53,27 @@ def test_snowfall_derive_fetch_cache_reuses_repeated_component_fetches(monkeypat
         2: 0.8,
     }
 
-    def _fake_fetch_variable(*, model_id, product, search_pattern, run_date, fh, herbie_kwargs=None):
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
         del model_id, product, run_date, herbie_kwargs
         calls.append((str(search_pattern), int(fh)))
         if search_pattern == ":APCP:surface:":
             data = np.full((2, 2), 1.0, dtype=np.float32)
+            if return_meta:
+                return data, crs, transform, {"inventory_line": ":APCP:surface:0-1 hour acc fcst:"}
             return data, crs, transform
         if search_pattern == ":CSNOW:surface:":
             data = np.full((2, 2), csnow_value_by_fh[int(fh)], dtype=np.float32)
+            if return_meta:
+                return data, crs, transform, {"inventory_line": ""}
             return data, crs, transform
         raise AssertionError(f"Unexpected search pattern: {search_pattern!r}")
 

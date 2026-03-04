@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
+import re
 from typing import Any, Callable
 
 import numpy as np
@@ -34,6 +35,7 @@ _MISSING_CSNOW_SAMPLE_LOG_COUNT = 0
 _KUCHERA_DEFAULT_LEVELS_HPA: tuple[int, ...] = (925, 850, 700, 600, 500)
 _KUCHERA_DEFAULT_REQUIRE_RH = True
 _KUCHERA_DEFAULT_MIN_LEVELS = 4
+_APCP_ACCUM_WINDOW_RE = re.compile(r":APCP:surface:(\d+)-(\d+)\s*hour acc(?:\s*fcst|@\([^)]*\))", re.IGNORECASE)
 
 
 @dataclass
@@ -45,6 +47,14 @@ class FetchContext:
     warp_cache: dict[
         tuple[str, str, str, int, str, str, str, str],
         tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine],
+    ] = field(default_factory=dict)
+    fetch_meta_cache: dict[
+        tuple[str, str, str, int, str, str, str, str],
+        dict[str, Any],
+    ] = field(default_factory=dict)
+    warp_meta_cache: dict[
+        tuple[str, str, str, int, str, str, str, str],
+        dict[str, Any],
     ] = field(default_factory=dict)
     stats: dict[str, int] = field(default_factory=lambda: {"hits": 0, "misses": 0})
     warp_stats: dict[str, int] = field(default_factory=lambda: {"hits": 0, "misses": 0})
@@ -319,6 +329,41 @@ def _resolve_component_cache_identity(model_plugin: Any, var_key: str) -> tuple[
     return normalized_var_key, _selector_fingerprint(selectors)
 
 
+def _parse_apcp_accum_window_hours(inventory_line: str | None) -> tuple[int, int] | None:
+    if not inventory_line:
+        return None
+    match = _APCP_ACCUM_WINDOW_RE.search(str(inventory_line))
+    if match is None:
+        return None
+    try:
+        start_hour = int(match.group(1))
+        end_hour = int(match.group(2))
+    except (TypeError, ValueError):
+        return None
+    if start_hour < 0 or end_hour < 0:
+        return None
+    return start_hour, end_hour
+
+
+def _classify_apcp_mode_for_kuchera(
+    *,
+    inventory_line: str | None,
+    step_fh: int,
+    expected_start_fh: int,
+) -> str:
+    window = _parse_apcp_accum_window_hours(inventory_line)
+    if window is None:
+        return "unknown"
+    start_hour, end_hour = window
+    if end_hour != int(step_fh):
+        return "unknown"
+    if start_hour == int(expected_start_fh):
+        return "step"
+    if start_hour == 0 and int(expected_start_fh) > 0:
+        return "cumulative"
+    return "unknown"
+
+
 def _fetch_component(
     *,
     model_id: str,
@@ -328,7 +373,11 @@ def _fetch_component(
     model_plugin: Any,
     var_key: str,
     ctx: FetchContext | None = None,
-) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+    return_meta: bool = False,
+) -> (
+    tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]
+    | tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine, dict[str, Any]]
+):
     normalized_var_key, selectors = _resolve_component_var(model_plugin, var_key)
     run_date_utc = run_date.astimezone(timezone.utc) if run_date.tzinfo else run_date.replace(tzinfo=timezone.utc)
     cache_key = (
@@ -343,22 +392,31 @@ def _fetch_component(
     )
     if ctx is not None and cache_key in ctx.fetch_cache:
         _record_fetch_stat(ctx, "hits")
-        return ctx.fetch_cache[cache_key]
+        cached = ctx.fetch_cache[cache_key]
+        if return_meta:
+            cached_meta = dict(ctx.fetch_meta_cache.get(cache_key, {}))
+            return cached[0], cached[1], cached[2], cached_meta
+        return cached
 
     last_exc: Exception | None = None
     for search_pattern in selectors.search:
         try:
-            data, crs, transform = fetch_variable(
+            fetch_result = fetch_variable(
                 model_id=model_id,
                 product=product,
                 search_pattern=search_pattern,
                 run_date=run_date,
                 fh=fh,
+                return_meta=True,
             )
+            data, crs, transform, meta = fetch_result
             resolved = data.astype(np.float32, copy=False), crs, transform
             if ctx is not None:
                 ctx.fetch_cache[cache_key] = resolved
+                ctx.fetch_meta_cache[cache_key] = dict(meta)
                 _record_fetch_stat(ctx, "misses")
+            if return_meta:
+                return resolved[0], resolved[1], resolved[2], dict(meta)
             return resolved
         except (HerbieTransientUnavailableError, RuntimeError) as exc:
             last_exc = exc
@@ -380,7 +438,11 @@ def _fetch_component_warped(
     target_grid_id: str,
     resampling: str,
     ctx: FetchContext | None = None,
-) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+    return_meta: bool = False,
+) -> (
+    tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]
+    | tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine, dict[str, Any]]
+):
     normalized_var_key, selector_fingerprint = _resolve_component_cache_identity(model_plugin, var_key)
     run_date_utc = run_date.astimezone(timezone.utc) if run_date.tzinfo else run_date.replace(tzinfo=timezone.utc)
     cache_key = (
@@ -395,9 +457,13 @@ def _fetch_component_warped(
     )
     if ctx is not None and cache_key in ctx.warp_cache:
         _record_warp_stat(ctx, "hits")
-        return ctx.warp_cache[cache_key]
+        cached = ctx.warp_cache[cache_key]
+        if return_meta:
+            cached_meta = dict(ctx.warp_meta_cache.get(cache_key, {}))
+            return cached[0], cached[1], cached[2], cached_meta
+        return cached
 
-    raw_data, raw_crs, raw_transform = _fetch_component(
+    raw_data, raw_crs, raw_transform, raw_meta = _fetch_component(
         model_id=model_id,
         product=product,
         run_date=run_date,
@@ -405,6 +471,7 @@ def _fetch_component_warped(
         model_plugin=model_plugin,
         var_key=normalized_var_key,
         ctx=ctx,
+        return_meta=True,
     )
     warped_data, dst_transform = warp_to_target_grid(
         raw_data,
@@ -423,7 +490,10 @@ def _fetch_component_warped(
     )
     if ctx is not None:
         ctx.warp_cache[cache_key] = resolved
+        ctx.warp_meta_cache[cache_key] = dict(raw_meta)
         _record_warp_stat(ctx, "misses")
+    if return_meta:
+        return resolved[0], resolved[1], resolved[2], dict(raw_meta)
     return resolved
 
 
@@ -1197,7 +1267,11 @@ def _derive_snowfall_kuchera_total_cumulative(
         component_var: str,
         *,
         component_product: str | None = None,
-    ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+        return_meta: bool = False,
+    ) -> (
+        tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]
+        | tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine, dict[str, Any]]
+    ):
         resolved_product = str(component_product or product)
         if use_warped_components:
             return _fetch_component_warped(
@@ -1211,6 +1285,7 @@ def _derive_snowfall_kuchera_total_cumulative(
                 target_grid_id=target_grid_id,
                 resampling=str(derive_component_resampling).strip(),
                 ctx=ctx,
+                return_meta=return_meta,
             )
         return _fetch_component(
             model_id=model_id,
@@ -1220,6 +1295,7 @@ def _derive_snowfall_kuchera_total_cumulative(
             model_plugin=model_plugin,
             var_key=component_var,
             ctx=ctx,
+            return_meta=return_meta,
         )
 
     cumulative_kgm2: np.ndarray | None = None
@@ -1231,15 +1307,73 @@ def _derive_snowfall_kuchera_total_cumulative(
     fallback_profile_logged = False
     unavailable_temp_levels: set[int] = set()
     unavailable_rh_levels: set[int] = set()
+    prev_apcp_cum: np.ndarray | None = None
+    prev_apcp_cum_valid: np.ndarray | None = None
+    prev_apcp_cum_crs: rasterio.crs.CRS | None = None
+    prev_apcp_cum_transform: rasterio.transform.Affine | None = None
+    prev_apcp_cum_fh: int | None = None
 
-    for step_fh in step_fhs:
-        apcp_step, step_crs, step_transform = _fetch_for_step(
+    for step_index, step_fh in enumerate(step_fhs):
+        expected_start_fh = 0 if step_index == 0 else int(step_fhs[step_index - 1])
+        apcp_step, step_crs, step_transform, apcp_meta = _fetch_for_step(
             step_fh,
             apcp_component,
             component_product=apcp_product,
+            return_meta=True,
         )
-        apcp_valid = np.isfinite(apcp_step) & (apcp_step >= 0.0)
-        step_apcp_clean = np.where(apcp_valid, apcp_step, 0.0).astype(np.float32, copy=False)
+        apcp_valid_raw = np.isfinite(apcp_step) & (apcp_step >= 0.0)
+        apcp_cum_clean = np.where(apcp_valid_raw, apcp_step, 0.0).astype(np.float32, copy=False)
+
+        apcp_inventory_line = str((apcp_meta or {}).get("inventory_line", "")).strip()
+        apcp_mode = _classify_apcp_mode_for_kuchera(
+            inventory_line=apcp_inventory_line,
+            step_fh=step_fh,
+            expected_start_fh=expected_start_fh,
+        )
+        fallback_differencing_applied = False
+
+        step_apcp_clean = apcp_cum_clean
+        apcp_valid = apcp_valid_raw
+        if apcp_mode == "cumulative" and prev_apcp_cum is not None and prev_apcp_cum_fh is not None:
+            same_shape = apcp_cum_clean.shape == prev_apcp_cum.shape
+            same_crs = step_crs == prev_apcp_cum_crs
+            same_transform = step_transform == prev_apcp_cum_transform
+            if same_shape and same_crs and same_transform:
+                step_apcp_clean = np.clip(apcp_cum_clean - prev_apcp_cum, 0.0, None).astype(np.float32, copy=False)
+                if prev_apcp_cum_valid is not None:
+                    apcp_valid = apcp_valid_raw & prev_apcp_cum_valid
+                fallback_differencing_applied = True
+                logger.info(
+                    'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d"',
+                    step_fh,
+                    prev_apcp_cum_fh,
+                    step_fh,
+                )
+            else:
+                logger.info(
+                    'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d grid_mismatch"',
+                    step_fh,
+                    prev_apcp_cum_fh,
+                    step_fh,
+                )
+
+        logger.info(
+            'KUCHERA_APCP step_fh=%d product=%s inv="%s" mode=%s fallback=%s',
+            step_fh,
+            apcp_product or product,
+            apcp_inventory_line.replace('"', "'"),
+            apcp_mode,
+            "true" if fallback_differencing_applied else "false",
+        )
+
+        window = _parse_apcp_accum_window_hours(apcp_inventory_line)
+        if window is not None and window[0] == 0 and window[1] == int(step_fh):
+            prev_apcp_cum = apcp_cum_clean
+            prev_apcp_cum_valid = apcp_valid_raw
+            prev_apcp_cum_crs = step_crs
+            prev_apcp_cum_transform = step_transform
+            prev_apcp_cum_fh = int(step_fh)
+
         if min_step_lwe > 0.0:
             step_apcp_clean = np.where(step_apcp_clean >= min_step_lwe, step_apcp_clean, 0.0).astype(np.float32, copy=False)
 

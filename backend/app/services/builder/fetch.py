@@ -270,6 +270,64 @@ def _precheck_subset_available(
         return True
 
 
+def _inventory_line_from_row(row: Any) -> str:
+    preferred_keys = (
+        "search_this",
+        "line",
+        "inventory_line",
+        "grib_message",
+        "message",
+    )
+    for key in preferred_keys:
+        try:
+            value = row.get(key)
+        except Exception:
+            value = None
+        if value is None:
+            continue
+        text = " ".join(str(value).split()).strip()
+        if text:
+            return text
+
+    try:
+        if hasattr(row, "to_dict"):
+            row_dict = row.to_dict()
+            pieces = [
+                " ".join(str(value).split()).strip()
+                for value in row_dict.values()
+                if str(value).strip()
+            ]
+            joined = " | ".join(piece for piece in pieces if piece)
+            if joined:
+                return joined
+    except Exception:
+        pass
+    return ""
+
+
+def _inventory_meta_from_herbie(H: Any, *, search_pattern: str, fh: int, product: str) -> dict[str, Any]:
+    meta: dict[str, Any] = {
+        "inventory_line": "",
+        "search_pattern": str(search_pattern),
+        "fh": int(fh),
+        "product": str(product),
+    }
+    try:
+        inventory = H.inventory(search_pattern)
+    except Exception:
+        return meta
+    if inventory is None or len(inventory) == 0:
+        return meta
+
+    try:
+        row = inventory.iloc[0]
+    except Exception:
+        return meta
+
+    meta["inventory_line"] = _inventory_line_from_row(row)
+    return meta
+
+
 def _manual_subset_download_with_corrected_range(
     H: Any,
     *,
@@ -445,7 +503,8 @@ def fetch_variable(
     fh: int,
     *,
     herbie_kwargs: dict[str, Any] | None = None,
-) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+    return_meta: bool = False,
+) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine] | tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine, dict[str, Any]]:
     """Fetch a single GRIB variable via Herbie and return its data.
 
     Downloads the GRIB subset matching *search_pattern*, then opens it
@@ -507,6 +566,12 @@ def fetch_variable(
     saw_missing_subset_file = False
     saw_non_transient_failure = False
     grib_path: Path | None = None
+    selected_meta: dict[str, Any] = {
+        "inventory_line": "",
+        "search_pattern": str(search_pattern),
+        "fh": int(fh),
+        "product": str(product),
+    }
     for priority in priority_list:
         for attempt_idx in range(1, retries + 1):
             run_kwargs = dict(kwargs)
@@ -526,6 +591,12 @@ def fetch_variable(
                     if sleep_s > 0 and attempt_idx < retries:
                         time.sleep(sleep_s)
                     continue
+                attempt_meta = _inventory_meta_from_herbie(
+                    H,
+                    search_pattern=search_pattern,
+                    fh=fh,
+                    product=product,
+                )
                 subset_hint: Path | None = None
                 if lock_enabled:
                     try:
@@ -549,6 +620,7 @@ def fetch_variable(
                                 retries,
                                 cached_size,
                             )
+                            selected_meta = attempt_meta
                             break
 
                         subset_path = H.download(search_pattern, errors="raise", overwrite=False)
@@ -591,6 +663,7 @@ def fetch_variable(
                             )
                             if manual_subset is not None:
                                 grib_path = manual_subset
+                                selected_meta = attempt_meta
                                 break
                             try:
                                 if subset_candidate.exists():
@@ -612,6 +685,7 @@ def fetch_variable(
                             attempt_idx,
                             retries,
                         )
+                        selected_meta = attempt_meta
                         break
                 else:
                     subset_path = H.download(search_pattern, errors="raise", overwrite=True)
@@ -655,6 +729,7 @@ def fetch_variable(
                         )
                         if manual_subset is not None:
                             grib_path = manual_subset
+                            selected_meta = attempt_meta
                             break
                         try:
                             if subset_candidate.exists():
@@ -676,6 +751,7 @@ def fetch_variable(
                         attempt_idx,
                         retries,
                     )
+                    selected_meta = attempt_meta
                     break
             except Exception as exc:
                 last_exc = exc
@@ -775,6 +851,8 @@ def fetch_variable(
         data.shape, crs, data.dtype,
     )
 
+    if return_meta:
+        return data, crs, transform, selected_meta
     return data, crs, transform
 
 

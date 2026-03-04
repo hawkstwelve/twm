@@ -71,11 +71,23 @@ def test_kuchera_falls_back_to_ten_to_one_with_insufficient_levels(monkeypatch, 
     def _fake_fetch_component(**kwargs):
         fh = int(kwargs["fh"])
         var_key = str(kwargs["var_key"])
+        return_meta = bool(kwargs.get("return_meta", False))
         if var_key == "apcp_step":
-            return apcp_by_fh[fh], crs, transform
+            data = apcp_by_fh[fh]
+            if return_meta:
+                if fh == 1:
+                    inventory_line = ":APCP:surface:0-1 hour acc fcst:"
+                else:
+                    inventory_line = ":APCP:surface:1-2 hour acc fcst:"
+                return data, crs, transform, {"inventory_line": inventory_line}
+            return data, crs, transform
         if var_key == "tmp850":
+            if return_meta:
+                return temp_850, crs, transform, {"inventory_line": ""}
             return temp_850, crs, transform
         if var_key == "rh850":
+            if return_meta:
+                return rh_850, crs, transform, {"inventory_line": ""}
             return rh_850, crs, transform
         raise ValueError(f"missing component {var_key}")
 
@@ -126,12 +138,19 @@ def test_kuchera_can_use_distinct_profile_product(monkeypatch) -> None:
         product = str(kwargs["product"])
         var_key = str(kwargs["var_key"])
         fh = int(kwargs["fh"])
+        return_meta = bool(kwargs.get("return_meta", False))
         seen_products.append((product, var_key, fh))
         if var_key == "apcp_step":
+            if return_meta:
+                return apcp, crs, transform, {"inventory_line": ":APCP:surface:0-1 hour acc fcst:"}
             return apcp, crs, transform
         if var_key.startswith("tmp"):
+            if return_meta:
+                return temp, crs, transform, {"inventory_line": ""}
             return temp, crs, transform
         if var_key.startswith("rh"):
+            if return_meta:
+                return rh, crs, transform, {"inventory_line": ""}
             return rh, crs, transform
         raise AssertionError(f"unexpected component {var_key}")
 

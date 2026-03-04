@@ -179,7 +179,11 @@ HRRR_VARS: dict[str, VarSpec] = {
         id="apcp_step",
         name="APCP Step",
         selectors=VarSelectors(
-            search=[":APCP:surface:"],
+            search=[
+                r":APCP:surface:[0-9]+-[0-9]+ hour acc@\(fcst,dt=[0-9]+ hour\),missing=0:$",
+                r":APCP:surface:[0-9]+-[0-9]+ hour acc@\(fcst,dt=[0-9]+ hour\):$",
+                r":APCP:surface:[0-9]+-[0-9]+ hour acc fcst:$",
+            ],
             filter_by_keys={
                 "shortName": "apcp",
                 "typeOfLevel": "surface",
