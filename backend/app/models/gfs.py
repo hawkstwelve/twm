@@ -34,8 +34,8 @@ class GFSPlugin(BaseModelPlugin):
         """GFS forecast hours to build.
 
         GFS runs 4×/day at 00/06/12/18z.  Initial V3 rollout builds
-        fh000–fh120 in 6-hour steps (same behaviour for all cycles).
-        Extend to fh384 in Phase 3 once CONUS is validated.
+        fh000–fh240 in 3-hour steps, then fh246–fh384 in 6-hour steps
+        (all cycles use the same schedule).
         """
         del cycle_hour  # all GFS cycles use the same FH set for now
         return list(GFS_INITIAL_FHS)
@@ -113,8 +113,11 @@ GFS_REGIONS: dict[str, RegionSpec] = {
 # Forecast-hour schedule
 # ---------------------------------------------------------------------------
 
-# Phase 3: extend to range(0, 385, 6) (fh384)
-GFS_INITIAL_FHS: tuple[int, ...] = tuple(range(0, 121, 6))  # fh000–fh120
+# Mixed-resolution forecast-hour schedule:
+#   - 3-hour steps: fh000–fh240 (inclusive)
+#   - 6-hour steps: fh246–fh384 (inclusive)
+# Boundary fh240 appears once to avoid duplicate builds.
+GFS_INITIAL_FHS: tuple[int, ...] = tuple(range(0, 241, 3)) + tuple(range(246, 385, 6))
 
 # Initial rollout: PNW only.  CONUS added in Phase 3 after scale validation.
 GFS_INITIAL_ROLLOUT_REGIONS: tuple[str, ...] = ("pnw",)
@@ -383,7 +386,7 @@ GFS_VARS: dict[str, VarSpec] = {
         selectors=VarSelectors(
             hints={
                 "apcp_component": "apcp_step",
-                "step_hours": "6",
+                "step_hours": "3",
             },
         ),
         derived=True,
@@ -398,7 +401,7 @@ GFS_VARS: dict[str, VarSpec] = {
             hints={
                 "apcp_component": "apcp_step",
                 "snow_component": "csnow",
-                "step_hours": "6",
+                "step_hours": "3",
                 "slr": "10",
                 "snow_mask_threshold": "0.5",
                 "min_step_lwe_kgm2": "0.01",
@@ -469,10 +472,10 @@ GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
 
 GFS_CONSTRAINTS_BY_VAR_KEY: dict[str, dict[str, int]] = {
     "precip_total": {
-        "min_fh": 6,
+        "min_fh": 3,
     },
     "snowfall_total": {
-        "min_fh": 6,
+        "min_fh": 3,
     },
     "qpf6h": {
         "min_fh": 6,

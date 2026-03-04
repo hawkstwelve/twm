@@ -12,10 +12,12 @@ from app.models.gfs import GFS_MODEL
 
 
 def test_gfs_target_fhs_invariants() -> None:
-    assert GFS_MODEL.target_fhs(0) == list(range(0, 121, 6))
-    assert GFS_MODEL.target_fhs(6) == list(range(0, 121, 6))
-    assert GFS_MODEL.target_fhs(12) == list(range(0, 121, 6))
-    assert GFS_MODEL.target_fhs(18) == list(range(0, 121, 6))
+    expected = list(range(0, 241, 3)) + list(range(246, 385, 6))
+
+    assert GFS_MODEL.target_fhs(0) == expected
+    assert GFS_MODEL.target_fhs(6) == expected
+    assert GFS_MODEL.target_fhs(12) == expected
+    assert GFS_MODEL.target_fhs(18) == expected
 
 
 def test_gfs_buildable_var_set_and_defaults_invariants() -> None:
@@ -64,7 +66,7 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert precip_total["derived"] is True
     assert precip_total["derive_strategy_id"] == "precip_total_cumulative"
     assert precip_total["kind"] == "continuous"
-    assert precip_total["constraints"]["min_fh"] == 6
+    assert precip_total["constraints"]["min_fh"] == 3
     assert precip_total["display_name"] == "Total Precip"
     assert precip_total["order"] == 4
 
@@ -108,7 +110,7 @@ def test_gfs_capabilities_schema_snapshot_invariants() -> None:
     assert snowfall_total["derived"] is True
     assert snowfall_total["derive_strategy_id"] == "snowfall_total_10to1_cumulative"
     assert snowfall_total["units"] == "in"
-    assert snowfall_total["constraints"]["min_fh"] == 6
+    assert snowfall_total["constraints"]["min_fh"] == 3
     assert snowfall_total["default_fh"] == 6
     assert snowfall_total["display_name"] == "Total Snowfall (10:1)"
     assert snowfall_total["order"] == 5

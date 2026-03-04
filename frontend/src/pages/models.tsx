@@ -144,7 +144,7 @@ export default function Models() {
         id: "gfs",
         name: "GFS",
         oneLiner: "Global guidance for synoptic trends and longer lead time. Great context setter.",
-        pills: ["Global", "Every 6 hours", "~25 km"],
+        pills: ["Global", "3h to 240h, then 6h", "~25 km"],
         bestFor: [
           "Pattern recognition (ridges/troughs and timing)",
           "Longer-range temperature trends",

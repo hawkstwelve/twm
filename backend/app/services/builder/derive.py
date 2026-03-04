@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+import logging
 from typing import Any, Callable
 
 import numpy as np
@@ -26,6 +27,9 @@ from app.services.colormaps import (
     RADAR_PTYPE_BREAKS,
     RADAR_PTYPE_ORDER,
 )
+
+logger = logging.getLogger(__name__)
+_MISSING_CSNOW_SAMPLE_LOG_COUNT = 0
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,88 @@ def _fetch_component(
     raise ValueError(f"Component var {normalized_var_key!r} has no usable search patterns")
 
 
+def _resolve_cumulative_step_fhs(
+    *,
+    hints: dict[str, Any],
+    fh: int,
+    default_step_hours: int = 6,
+) -> list[int]:
+    step_hours_raw = hints.get("step_hours", str(default_step_hours))
+    step_transition_fh_raw = hints.get("step_transition_fh")
+    step_hours_after_fh_raw = hints.get("step_hours_after_fh")
+
+    try:
+        step_hours = max(1, int(step_hours_raw))
+    except (TypeError, ValueError):
+        step_hours = default_step_hours
+    try:
+        step_transition_fh = int(step_transition_fh_raw) if step_transition_fh_raw is not None else None
+    except (TypeError, ValueError):
+        step_transition_fh = None
+    try:
+        step_hours_after_fh = int(step_hours_after_fh_raw) if step_hours_after_fh_raw is not None else None
+    except (TypeError, ValueError):
+        step_hours_after_fh = None
+    if step_hours_after_fh is not None:
+        step_hours_after_fh = max(1, step_hours_after_fh)
+
+    if (
+        step_transition_fh is not None
+        and step_transition_fh > 0
+        and step_hours_after_fh is not None
+        and step_hours_after_fh > 0
+    ):
+        before_end = min(fh, step_transition_fh)
+        step_fhs = list(range(step_hours, before_end + 1, step_hours))
+        if fh > step_transition_fh:
+            after_start = step_transition_fh + step_hours_after_fh
+            step_fhs.extend(range(after_start, fh + 1, step_hours_after_fh))
+        return step_fhs
+
+    return list(range(step_hours, fh + 1, step_hours))
+
+
+def _interval_sample_fhs(step_fh: int, step_len: int) -> list[int]:
+    if step_len <= 0:
+        raise ValueError(f"Invalid cumulative step length={step_len} for fh={step_fh}")
+    start_fh = step_fh - step_len
+    if step_len == 3:
+        candidates = [start_fh, step_fh]
+    else:
+        mid_fh = step_fh - (step_len // 2)
+        candidates = [start_fh, mid_fh, step_fh]
+
+    sample_fhs: list[int] = []
+    for sample_fh in candidates:
+        if sample_fh in sample_fhs:
+            continue
+        sample_fhs.append(sample_fh)
+    return sample_fhs
+
+
+def _log_missing_csnow_sample(
+    *,
+    model_id: str,
+    var_key: str,
+    step_fh: int,
+    sample_fh: int,
+    exc: Exception,
+) -> None:
+    global _MISSING_CSNOW_SAMPLE_LOG_COUNT
+    _MISSING_CSNOW_SAMPLE_LOG_COUNT += 1
+    count = _MISSING_CSNOW_SAMPLE_LOG_COUNT
+    if count <= 5 or count % 25 == 0:
+        logger.debug(
+            "Skipping unavailable csnow sample for %s/%s at step fh%03d sample fh%03d (%s); missing_count=%d",
+            model_id,
+            var_key,
+            step_fh,
+            sample_fh,
+            exc.__class__.__name__,
+            count,
+        )
+
+
 def _neighbor_count_3x3(mask: np.ndarray) -> np.ndarray:
     """Return count of True values in each 3x3 neighborhood (including center)."""
     padded = np.pad(mask.astype(np.uint8, copy=False), 1, mode="constant", constant_values=0)
@@ -142,9 +228,6 @@ def _derive_wspd10m(
     var_capability: Any | None,
     model_plugin: Any,
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
-    import logging
-
-    logger = logging.getLogger(__name__)
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     u_component = hints.get("u_component", "10u")
     v_component = hints.get("v_component", "10v")
@@ -379,43 +462,12 @@ def _derive_precip_total_cumulative(
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     apcp_component = hints.get("apcp_component", "apcp_step")
-    step_hours_raw = hints.get("step_hours", "6")
-    step_transition_fh_raw = hints.get("step_transition_fh")
-    step_hours_after_fh_raw = hints.get("step_hours_after_fh")
-    try:
-        step_hours = max(1, int(step_hours_raw))
-    except (TypeError, ValueError):
-        step_hours = 6
-    try:
-        step_transition_fh = int(step_transition_fh_raw) if step_transition_fh_raw is not None else None
-    except (TypeError, ValueError):
-        step_transition_fh = None
-    try:
-        step_hours_after_fh = int(step_hours_after_fh_raw) if step_hours_after_fh_raw is not None else None
-    except (TypeError, ValueError):
-        step_hours_after_fh = None
-    if step_hours_after_fh is not None:
-        step_hours_after_fh = max(1, step_hours_after_fh)
-
     cumulative_kgm2: np.ndarray | None = None
     valid_mask: np.ndarray | None = None
     src_crs: rasterio.crs.CRS | None = None
     src_transform: rasterio.transform.Affine | None = None
 
-    step_fhs: list[int]
-    if (
-        step_transition_fh is not None
-        and step_transition_fh > 0
-        and step_hours_after_fh is not None
-        and step_hours_after_fh > 0
-    ):
-        before_end = min(fh, step_transition_fh)
-        step_fhs = list(range(step_hours, before_end + 1, step_hours))
-        if fh > step_transition_fh:
-            after_start = step_transition_fh + step_hours_after_fh
-            step_fhs.extend(range(after_start, fh + 1, step_hours_after_fh))
-    else:
-        step_fhs = list(range(step_hours, fh + 1, step_hours))
+    step_fhs = _resolve_cumulative_step_fhs(hints=hints, fh=fh, default_step_hours=6)
 
     for step_fh in step_fhs:
         step_data, step_crs, step_transform = _fetch_component(
@@ -475,15 +527,8 @@ def _derive_snowfall_total_10to1_cumulative(
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     apcp_component = hints.get("apcp_component", "apcp_step")
     snow_component = hints.get("snow_component", "csnow")
-    step_hours_raw = hints.get("step_hours", "6")
     slr_raw = hints.get("slr", "10")
-    snow_mask_threshold_raw = hints.get("snow_mask_threshold", "0.5")
     min_step_lwe_raw = hints.get("min_step_lwe_kgm2", "0.01")
-
-    try:
-        step_hours = max(1, int(step_hours_raw))
-    except (TypeError, ValueError):
-        step_hours = 6
 
     try:
         slr = float(slr_raw)
@@ -491,12 +536,6 @@ def _derive_snowfall_total_10to1_cumulative(
         slr = 10.0
     if slr <= 0.0:
         slr = 10.0
-
-    try:
-        snow_mask_threshold = float(snow_mask_threshold_raw)
-    except (TypeError, ValueError):
-        snow_mask_threshold = 0.5
-    snow_mask_threshold = min(max(snow_mask_threshold, 0.0), 1.0)
 
     try:
         min_step_lwe = float(min_step_lwe_raw)
@@ -509,7 +548,17 @@ def _derive_snowfall_total_10to1_cumulative(
     src_crs: rasterio.crs.CRS | None = None
     src_transform: rasterio.transform.Affine | None = None
 
-    for step_fh in range(step_hours, fh + 1, step_hours):
+    step_fhs = _resolve_cumulative_step_fhs(hints=hints, fh=fh, default_step_hours=6)
+    prev_step_fh = 0
+    for step_fh in step_fhs:
+        step_len = step_fh - prev_step_fh
+        prev_step_fh = step_fh
+        if step_len <= 0:
+            raise ValueError(
+                f"Non-increasing cumulative snowfall step sequence for {model_id}/{var_key}: "
+                f"step_len={step_len} at fh{step_fh:03d}"
+            )
+
         apcp_step, step_crs, step_transform = _fetch_component(
             model_id=model_id,
             product=product,
@@ -518,19 +567,7 @@ def _derive_snowfall_total_10to1_cumulative(
             model_plugin=model_plugin,
             var_key=apcp_component,
         )
-        snow_mask, _, _ = _fetch_component(
-            model_id=model_id,
-            product=product,
-            run_date=run_date,
-            fh=step_fh,
-            model_plugin=model_plugin,
-            var_key=snow_component,
-        )
-
-        # Categorical snow mask should be binary; reject out-of-range sentinels.
         apcp_valid = np.isfinite(apcp_step) & (apcp_step >= 0.0)
-        snow_valid = np.isfinite(snow_mask) & (snow_mask >= 0.0) & (snow_mask <= 1.0)
-
         step_apcp_clean = np.where(apcp_valid, apcp_step, 0.0).astype(np.float32, copy=False)
         if min_step_lwe > 0.0:
             step_apcp_clean = np.where(
@@ -539,13 +576,59 @@ def _derive_snowfall_total_10to1_cumulative(
                 0.0,
             ).astype(np.float32, copy=False)
 
-        step_snow_binary = np.where(
-            snow_valid & (snow_mask >= snow_mask_threshold),
-            1.0,
-            0.0,
-        ).astype(np.float32)
-        step_snow_kgm2 = step_apcp_clean * step_snow_binary
-        step_valid = apcp_valid & snow_valid
+        sample_masks: list[np.ndarray] = []
+        for sample_fh in _interval_sample_fhs(step_fh, step_len):
+            if sample_fh < 0:
+                continue
+            try:
+                snow_mask, _, _ = _fetch_component(
+                    model_id=model_id,
+                    product=product,
+                    run_date=run_date,
+                    fh=sample_fh,
+                    model_plugin=model_plugin,
+                    var_key=snow_component,
+                )
+            except (HerbieTransientUnavailableError, RuntimeError, ValueError) as exc:
+                _log_missing_csnow_sample(
+                    model_id=model_id,
+                    var_key=var_key,
+                    step_fh=step_fh,
+                    sample_fh=sample_fh,
+                    exc=exc,
+                )
+                continue
+
+            if snow_mask.shape != step_apcp_clean.shape:
+                raise ValueError(
+                    f"Snowfall mask shape mismatch for {model_id}/{var_key} at fh{sample_fh:03d}: "
+                    f"{snow_mask.shape} != {step_apcp_clean.shape}"
+                )
+
+            snow_valid = np.isfinite(snow_mask) & (snow_mask >= 0.0) & (snow_mask <= 1.0)
+            sample_masks.append(
+                np.where(snow_valid, snow_mask, np.nan).astype(np.float32, copy=False)
+            )
+
+        if sample_masks:
+            sample_stack = np.stack(sample_masks, axis=0).astype(np.float32, copy=False)
+            sample_valid_counts = np.sum(np.isfinite(sample_stack), axis=0).astype(np.int32, copy=False)
+            sample_sum = np.nansum(sample_stack, axis=0).astype(np.float32, copy=False)
+            interval_mask = np.zeros(step_apcp_clean.shape, dtype=np.float32)
+            np.divide(
+                sample_sum,
+                sample_valid_counts.astype(np.float32, copy=False),
+                out=interval_mask,
+                where=sample_valid_counts > 0,
+            )
+            interval_mask = np.clip(interval_mask, 0.0, 1.0).astype(np.float32, copy=False)
+            csnow_valid = sample_valid_counts > 0
+        else:
+            interval_mask = np.zeros(step_apcp_clean.shape, dtype=np.float32)
+            csnow_valid = np.zeros(step_apcp_clean.shape, dtype=bool)
+
+        step_snow_kgm2 = (step_apcp_clean * interval_mask).astype(np.float32, copy=False)
+        step_valid = apcp_valid & csnow_valid
 
         if cumulative_kgm2 is None:
             cumulative_kgm2 = step_snow_kgm2

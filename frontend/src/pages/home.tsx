@@ -64,7 +64,7 @@ export default function Home() {
       {
         key: "GFS",
         modelId: "gfs",
-        update: "Every 6 hours",
+        update: "3h to 240h, then 6h",
         forecast: "0-384h",
         notes: "Global trends",
       },
@@ -170,7 +170,7 @@ export default function Home() {
           <GlassCard title="GFS" desc="Global guidance. Great for synoptic trends and longer lead time.">
             <div className="grid grid-cols-3 gap-3 text-xs text-white/65">
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">Global</div>
-              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">Every 6 hours</div>
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">3h to 240h, then 6h</div>
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">~25km</div>
             </div>
           </GlassCard>
