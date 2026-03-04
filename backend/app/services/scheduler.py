@@ -547,6 +547,35 @@ def _should_promote(
     return False
 
 
+def _resolve_promotion_fhs(plugin: Any, primary_vars: list[str], cycle_hour: int) -> tuple[int, ...]:
+    desired = max(1, len(DEFAULT_PROMOTION_FHS))
+    available_fhs: set[int] = set()
+
+    for var_id in primary_vars:
+        try:
+            if hasattr(plugin, "scheduled_fhs_for_var"):
+                var_fhs = plugin.scheduled_fhs_for_var(var_id, cycle_hour)
+            else:
+                var_fhs = plugin.target_fhs(cycle_hour)
+        except Exception:
+            continue
+        for fh in var_fhs:
+            try:
+                parsed = int(fh)
+            except (TypeError, ValueError):
+                continue
+            if parsed < 0:
+                continue
+            available_fhs.add(parsed)
+
+    if not available_fhs:
+        return tuple(int(fh) for fh in DEFAULT_PROMOTION_FHS)
+    resolved = tuple(sorted(available_fhs)[:desired])
+    if resolved:
+        return resolved
+    return tuple(int(fh) for fh in DEFAULT_PROMOTION_FHS)
+
+
 def _promote_run(data_root: Path, model: str, run_id: str) -> None:
     stage_run = data_root / "staging" / model / run_id
     if not stage_run.is_dir():
@@ -956,6 +985,14 @@ def _process_run(
     run_id = _run_id_from_dt(run_dt)
     cycle_hour = run_dt.hour
     targets = _scheduled_targets_for_cycle(plugin, vars_to_build, cycle_hour)
+    promotion_fhs = _resolve_promotion_fhs(plugin, primary_vars, cycle_hour)
+    logger.info(
+        "Promotion gate: run=%s model=%s primary=%s fhs=%s",
+        run_id,
+        model_id,
+        primary_vars,
+        list(promotion_fhs),
+    )
 
     # Catch up within a single poll cycle: for each variable, keep advancing
     # forecast hours until we hit the first unavailable/failed hour.
@@ -1094,12 +1131,12 @@ def _process_run(
 
         # Publish as soon as promotion criteria is met so "latest" can switch
         # before the full catch-up pass exits.
-        if not published_once and _should_promote(data_root, model_id, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
+        if not published_once and _should_promote(data_root, model_id, run_id, primary_vars, promotion_fhs):
             _publish_run_snapshot(reason=f"catchup_round_{rounds}")
             published_once = True
             built_ok_at_last_publish = built_ok
 
-    if _should_promote(data_root, model_id, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
+    if _should_promote(data_root, model_id, run_id, primary_vars, promotion_fhs):
         if (not published_once) or (built_ok > built_ok_at_last_publish):
             _publish_run_snapshot(reason="catchup_complete")
             published_once = True

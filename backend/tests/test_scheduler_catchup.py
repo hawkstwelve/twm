@@ -21,6 +21,87 @@ class _FakePlugin:
         return [0, 1, 2, 3, 4]
 
 
+class _FakeGFSPlugin:
+    id = "gfs"
+
+    def scheduled_fhs_for_var(self, var_key: str, cycle_hour: int) -> list[int]:
+        del var_key, cycle_hour
+        return [0, 3, 6, 9]
+
+
+def test_resolve_promotion_fhs_uses_model_schedule() -> None:
+    assert scheduler_module._resolve_promotion_fhs(_FakeGFSPlugin(), ["tmp2m"], 18) == (0, 3, 6)
+
+
+def test_process_run_uses_resolved_promotion_fhs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_dt = datetime(2026, 2, 27, 18, tzinfo=timezone.utc)
+    seen_promotion_fhs: list[tuple[int, ...]] = []
+
+    def fake_frame_artifacts_exist(
+        data_root: Path,
+        model: str,
+        run: str,
+        var_id: str,
+        fh: int,
+    ) -> bool:
+        del data_root, model, run, var_id, fh
+        return False
+
+    def fake_build_one(
+        *,
+        model_id: str,
+        var_id: str,
+        fh: int,
+        run_dt: datetime,
+        data_root: Path,
+        plugin: object,
+    ) -> tuple[str, int, bool]:
+        del model_id, run_dt, data_root, plugin
+        return var_id, fh, False
+
+    def fake_should_promote(
+        data_root: Path,
+        model: str,
+        run_id: str,
+        primary_vars: list[str],
+        promotion_fhs: tuple[int, ...],
+    ) -> bool:
+        del data_root, model, run_id, primary_vars
+        seen_promotion_fhs.append(tuple(int(fh) for fh in promotion_fhs))
+        return False
+
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", fake_frame_artifacts_exist)
+    monkeypatch.setattr(scheduler_module, "_build_one", fake_build_one)
+    monkeypatch.setattr(scheduler_module, "_should_promote", fake_should_promote)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+
+    scheduler_module._process_run(
+        plugin=_FakeGFSPlugin(),
+        model_id="gfs",
+        vars_to_build=["tmp2m"],
+        primary_vars=["tmp2m"],
+        run_dt=run_dt,
+        data_root=tmp_path,
+        workers=1,
+        keep_runs=2,
+        loop_pregenerate_enabled=False,
+        loop_cache_root=tmp_path / "loop-cache",
+        loop_workers=1,
+        loop_tier0_quality=82,
+        loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
+        loop_tier1_quality=86,
+        loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
+    )
+
+    assert seen_promotion_fhs
+    assert seen_promotion_fhs[0] == (0, 3, 6)
+
+
 def test_process_run_catches_up_consecutive_available_hours(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
