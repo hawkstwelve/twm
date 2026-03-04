@@ -37,6 +37,37 @@ class _FakeDataset:
         return self._read_fn(indexes=indexes, out_shape=out_shape, resampling=resampling)
 
 
+def test_maybe_unsharp_rgba_disable_is_noop():
+    rgba = np.zeros((12, 16, 4), dtype=np.uint8)
+    rgba[..., 0] = 40
+    rgba[..., 1] = 90
+    rgba[..., 2] = 140
+    rgba[..., 3] = 200
+
+    out = main_module._maybe_unsharp_rgba(rgba, enable=False)
+    assert np.array_equal(out, rgba)
+
+
+def test_maybe_unsharp_rgba_preserves_alpha_shape_and_dtype():
+    yy, xx = np.indices((18, 24))
+    rgba = np.zeros((18, 24, 4), dtype=np.uint8)
+    rgba[..., 0] = np.where(xx < 12, 10, 240).astype(np.uint8)
+    rgba[..., 1] = np.where(yy < 9, 20, 220).astype(np.uint8)
+    rgba[..., 2] = ((xx * 7 + yy * 9) % 256).astype(np.uint8)
+    rgba[..., 3] = ((xx * 13 + yy * 5) % 256).astype(np.uint8)
+
+    out = main_module._maybe_unsharp_rgba(
+        rgba,
+        enable=True,
+        radius=1.2,
+        percent=35,
+        threshold=3,
+    )
+    assert out.shape == rgba.shape
+    assert out.dtype == np.uint8
+    assert np.array_equal(out[..., 3], rgba[..., 3])
+
+
 def test_render_loop_webp_bytes_uses_value_render_for_gfs_continuous(tmp_path, monkeypatch):
     cog_path = tmp_path / "fh000.rgba.cog.tif"
     val_path = tmp_path / "fh000.val.cog.tif"

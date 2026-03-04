@@ -9,12 +9,13 @@ import re
 import shutil
 import time
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
 import rasterio
-from PIL import Image
+from PIL import Image, ImageFilter
 from rasterio.enums import Resampling
 
 from app.models.registry import MODEL_REGISTRY
@@ -26,6 +27,7 @@ from app.services.render_resampling import (
     log_fixed_loop_size_once,
     rasterio_resampling_for_loop,
     use_value_render_for_variable,
+    variable_kind,
     variable_color_map_id,
 )
 
@@ -55,6 +57,10 @@ ENV_LOOP_WEBP_TIER1_QUALITY = "TWF_V3_LOOP_WEBP_TIER1_QUALITY"
 ENV_LOOP_WEBP_TIER1_MAX_DIM = "TWF_V3_LOOP_WEBP_TIER1_MAX_DIM"
 ENV_LOOP_WEBP_TIER0_FIXED_W = "TWF_V3_LOOP_WEBP_TIER0_FIXED_W"
 ENV_LOOP_WEBP_TIER1_FIXED_W = "TWF_V3_LOOP_WEBP_TIER1_FIXED_W"
+ENV_LOOP_SHARPEN_ENABLE = "TWF_V3_LOOP_SHARPEN_ENABLE"
+ENV_LOOP_SHARPEN_RADIUS = "TWF_V3_LOOP_SHARPEN_RADIUS"
+ENV_LOOP_SHARPEN_PERCENT = "TWF_V3_LOOP_SHARPEN_PERCENT"
+ENV_LOOP_SHARPEN_THRESHOLD = "TWF_V3_LOOP_SHARPEN_THRESHOLD"
 
 DEFAULT_LOOP_PREGENERATE_ENABLED = True
 DEFAULT_LOOP_CACHE_ROOT = Path("/tmp/twf_v3_loop_webp_cache")
@@ -65,6 +71,10 @@ DEFAULT_LOOP_WEBP_TIER1_QUALITY = 86
 DEFAULT_LOOP_WEBP_TIER1_MAX_DIM = 2400
 DEFAULT_LOOP_WEBP_TIER0_FIXED_W = 1600
 DEFAULT_LOOP_WEBP_TIER1_FIXED_W = 2400
+DEFAULT_LOOP_SHARPEN_ENABLE = True
+DEFAULT_LOOP_SHARPEN_RADIUS = 1.2
+DEFAULT_LOOP_SHARPEN_PERCENT = 35
+DEFAULT_LOOP_SHARPEN_THRESHOLD = 3
 
 
 class SchedulerConfigError(RuntimeError):
@@ -139,6 +149,18 @@ def _int_from_env(env_name: str, fallback: int, *, min_value: int) -> int:
     return parsed if parsed >= min_value else fallback
 
 
+def _float_from_env(env_name: str, fallback: float, *, min_value: float) -> float:
+    raw = os.getenv(env_name, "").strip()
+    if not raw:
+        return fallback
+    try:
+        parsed = float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using fallback=%s", env_name, raw, fallback)
+        return fallback
+    return parsed if parsed >= min_value else fallback
+
+
 def _bool_from_env(env_name: str, fallback: bool) -> bool:
     raw = os.getenv(env_name, "").strip().lower()
     if not raw:
@@ -149,6 +171,15 @@ def _bool_from_env(env_name: str, fallback: bool) -> bool:
         return False
     logger.warning("Invalid %s=%r; using fallback=%s", env_name, raw, fallback)
     return fallback
+
+
+@lru_cache(maxsize=1)
+def _loop_sharpen_config() -> tuple[bool, float, int, int]:
+    enable = _bool_from_env(ENV_LOOP_SHARPEN_ENABLE, DEFAULT_LOOP_SHARPEN_ENABLE)
+    radius = _float_from_env(ENV_LOOP_SHARPEN_RADIUS, DEFAULT_LOOP_SHARPEN_RADIUS, min_value=0.0)
+    percent = _int_from_env(ENV_LOOP_SHARPEN_PERCENT, DEFAULT_LOOP_SHARPEN_PERCENT, min_value=0)
+    threshold = _int_from_env(ENV_LOOP_SHARPEN_THRESHOLD, DEFAULT_LOOP_SHARPEN_THRESHOLD, min_value=0)
+    return enable, radius, percent, threshold
 
 
 def _int_or_default(value: Any, default: int, *, minimum: int = 0) -> int:
@@ -591,6 +622,35 @@ def _convert_rgba_cog_to_loop_webp(
 ) -> tuple[bool, str]:
     mode_used = "rgba"
 
+    def _should_sharpen_loop(model: str, kind: str | None) -> bool:
+        model_norm = str(model or "").strip().lower()
+        kind_norm = str(kind or "").strip().lower()
+        return model_norm == "gfs" and kind_norm == "continuous"
+
+    def _maybe_unsharp_rgba(
+        rgba: np.ndarray,
+        *,
+        enable: bool,
+        radius: float = 1.2,
+        percent: int = 35,
+        threshold: int = 3,
+    ) -> np.ndarray:
+        if not enable:
+            return rgba
+        rgba_u8 = np.asarray(rgba, dtype=np.uint8)
+        im = Image.fromarray(rgba_u8, mode="RGBA")
+        r, g, b, a = im.split()
+        rgb = Image.merge("RGB", (r, g, b))
+        rgb_sharp = rgb.filter(
+            ImageFilter.UnsharpMask(
+                radius=float(radius),
+                percent=int(percent),
+                threshold=int(threshold),
+            )
+        )
+        out = Image.merge("RGBA", (*rgb_sharp.split(), a))
+        return np.asarray(out, dtype=np.uint8)
+
     def _maybe_blur_value_frame(values: np.ndarray, *, sigma: float | None = None) -> np.ndarray:
         # Reserved optional hook for value-render loop frames.
         # Disabled by default (sigma=None everywhere in this change).
@@ -605,6 +665,9 @@ def _convert_rgba_cog_to_loop_webp(
 
     try:
         out_path.parent.mkdir(parents=True, exist_ok=True)
+        sharpen_enable_cfg, sharpen_radius, sharpen_percent, sharpen_threshold = _loop_sharpen_config()
+        kind = variable_kind(model_id, var_key)
+        sharpen_enable = sharpen_enable_cfg and _should_sharpen_loop(model_id, kind)
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
@@ -654,6 +717,13 @@ def _convert_rgba_cog_to_loop_webp(
                             meta_var_key=var_key,
                         )
                         rgba_hwc = np.moveaxis(rgba, 0, -1)
+                        rgba_hwc = _maybe_unsharp_rgba(
+                            rgba_hwc,
+                            enable=sharpen_enable,
+                            radius=sharpen_radius,
+                            percent=sharpen_percent,
+                            threshold=sharpen_threshold,
+                        )
                         image = Image.fromarray(rgba_hwc, mode="RGBA")
                         image.save(out_path, format="WEBP", quality=quality, method=6)
                         return True, "value"
@@ -693,6 +763,13 @@ def _convert_rgba_cog_to_loop_webp(
                 data = np.concatenate((rgb, alpha[np.newaxis, :, :]), axis=0)
 
         rgba = np.moveaxis(data, 0, -1)
+        rgba = _maybe_unsharp_rgba(
+            rgba,
+            enable=sharpen_enable,
+            radius=sharpen_radius,
+            percent=sharpen_percent,
+            threshold=sharpen_threshold,
+        )
         image = Image.fromarray(rgba, mode="RGBA")
         image.save(out_path, format="WEBP", quality=quality, method=6)
         return True, mode_used

@@ -27,7 +27,7 @@ from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
-from PIL import Image
+from PIL import Image, ImageFilter
 from pyproj import Transformer
 from rasterio.enums import Resampling
 from rasterio.windows import Window
@@ -43,6 +43,7 @@ from .services.render_resampling import (
     log_fixed_loop_size_once,
     rasterio_resampling_for_loop,
     use_value_render_for_variable,
+    variable_kind,
     variable_color_map_id,
 )
 from backend.app.auth import twf_oauth
@@ -57,12 +58,54 @@ CAPABILITIES_CONTRACT_VERSION = "v1"
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
 _JSON_CACHE_RECHECK_SECONDS = float(os.environ.get("TWF_V3_JSON_CACHE_RECHECK_SECONDS", "1.0"))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name, "").strip().lower()
+    if not raw:
+        return default
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    logger.warning("Invalid %s=%r; using fallback=%s", name, raw, default)
+    return default
+
+
+def _env_int(name: str, default: int, *, min_value: int = 0) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = int(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using fallback=%d", name, raw, default)
+        return default
+    return parsed if parsed >= min_value else default
+
+
+def _env_float(name: str, default: float, *, min_value: float = 0.0) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        parsed = float(raw)
+    except ValueError:
+        logger.warning("Invalid %s=%r; using fallback=%s", name, raw, default)
+        return default
+    return parsed if parsed >= min_value else default
+
+
 LOOP_WEBP_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_QUALITY", "82"))
 LOOP_WEBP_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_MAX_DIM", "1600"))
 LOOP_WEBP_TIER1_QUALITY = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_QUALITY", "86"))
 LOOP_WEBP_TIER1_MAX_DIM = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_MAX_DIM", "2400"))
 LOOP_WEBP_TIER0_FIXED_W = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER0_FIXED_W", "1600"))
 LOOP_WEBP_TIER1_FIXED_W = int(os.environ.get("TWF_V3_LOOP_WEBP_TIER1_FIXED_W", "2400"))
+LOOP_SHARPEN_ENABLE = _env_bool("TWF_V3_LOOP_SHARPEN_ENABLE", True)
+LOOP_SHARPEN_RADIUS = _env_float("TWF_V3_LOOP_SHARPEN_RADIUS", 1.2, min_value=0.0)
+LOOP_SHARPEN_PERCENT = _env_int("TWF_V3_LOOP_SHARPEN_PERCENT", 35, min_value=0)
+LOOP_SHARPEN_THRESHOLD = _env_int("TWF_V3_LOOP_SHARPEN_THRESHOLD", 3, min_value=0)
 SAMPLE_CACHE_TTL_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_CACHE_TTL_SECONDS", "2.0"))
 SAMPLE_INFLIGHT_WAIT_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_INFLIGHT_WAIT_SECONDS", "0.2"))
 SAMPLE_RATE_LIMIT_WINDOW_SECONDS = float(os.environ.get("TWF_V3_SAMPLE_RATE_LIMIT_WINDOW_SECONDS", "1.0"))
@@ -1443,6 +1486,51 @@ def _maybe_blur_loop_values(values: np.ndarray, *, sigma: float | None = None) -
     return values
 
 
+def _should_sharpen_loop(model: str, kind: str | None) -> bool:
+    model_norm = str(model or "").strip().lower()
+    kind_norm = str(kind or "").strip().lower()
+    return model_norm == "gfs" and kind_norm == "continuous"
+
+
+def _maybe_unsharp_rgba(
+    rgba: np.ndarray,
+    *,
+    enable: bool,
+    radius: float = 1.2,
+    percent: int = 35,
+    threshold: int = 3,
+) -> np.ndarray:
+    """Apply subtle unsharp mask to RGB channels while preserving alpha."""
+    if not enable:
+        return rgba
+
+    rgba_u8 = np.asarray(rgba, dtype=np.uint8)
+    im = Image.fromarray(rgba_u8, mode="RGBA")
+    r, g, b, a = im.split()
+    rgb = Image.merge("RGB", (r, g, b))
+    rgb_sharp = rgb.filter(
+        ImageFilter.UnsharpMask(
+            radius=float(radius),
+            percent=int(percent),
+            threshold=int(threshold),
+        )
+    )
+    out = Image.merge("RGBA", (*rgb_sharp.split(), a))
+    return np.asarray(out, dtype=np.uint8)
+
+
+def _apply_loop_sharpen_if_needed(*, rgba: np.ndarray, model_id: str, var_key: str) -> np.ndarray:
+    kind = variable_kind(model_id, var_key)
+    enable = LOOP_SHARPEN_ENABLE and _should_sharpen_loop(model_id, kind)
+    return _maybe_unsharp_rgba(
+        rgba,
+        enable=enable,
+        radius=LOOP_SHARPEN_RADIUS,
+        percent=LOOP_SHARPEN_PERCENT,
+        threshold=LOOP_SHARPEN_THRESHOLD,
+    )
+
+
 def _render_loop_rgba_hwc(
     *,
     cog_path: Path,
@@ -1578,6 +1666,7 @@ def _ensure_loop_webp(
         )
         if rgba is None:
             return False
+        rgba = _apply_loop_sharpen_if_needed(rgba=rgba, model_id=model_id, var_key=var_key)
         image = Image.fromarray(rgba, mode="RGBA")
         image.save(tmp_path, format="WEBP", quality=quality_cfg, method=6)
         tmp_path.replace(out_path)
@@ -1647,6 +1736,7 @@ def _render_loop_webp_bytes(
         )
         if rgba is None:
             return None
+        rgba = _apply_loop_sharpen_if_needed(rgba=rgba, model_id=model_id, var_key=var_key)
         image = Image.fromarray(rgba, mode="RGBA")
         buffer = io.BytesIO()
         image.save(buffer, format="WEBP", quality=quality_cfg, method=6)
