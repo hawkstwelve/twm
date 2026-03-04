@@ -20,7 +20,7 @@
     --border: 0 0% 100%;
     --secondary: 0 0% 100%;
     --muted: 0 0% 100%;
-    /* Keep primary blue accent so focus rings / active states stay visible */
+    /* Keep primary accent so focus rings / active states stay visible */
     color: rgba(255, 255, 255, 0.92);
   }
 
@@ -86,19 +86,19 @@
     --card-foreground: 220 20% 10%;
     --popover: 220 20% 100%;
     --popover-foreground: 220 20% 10%;
-    --primary: 199 89% 48%;
+    --primary: 162 21% 22%;
     --primary-foreground: 0 0% 100%;
     --secondary: 220 14% 92%;
     --secondary-foreground: 220 20% 10%;
     --muted: 220 14% 92%;
     --muted-foreground: 220 10% 46%;
-    --accent: 199 89% 48%;
+    --accent: 162 21% 22%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 84% 60%;
     --destructive-foreground: 0 0% 98%;
     --border: 220 14% 86%;
     --input: 220 14% 86%;
-    --ring: 199 89% 48%;
+    --ring: 162 21% 22%;
     --radius: 0.375rem;
     --toolbar: 220 20% 100%;
   }
@@ -110,19 +110,19 @@
     --card-foreground: 210 20% 92%;
     --popover: 222 22% 11%;
     --popover-foreground: 210 20% 92%;
-    --primary: 199 89% 48%;
+    --primary: 162 21% 22%;
     --primary-foreground: 0 0% 100%;
     --secondary: 222 18% 16%;
     --secondary-foreground: 210 20% 92%;
     --muted: 222 18% 16%;
     --muted-foreground: 215 14% 55%;
-    --accent: 199 89% 48%;
+    --accent: 162 21% 22%;
     --accent-foreground: 0 0% 100%;
     --destructive: 0 62% 30%;
     --destructive-foreground: 0 0% 98%;
     --border: 222 16% 20%;
     --input: 222 16% 20%;
-    --ring: 199 89% 48%;
+    --ring: 162 21% 22%;
     --toolbar: 222 22% 11%;
   }
 
