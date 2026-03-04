@@ -1017,6 +1017,20 @@ def _process_run(
             plugin=plugin,
         )
         _write_latest_pointer(data_root, model_id, run_id)
+        if loop_pregenerate_enabled:
+            _pregenerate_loop_webp_for_run(
+                data_root=data_root,
+                model=model_id,
+                run_id=run_id,
+                loop_cache_root=loop_cache_root,
+                workers=loop_workers,
+                tier0_quality=loop_tier0_quality,
+                tier0_max_dim=loop_tier0_max_dim,
+                tier0_fixed_w=loop_tier0_fixed_w,
+                tier1_quality=loop_tier1_quality,
+                tier1_max_dim=loop_tier1_max_dim,
+                tier1_fixed_w=loop_tier1_fixed_w,
+            )
         logger.info(
             "Published run snapshot: run=%s model=%s reason=%s built=%d/%d",
             run_id,
@@ -1141,20 +1155,6 @@ def _process_run(
             _publish_run_snapshot(reason="catchup_complete")
             published_once = True
             built_ok_at_last_publish = built_ok
-        if loop_pregenerate_enabled:
-            _pregenerate_loop_webp_for_run(
-                data_root=data_root,
-                model=model_id,
-                run_id=run_id,
-                loop_cache_root=loop_cache_root,
-                workers=loop_workers,
-                tier0_quality=loop_tier0_quality,
-                tier0_max_dim=loop_tier0_max_dim,
-                tier0_fixed_w=loop_tier0_fixed_w,
-                tier1_quality=loop_tier1_quality,
-                tier1_max_dim=loop_tier1_max_dim,
-                tier1_fixed_w=loop_tier1_fixed_w,
-            )
 
     _enforce_run_retention(data_root / "staging" / model_id, keep_runs)
     _enforce_run_retention(data_root / "published" / model_id, keep_runs)

@@ -1053,6 +1053,31 @@ def _resolve_existing_loop_urls(
     return tier0_url, tier1_url
 
 
+def _resolve_loop_urls_for_frame(
+    model: str,
+    run: str,
+    var: str,
+    fh: int,
+    *,
+    version_token: str,
+    include_tier0_runtime_fallback: bool = False,
+    include_tier1_runtime_fallback: bool = False,
+) -> tuple[str | None, str | None]:
+    tier0_url, tier1_url = _resolve_existing_loop_urls(
+        model,
+        run,
+        var,
+        fh,
+        version_token=version_token,
+    )
+
+    if tier0_url is None and include_tier0_runtime_fallback:
+        tier0_url = _loop_webp_url(model, run, var, fh, tier=0, version_token=version_token)
+    if tier1_url is None and include_tier1_runtime_fallback:
+        tier1_url = _loop_webp_url(model, run, var, fh, tier=1, version_token=version_token)
+    return tier0_url, tier1_url
+
+
 def _load_json_cached(path: Path, cache: dict[str, dict[str, Any]]) -> dict | None:
     key = str(path)
     now = time.monotonic()
@@ -2003,12 +2028,13 @@ def list_frames(request: Request, model: str, run: str, var: str):
         if not isinstance(fh, int):
             continue
 
-        tier0_url, tier1_url = _resolve_existing_loop_urls(
+        tier0_url, tier1_url = _resolve_loop_urls_for_frame(
             model,
             resolved,
             var,
             fh,
             version_token=version_token,
+            include_tier0_runtime_fallback=True,
         )
 
         meta = _resolve_sidecar(model, resolved, var, fh)
@@ -2071,12 +2097,13 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
         if not isinstance(fh, int):
             continue
 
-        tier0_url, tier1_url = _resolve_existing_loop_urls(
+        tier0_url, tier1_url = _resolve_loop_urls_for_frame(
             model,
             resolved,
             var,
             fh,
             version_token=version_token,
+            include_tier0_runtime_fallback=True,
         )
         if tier0_url:
             tier_frames[0].append({"fh": fh, "url": tier0_url})

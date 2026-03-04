@@ -175,6 +175,40 @@ async def test_frame_loop_urls_emit_v4_runtime_paths(client: httpx.AsyncClient) 
     assert "/loop.webp?tier=1" in tier1_row["loop_webp_tier1_url"]
 
 
+async def test_frame_loop_urls_include_tier0_runtime_fallback_without_pregenerated_cache(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/api/v4/hrrr/20260224_15z/radar_ptype/frames")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert isinstance(rows, list) and rows
+    first = rows[0]
+    assert first["fh"] == 0
+    assert first["loop_webp_tier0_url"].startswith("/api/v4/hrrr/20260224_15z/radar_ptype/0/loop.webp")
+    assert "/loop.webp?tier=0" in first["loop_webp_tier0_url"]
+    assert first["loop_webp_url"] == first["loop_webp_tier0_url"]
+
+
+async def test_loop_manifest_includes_tier0_runtime_fallback_without_pregenerated_cache(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/api/v4/hrrr/20260224_15z/radar_ptype/loop-manifest")
+
+    assert response.status_code == 200
+    payload = response.json()
+    loop_tiers = payload.get("loop_tiers", [])
+    assert isinstance(loop_tiers, list) and len(loop_tiers) == 2
+
+    tier0 = next((entry for entry in loop_tiers if entry.get("tier") == 0), None)
+    assert tier0 is not None
+    tier0_frames = tier0.get("frames", [])
+    assert isinstance(tier0_frames, list) and tier0_frames
+    assert tier0_frames[0]["fh"] == 0
+    assert tier0_frames[0]["url"].startswith("/api/v4/hrrr/20260224_15z/radar_ptype/0/loop.webp")
+    assert "/loop.webp?tier=0" in tier0_frames[0]["url"]
+
+
 async def test_legacy_runtime_routes_are_retired(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/legacy/hrrr/latest/radar_ptype/frames")
     assert response.status_code == 404

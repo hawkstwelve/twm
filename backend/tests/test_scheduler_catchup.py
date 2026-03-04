@@ -259,3 +259,80 @@ def test_process_run_publishes_early_then_refreshes_after_more_progress(
     assert publish_promote_snapshots == [[0, 1, 2], [0, 1, 2, 3]]
     assert manifest_calls == 2
     assert pointer_calls == 2
+
+
+def test_process_run_pregenerates_loop_cache_on_publish_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_dt = datetime(2026, 2, 27, 12, tzinfo=timezone.utc)
+    model_id = "hrrr"
+
+    built: set[tuple[str, int]] = set()
+    available_up_to = {"tmp2m": 2}
+    loop_pregen_calls = 0
+
+    def fake_frame_artifacts_exist(
+        data_root: Path,
+        model: str,
+        run: str,
+        var_id: str,
+        fh: int,
+    ) -> bool:
+        del data_root, model, run
+        return (var_id, fh) in built
+
+    def fake_build_one(
+        *,
+        model_id: str,
+        var_id: str,
+        fh: int,
+        run_dt: datetime,
+        data_root: Path,
+        plugin: object,
+    ) -> tuple[str, int, bool]:
+        del model_id, run_dt, data_root, plugin
+        ok = fh <= available_up_to[var_id]
+        if ok:
+            built.add((var_id, fh))
+        return var_id, fh, ok
+
+    def fake_should_promote(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        return ("tmp2m", 2) in built
+
+    def fake_loop_pregen(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        nonlocal loop_pregen_calls
+        loop_pregen_calls += 1
+
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", fake_frame_artifacts_exist)
+    monkeypatch.setattr(scheduler_module, "_build_one", fake_build_one)
+    monkeypatch.setattr(scheduler_module, "_should_promote", fake_should_promote)
+    monkeypatch.setattr(scheduler_module, "_promote_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler_module, "_write_run_manifest", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler_module, "_write_latest_pointer", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler_module, "_pregenerate_loop_webp_for_run", fake_loop_pregen)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+
+    scheduler_module._process_run(
+        plugin=_FakePlugin(),
+        model_id=model_id,
+        vars_to_build=["tmp2m"],
+        primary_vars=["tmp2m"],
+        run_dt=run_dt,
+        data_root=tmp_path,
+        workers=1,
+        keep_runs=2,
+        loop_pregenerate_enabled=True,
+        loop_cache_root=tmp_path / "loop-cache",
+        loop_workers=1,
+        loop_tier0_quality=82,
+        loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
+        loop_tier1_quality=86,
+        loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
+    )
+
+    assert loop_pregen_calls >= 1
