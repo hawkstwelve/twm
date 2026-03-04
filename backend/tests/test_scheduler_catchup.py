@@ -88,3 +88,93 @@ def test_process_run_catches_up_consecutive_available_hours(
     assert total == 5
     assert available == 4
     assert attempted == [("tmp2m", 0), ("tmp2m", 1), ("tmp2m", 2), ("tmp2m", 3), ("tmp2m", 4)]
+
+
+def test_process_run_publishes_early_then_refreshes_after_more_progress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_dt = datetime(2026, 2, 27, 12, tzinfo=timezone.utc)
+    model_id = "hrrr"
+
+    built: set[tuple[str, int]] = set()
+    available_up_to = {"tmp2m": 3}
+
+    def fake_frame_artifacts_exist(
+        data_root: Path,
+        model: str,
+        run: str,
+        var_id: str,
+        fh: int,
+    ) -> bool:
+        del data_root, model, run
+        return (var_id, fh) in built
+
+    def fake_build_one(
+        *,
+        model_id: str,
+        var_id: str,
+        fh: int,
+        run_dt: datetime,
+        data_root: Path,
+        plugin: object,
+    ) -> tuple[str, int, bool]:
+        del model_id, run_dt, data_root, plugin
+        ok = fh <= available_up_to[var_id]
+        if ok:
+            built.add((var_id, fh))
+        return var_id, fh, ok
+
+    publish_promote_snapshots: list[list[int]] = []
+    manifest_calls = 0
+    pointer_calls = 0
+
+    def fake_should_promote(*args: object, **kwargs: object) -> bool:
+        del args, kwargs
+        return ("tmp2m", 2) in built
+
+    def fake_promote_run(data_root: Path, model: str, run_id: str) -> None:
+        del data_root, model, run_id
+        publish_promote_snapshots.append(sorted(fh for var_id, fh in built if var_id == "tmp2m"))
+
+    def fake_write_run_manifest(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        nonlocal manifest_calls
+        manifest_calls += 1
+
+    def fake_write_latest_pointer(data_root: Path, model: str, run_id: str) -> None:
+        del data_root, model, run_id
+        nonlocal pointer_calls
+        pointer_calls += 1
+
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", fake_frame_artifacts_exist)
+    monkeypatch.setattr(scheduler_module, "_build_one", fake_build_one)
+    monkeypatch.setattr(scheduler_module, "_should_promote", fake_should_promote)
+    monkeypatch.setattr(scheduler_module, "_promote_run", fake_promote_run)
+    monkeypatch.setattr(scheduler_module, "_write_run_manifest", fake_write_run_manifest)
+    monkeypatch.setattr(scheduler_module, "_write_latest_pointer", fake_write_latest_pointer)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+
+    scheduler_module._process_run(
+        plugin=_FakePlugin(),
+        model_id=model_id,
+        vars_to_build=["tmp2m"],
+        primary_vars=["tmp2m"],
+        run_dt=run_dt,
+        data_root=tmp_path,
+        workers=1,
+        keep_runs=2,
+        loop_pregenerate_enabled=False,
+        loop_cache_root=tmp_path / "loop-cache",
+        loop_workers=1,
+        loop_tier0_quality=82,
+        loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
+        loop_tier1_quality=86,
+        loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
+    )
+
+    assert publish_promote_snapshots == [[0, 1, 2], [0, 1, 2, 3]]
+    assert manifest_calls == 2
+    assert pointer_calls == 2

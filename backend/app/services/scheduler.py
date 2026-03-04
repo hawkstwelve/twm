@@ -967,6 +967,28 @@ def _process_run(
     built_ok = 0
     blocked_vars: set[str] = set()
     derive_bundle_enabled = _bool_from_env(ENV_DERIVE_BUNDLE, DEFAULT_DERIVE_BUNDLE)
+    published_once = False
+    built_ok_at_last_publish = -1
+
+    def _publish_run_snapshot(*, reason: str) -> None:
+        _promote_run(data_root, model_id, run_id)
+        _write_run_manifest(
+            data_root=data_root,
+            model=model_id,
+            run_id=run_id,
+            targets=targets,
+            plugin=plugin,
+        )
+        _write_latest_pointer(data_root, model_id, run_id)
+        logger.info(
+            "Published run snapshot: run=%s model=%s reason=%s built=%d/%d",
+            run_id,
+            model_id,
+            reason,
+            built_ok,
+            total,
+        )
+
     rounds = 0
     while True:
         next_missing: list[tuple[str, int]] = []
@@ -1070,16 +1092,18 @@ def _process_run(
             )
             break
 
+        # Publish as soon as promotion criteria is met so "latest" can switch
+        # before the full catch-up pass exits.
+        if not published_once and _should_promote(data_root, model_id, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
+            _publish_run_snapshot(reason=f"catchup_round_{rounds}")
+            published_once = True
+            built_ok_at_last_publish = built_ok
+
     if _should_promote(data_root, model_id, run_id, primary_vars, DEFAULT_PROMOTION_FHS):
-        _promote_run(data_root, model_id, run_id)
-        _write_run_manifest(
-            data_root=data_root,
-            model=model_id,
-            run_id=run_id,
-            targets=targets,
-            plugin=plugin,
-        )
-        _write_latest_pointer(data_root, model_id, run_id)
+        if (not published_once) or (built_ok > built_ok_at_last_publish):
+            _publish_run_snapshot(reason="catchup_complete")
+            published_once = True
+            built_ok_at_last_publish = built_ok
         if loop_pregenerate_enabled:
             _pregenerate_loop_webp_for_run(
                 data_root=data_root,
