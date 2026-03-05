@@ -36,6 +36,9 @@ from app.services.colormaps import (
 
 logger = logging.getLogger(__name__)
 _MISSING_CSNOW_SAMPLE_LOG_COUNT = 0
+_KUCHERA_PTYPE_GATE_WARN_INTERVAL_SECONDS = 60.0
+_KUCHERA_PTYPE_GATE_LAST_WARN_TS = 0.0
+_KUCHERA_PTYPE_GATE_WARN_LOCK = threading.Lock()
 _KUCHERA_DEFAULT_LEVELS_HPA: tuple[int, ...] = (925, 850, 700, 600, 500)
 _KUCHERA_DEFAULT_REQUIRE_RH = True
 _KUCHERA_DEFAULT_MIN_LEVELS = 4
@@ -664,6 +667,97 @@ def _kuchera_select_apcp_window_from_inventory(
         "inventory_line": str(inventory_line),
         "search_pattern": _apcp_exact_window_pattern(start_hour, end_hour),
     }
+
+
+def _normalize_ptype_probability(data: np.ndarray) -> np.ndarray:
+    values = np.asarray(data, dtype=np.float32)
+    finite = np.isfinite(values)
+    max_val = float(np.nanmax(values[finite])) if np.any(finite) else 0.0
+    scale = 100.0 if max_val > 1.5 else 1.0
+    normalized = values / np.float32(scale)
+    normalized = np.clip(normalized, 0.0, 1.0).astype(np.float32, copy=False)
+    return normalized
+
+
+def _apply_kuchera_ptype_gate(apcp_step: np.ndarray, frozen_frac: np.ndarray) -> np.ndarray:
+    if apcp_step.shape != frozen_frac.shape:
+        raise ValueError(f"kuchera ptype gate shape mismatch: {apcp_step.shape} != {frozen_frac.shape}")
+    frozen = np.clip(np.asarray(frozen_frac, dtype=np.float32), 0.0, 1.0).astype(np.float32, copy=False)
+    return (np.asarray(apcp_step, dtype=np.float32) * frozen).astype(np.float32, copy=False)
+
+
+def _log_kuchera_ptype_gate_warning_once(*, model_id: str, var_key: str, step_fh: int, reason: str) -> None:
+    global _KUCHERA_PTYPE_GATE_LAST_WARN_TS
+    now = time.monotonic()
+    should_log = False
+    with _KUCHERA_PTYPE_GATE_WARN_LOCK:
+        if now - _KUCHERA_PTYPE_GATE_LAST_WARN_TS >= _KUCHERA_PTYPE_GATE_WARN_INTERVAL_SECONDS:
+            _KUCHERA_PTYPE_GATE_LAST_WARN_TS = now
+            should_log = True
+    if should_log:
+        logger.warning(
+            "kuchera_ptype_gate fallback=ones model=%s var=%s step_fh=%03d reason=%s",
+            model_id,
+            var_key,
+            int(step_fh),
+            reason,
+        )
+
+
+def _kuchera_frozen_fraction_for_step(
+    *,
+    model_id: str,
+    var_key: str,
+    product: str,
+    run_date: datetime,
+    step_fh: int,
+    model_plugin: Any,
+    use_warped: bool,
+    target_region: str,
+    target_grid_id: str,
+    resampling: str,
+    ctx: FetchContext | None,
+    expected_shape: tuple[int, ...],
+) -> tuple[np.ndarray, bool]:
+    component_keys = ("csnow", "crain", "cicep", "cfrzr")
+    fetched: dict[str, np.ndarray] = {}
+    try:
+        for key in component_keys:
+            component_data, _, _ = _fetch_step_component(
+                model_id=model_id,
+                product=product,
+                run_date=run_date,
+                step_fh=step_fh,
+                model_plugin=model_plugin,
+                var_key=key,
+                use_warped=use_warped,
+                target_region=target_region,
+                target_grid_id=target_grid_id,
+                resampling=resampling,
+                ctx=ctx,
+            )
+            component_clean = np.asarray(component_data, dtype=np.float32)
+            if component_clean.shape != expected_shape:
+                raise ValueError(
+                    f"kuchera ptype component shape mismatch for {key}: "
+                    f"{component_clean.shape} != {expected_shape}"
+                )
+            fetched[key] = component_clean
+    except Exception as exc:
+        _log_kuchera_ptype_gate_warning_once(
+            model_id=model_id,
+            var_key=var_key,
+            step_fh=step_fh,
+            reason=str(exc),
+        )
+        return np.ones(expected_shape, dtype=np.float32), True
+
+    csnow_prob = _normalize_ptype_probability(fetched["csnow"])
+    _ = _normalize_ptype_probability(fetched["crain"])
+    cicep_prob = _normalize_ptype_probability(fetched["cicep"])
+    _ = _normalize_ptype_probability(fetched["cfrzr"])
+    frozen_frac = np.clip(csnow_prob + cicep_prob, 0.0, 1.0).astype(np.float32, copy=False)
+    return frozen_frac, False
 
 
 def _fetch_component(
@@ -1936,10 +2030,16 @@ def _derive_snowfall_kuchera_total_cumulative(
     apcp_product = apcp_product_raw or None
     profile_product_raw = str(hints.get("kuchera_profile_product", "")).strip()
     profile_product = profile_product_raw or None
+    ptype_product_raw = str(hints.get("kuchera_ptype_product", "")).strip()
+    ptype_product = ptype_product_raw or apcp_product or product
     levels_hpa = _parse_kuchera_levels_hpa(hints.get("kuchera_levels_hpa"))
     require_rh = _parse_hint_bool(
         hints.get("kuchera_require_rh"),
         default=_KUCHERA_DEFAULT_REQUIRE_RH,
+    )
+    use_ptype_gate = _parse_hint_bool(
+        hints.get("kuchera_use_ptype_gate"),
+        default=False,
     )
     min_levels = _parse_hint_int(
         hints.get("kuchera_min_levels"),
@@ -2051,6 +2151,18 @@ def _derive_snowfall_kuchera_total_cumulative(
 
     fallback_used = False
     fallback_profile_logged = False
+    ptype_stats: dict[str, float] = {
+        "frozen_min": float("inf"),
+        "frozen_max": float("-inf"),
+        "frozen_sum": 0.0,
+        "frozen_count": 0.0,
+        "apcp_min": float("inf"),
+        "apcp_max": float("-inf"),
+        "apcp_frozen_min": float("inf"),
+        "apcp_frozen_max": float("-inf"),
+    }
+    ptype_any_precip_pixels = False
+    ptype_any_reduced_pixels = False
 
     def _process_step(
         step_fh: int,
@@ -2059,7 +2171,10 @@ def _derive_snowfall_kuchera_total_cumulative(
         step_crs: rasterio.crs.CRS,
         step_transform: rasterio.transform.Affine,
     ) -> tuple[np.ndarray, np.ndarray]:
-        nonlocal fallback_used, fallback_profile_logged
+        nonlocal fallback_used
+        nonlocal fallback_profile_logged
+        nonlocal ptype_any_precip_pixels
+        nonlocal ptype_any_reduced_pixels
         # apcp_valid is provided by _resolve_apcp_step_data (pre-cleaned,
         # post-differencing); step_data is the cleaned step increment.
         assert apcp_valid is not None
@@ -2068,6 +2183,47 @@ def _derive_snowfall_kuchera_total_cumulative(
             step_apcp_clean = np.where(
                 step_apcp_clean >= min_step_lwe, step_apcp_clean, 0.0,
             ).astype(np.float32, copy=False)
+        step_apcp_for_snow = step_apcp_clean
+        if use_ptype_gate:
+            frozen_frac, _ = _kuchera_frozen_fraction_for_step(
+                model_id=model_id,
+                var_key=var_key,
+                product=str(ptype_product),
+                run_date=run_date,
+                step_fh=step_fh,
+                model_plugin=model_plugin,
+                use_warped=use_warped,
+                target_region=target_region,
+                target_grid_id=target_grid_id,
+                resampling=resampling,
+                ctx=ctx,
+                expected_shape=step_apcp_clean.shape,
+            )
+            step_apcp_for_snow = _apply_kuchera_ptype_gate(step_apcp_clean, frozen_frac)
+
+            finite_frozen = np.isfinite(frozen_frac)
+            if np.any(finite_frozen):
+                frozen_values = frozen_frac[finite_frozen]
+                ptype_stats["frozen_min"] = min(ptype_stats["frozen_min"], float(np.min(frozen_values)))
+                ptype_stats["frozen_max"] = max(ptype_stats["frozen_max"], float(np.max(frozen_values)))
+                ptype_stats["frozen_sum"] += float(np.sum(frozen_values, dtype=np.float64))
+                ptype_stats["frozen_count"] += float(frozen_values.size)
+            finite_apcp = np.isfinite(step_apcp_clean)
+            if np.any(finite_apcp):
+                apcp_values = step_apcp_clean[finite_apcp]
+                ptype_stats["apcp_min"] = min(ptype_stats["apcp_min"], float(np.min(apcp_values)))
+                ptype_stats["apcp_max"] = max(ptype_stats["apcp_max"], float(np.max(apcp_values)))
+            finite_apcp_frozen = np.isfinite(step_apcp_for_snow)
+            if np.any(finite_apcp_frozen):
+                apcp_frozen_values = step_apcp_for_snow[finite_apcp_frozen]
+                ptype_stats["apcp_frozen_min"] = min(ptype_stats["apcp_frozen_min"], float(np.min(apcp_frozen_values)))
+                ptype_stats["apcp_frozen_max"] = max(ptype_stats["apcp_frozen_max"], float(np.max(apcp_frozen_values)))
+
+            precip_mask = apcp_valid & np.isfinite(step_apcp_clean) & (step_apcp_clean > 0.0) & np.isfinite(frozen_frac)
+            if np.any(precip_mask):
+                ptype_any_precip_pixels = True
+                if np.any(frozen_frac[precip_mask] < 0.999):
+                    ptype_any_reduced_pixels = True
 
         step_levels: list[int] = []
         step_temps: list[np.ndarray] = []
@@ -2112,7 +2268,7 @@ def _derive_snowfall_kuchera_total_cumulative(
                 require_rh=require_rh,
             )
 
-        step_snow_kgm2 = (step_apcp_clean * step_slr).astype(np.float32, copy=False)
+        step_snow_kgm2 = (step_apcp_for_snow * step_slr).astype(np.float32, copy=False)
         step_valid = apcp_valid & np.isfinite(step_slr)
         return step_snow_kgm2, step_valid
 
@@ -2137,6 +2293,23 @@ def _derive_snowfall_kuchera_total_cumulative(
     )
 
     cumulative_snow_inches = cumulative_kgm2 * 0.03937007874015748
+    if use_ptype_gate and ptype_stats["frozen_count"] > 0:
+        frozen_mean = ptype_stats["frozen_sum"] / ptype_stats["frozen_count"]
+        logger.info(
+            "kuchera_ptype_gate fh=%03d frozen_frac_min=%.3f frozen_frac_max=%.3f "
+            "frozen_frac_mean=%.3f apcp_step_min=%.3f apcp_step_max=%.3f "
+            "apcp_frozen_min=%.3f apcp_frozen_max=%.3f",
+            fh,
+            ptype_stats["frozen_min"],
+            ptype_stats["frozen_max"],
+            frozen_mean,
+            ptype_stats["apcp_min"],
+            ptype_stats["apcp_max"],
+            ptype_stats["apcp_frozen_min"],
+            ptype_stats["apcp_frozen_max"],
+        )
+        if ptype_any_precip_pixels and not ptype_any_reduced_pixels:
+            logger.warning("ptype gate ineffective")
     quality_flags: list[str] = []
     if fallback_used:
         quality_flags.append("slr_fallback_10to1")

@@ -474,6 +474,7 @@ GFS_VARS: dict[str, VarSpec] = {
             hints={
                 "apcp_component": "apcp_step",
                 "step_hours": "3",
+                "kuchera_use_ptype_gate": "true",
                 **kuchera_hint_overrides(),
             },
         ),
