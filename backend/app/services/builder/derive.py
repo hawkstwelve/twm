@@ -60,6 +60,7 @@ class FetchContext:
         tuple[str, str, str, int, str, str, str, str],
         dict[str, Any],
     ] = field(default_factory=dict)
+    derive_quality: dict[tuple[str, int], dict[str, Any]] = field(default_factory=dict)
     stats: dict[str, int] = field(default_factory=lambda: {"hits": 0, "misses": 0})
     warp_stats: dict[str, int] = field(default_factory=lambda: {"hits": 0, "misses": 0})
     coverage: str | None = None
@@ -329,6 +330,27 @@ def _record_warp_stat(ctx: FetchContext | None, metric: str) -> None:
         return
     with ctx._lock:
         ctx.warp_stats[metric] = int(ctx.warp_stats.get(metric, 0)) + 1
+
+
+def _record_derive_quality(
+    ctx: FetchContext | None,
+    *,
+    var_key: str,
+    fh: int,
+    quality_flags: list[str],
+) -> None:
+    if ctx is None:
+        return
+    deduped_flags = [
+        flag for flag in dict.fromkeys(str(item).strip() for item in quality_flags)
+        if flag
+    ]
+    payload = {
+        "quality": "degraded" if deduped_flags else "full",
+        "quality_flags": deduped_flags,
+    }
+    with ctx._lock:
+        ctx.derive_quality[(str(var_key), int(fh))] = payload
 
 
 # ---------------------------------------------------------------------------
@@ -958,11 +980,11 @@ def _is_valid_apcp_exact_result(data: Any, meta: dict[str, Any] | None) -> bool:
 @dataclass
 class _ApcpCumDiffState:
     """Mutable state for cumulative-to-step APCP differencing across the loop."""
-    prev_cum: np.ndarray | None = None
-    prev_cum_valid: np.ndarray | None = None
-    prev_cum_crs: rasterio.crs.CRS | None = None
-    prev_cum_transform: rasterio.transform.Affine | None = None
-    prev_cum_fh: int | None = None
+    consumed_sum: np.ndarray | None = None
+    consumed_sum_valid: np.ndarray | None = None
+    consumed_sum_crs: rasterio.crs.CRS | None = None
+    consumed_sum_transform: rasterio.transform.Affine | None = None
+    consumed_through_fh: int = 0
 
 
 def _resolve_apcp_step_data(
@@ -982,7 +1004,7 @@ def _resolve_apcp_step_data(
     target_grid_id: str,
     resampling: str,
     cum_diff_state: _ApcpCumDiffState,
-) -> tuple[np.ndarray, np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+) -> tuple[np.ndarray, np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine, bool]:
     """Resolve per-step APCP data with inventory-driven window selection.
 
     Tries, in order:
@@ -994,7 +1016,8 @@ def _resolve_apcp_step_data(
     Detects cumulative (0-N hour) windows and differences against the
     previous step's cumulative value (tracked in *cum_diff_state*).
 
-    Returns ``(step_clean, apcp_valid, crs, transform)`` where
+    Returns ``(step_clean, apcp_valid, crs, transform, cumulative_mode_used)``
+    where
     *step_clean* is the cleaned per-step increment (>= 0, invalid → 0)
     and *apcp_valid* is the boolean validity mask.
     """
@@ -1189,34 +1212,28 @@ def _resolve_apcp_step_data(
     apcp_valid = apcp_valid_raw
     fallback_differencing_applied = False
 
-    if (
-        apcp_mode == "cumulative"
-        and cum_diff_state.prev_cum is not None
-        and cum_diff_state.prev_cum_fh is not None
-    ):
-        same_shape = apcp_cum_clean.shape == cum_diff_state.prev_cum.shape
-        same_crs = step_crs == cum_diff_state.prev_cum_crs
-        same_transform = step_transform == cum_diff_state.prev_cum_transform
-        if same_shape and same_crs and same_transform:
-            step_apcp_data = np.clip(
-                apcp_cum_clean - cum_diff_state.prev_cum, 0.0, None,
-            ).astype(np.float32, copy=False)
-            if cum_diff_state.prev_cum_valid is not None:
-                apcp_valid = apcp_valid_raw & cum_diff_state.prev_cum_valid
-            fallback_differencing_applied = True
-            logger.info(
-                'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d"',
-                step_fh,
-                cum_diff_state.prev_cum_fh,
-                step_fh,
+    cumulative_mode_used = apcp_mode == "cumulative"
+    if cumulative_mode_used and cum_diff_state.consumed_sum is not None:
+        same_shape = apcp_cum_clean.shape == cum_diff_state.consumed_sum.shape
+        same_crs = step_crs == cum_diff_state.consumed_sum_crs
+        same_transform = step_transform == cum_diff_state.consumed_sum_transform
+        if not (same_shape and same_crs and same_transform):
+            raise ValueError(
+                f"KUCHERA_APCP cumulative grid mismatch for fh{step_fh:03d}: "
+                f"shape_match={same_shape} crs_match={same_crs} transform_match={same_transform}"
             )
-        else:
-            logger.info(
-                'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d grid_mismatch"',
-                step_fh,
-                cum_diff_state.prev_cum_fh,
-                step_fh,
-            )
+        step_apcp_data = np.clip(
+            apcp_cum_clean - cum_diff_state.consumed_sum, 0.0, None,
+        ).astype(np.float32, copy=False)
+        if cum_diff_state.consumed_sum_valid is not None:
+            apcp_valid = apcp_valid_raw & cum_diff_state.consumed_sum_valid
+        fallback_differencing_applied = True
+        logger.info(
+            'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d"',
+            step_fh,
+            cum_diff_state.consumed_through_fh,
+            step_fh,
+        )
 
     logger.info(
         'KUCHERA_APCP step_fh=%d product=%s inv="%s" mode=%s fallback=%s '
@@ -1235,16 +1252,32 @@ def _resolve_apcp_step_data(
         apcp_search_pattern.replace('"', "'"),
     )
 
-    # 5. Update cumulative tracking state.
-    window = _parse_apcp_accum_window_hours(apcp_inventory_line)
-    if window is not None and window[0] == 0 and window[1] == int(step_fh):
-        cum_diff_state.prev_cum = apcp_cum_clean
-        cum_diff_state.prev_cum_valid = apcp_valid_raw
-        cum_diff_state.prev_cum_crs = step_crs
-        cum_diff_state.prev_cum_transform = step_transform
-        cum_diff_state.prev_cum_fh = int(step_fh)
+    # 5. Advance consumed-sum tracking for all modes.
+    increment_for_sum = np.where(apcp_valid, step_apcp_data, 0.0).astype(np.float32, copy=False)
+    if cum_diff_state.consumed_sum is None:
+        cum_diff_state.consumed_sum = increment_for_sum.copy()
+        cum_diff_state.consumed_sum_valid = apcp_valid.copy()
+        cum_diff_state.consumed_sum_crs = step_crs
+        cum_diff_state.consumed_sum_transform = step_transform
+    else:
+        same_shape = increment_for_sum.shape == cum_diff_state.consumed_sum.shape
+        same_crs = step_crs == cum_diff_state.consumed_sum_crs
+        same_transform = step_transform == cum_diff_state.consumed_sum_transform
+        if not (same_shape and same_crs and same_transform):
+            raise ValueError(
+                f"KUCHERA_APCP consumed-sum grid mismatch for fh{step_fh:03d}: "
+                f"shape_match={same_shape} crs_match={same_crs} transform_match={same_transform}"
+            )
+        cum_diff_state.consumed_sum = (
+            cum_diff_state.consumed_sum + increment_for_sum
+        ).astype(np.float32, copy=False)
+        if cum_diff_state.consumed_sum_valid is not None:
+            cum_diff_state.consumed_sum_valid = cum_diff_state.consumed_sum_valid & apcp_valid
+        else:
+            cum_diff_state.consumed_sum_valid = apcp_valid.copy()
 
-    return step_apcp_data, apcp_valid, step_crs, step_transform
+    cum_diff_state.consumed_through_fh = int(step_fh)
+    return step_apcp_data, apcp_valid, step_crs, step_transform, cumulative_mode_used
 
 
 def _cumulative_apcp_loop(
@@ -1269,7 +1302,7 @@ def _cumulative_apcp_loop(
         tuple[np.ndarray, np.ndarray],
     ],
     error_label: str,
-) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
+) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine, bool]:
     """Shared cumulative APCP accumulation loop.
 
     For each forecast step:
@@ -1282,7 +1315,8 @@ def _cumulative_apcp_loop(
     (the callback determines validity from raw data) and a boolean mask for
     the inventory path (pre-cleaned, post-differencing).
 
-    Returns ``(cumulative, crs, transform)`` with NaN at invalid pixels.
+    Returns ``(cumulative, crs, transform, cumulative_fallback_used)``
+    with NaN at invalid pixels.
     """
     cum_diff_state = _ApcpCumDiffState() if use_inventory_resolution else None
 
@@ -1290,10 +1324,11 @@ def _cumulative_apcp_loop(
     valid_mask: np.ndarray | None = None
     src_crs: rasterio.crs.CRS | None = None
     src_transform: rasterio.transform.Affine | None = None
+    cumulative_fallback_used = False
 
     for step_index, step_fh in enumerate(step_fhs):
         if use_inventory_resolution and cum_diff_state is not None:
-            step_data, apcp_valid, step_crs, step_transform = _resolve_apcp_step_data(
+            step_data, apcp_valid, step_crs, step_transform, step_cumulative_mode = _resolve_apcp_step_data(
                 step_fh=step_fh,
                 step_index=step_index,
                 step_fhs=step_fhs,
@@ -1310,6 +1345,7 @@ def _cumulative_apcp_loop(
                 resampling=resampling,
                 cum_diff_state=cum_diff_state,
             )
+            cumulative_fallback_used = cumulative_fallback_used or bool(step_cumulative_mode)
         else:
             step_data, step_crs, step_transform = _fetch_step_component(
                 model_id=model_id,
@@ -1350,7 +1386,7 @@ def _cumulative_apcp_loop(
         raise ValueError(error_label)
 
     cumulative = np.where(valid_mask, cumulative, np.nan).astype(np.float32)
-    return cumulative, src_crs, src_transform
+    return cumulative, src_crs, src_transform, cumulative_fallback_used
 
 
 def _interval_sample_fhs(step_fh: int, step_len: int) -> list[int]:
@@ -1710,7 +1746,7 @@ def _derive_precip_total_cumulative(
         step_valid = np.isfinite(step_data)
         return step_clean, step_valid
 
-    cumulative_kgm2, src_crs, src_transform = _cumulative_apcp_loop(
+    cumulative_kgm2, src_crs, src_transform, _ = _cumulative_apcp_loop(
         model_id=model_id,
         var_key=var_key,
         product=product,
@@ -1887,7 +1923,7 @@ def _derive_snowfall_total_10to1_cumulative(
         step_valid = apcp_valid & csnow_valid
         return step_snow_kgm2, step_valid
 
-    cumulative_kgm2, src_crs, src_transform = _cumulative_apcp_loop(
+    cumulative_kgm2, src_crs, src_transform, _ = _cumulative_apcp_loop(
         model_id=model_id,
         var_key=var_key,
         product=product,
@@ -2113,7 +2149,7 @@ def _derive_snowfall_kuchera_total_cumulative(
         step_valid = apcp_valid & np.isfinite(step_slr)
         return step_snow_kgm2, step_valid
 
-    cumulative_kgm2, src_crs, src_transform = _cumulative_apcp_loop(
+    cumulative_kgm2, src_crs, src_transform, apcp_cumulative_fallback_used = _cumulative_apcp_loop(
         model_id=model_id,
         var_key=var_key,
         product=product,
@@ -2134,6 +2170,17 @@ def _derive_snowfall_kuchera_total_cumulative(
     )
 
     cumulative_snow_inches = cumulative_kgm2 * 0.03937007874015748
+    quality_flags: list[str] = []
+    if fallback_used:
+        quality_flags.append("slr_fallback_10to1")
+    if apcp_cumulative_fallback_used:
+        quality_flags.append("apcp_cumulative_fallback")
+    _record_derive_quality(
+        ctx,
+        var_key=var_key,
+        fh=fh,
+        quality_flags=quality_flags,
+    )
     logger.info(
         "snow_ratio method=kuchera fh=%d levels=%s fallback=%s",
         fh, levels_hpa, "10to1" if fallback_used else "none",

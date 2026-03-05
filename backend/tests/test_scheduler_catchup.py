@@ -336,3 +336,234 @@ def test_process_run_pregenerates_loop_cache_on_publish_snapshot(
     )
 
     assert loop_pregen_calls >= 1
+
+
+def _write_sidecar(tmp_path: Path, run_id: str, var_id: str, fh: int, *, quality: str, quality_flags: list[str]) -> None:
+    sidecar = tmp_path / "staging" / "hrrr" / run_id / var_id / f"fh{fh:03d}.json"
+    sidecar.parent.mkdir(parents=True, exist_ok=True)
+    sidecar.write_text(
+        scheduler_module.json.dumps(
+            {
+                "contract_version": "3.0",
+                "model": "hrrr",
+                "run": run_id,
+                "var": var_id,
+                "fh": fh,
+                "quality": quality,
+                "quality_flags": quality_flags,
+            }
+        )
+    )
+
+
+class _FakeKucheraPlugin:
+    id = "hrrr"
+
+    def normalize_var_id(self, var_id: str) -> str:
+        return str(var_id)
+
+    def scheduled_fhs_for_var(self, var_key: str, cycle_hour: int) -> list[int]:
+        del var_key, cycle_hour
+        return [0, 1]
+
+
+def test_process_run_requeues_only_slr_fallback_degraded_frames(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_dt = datetime(2026, 3, 5, 17, tzinfo=timezone.utc)
+    run_id = scheduler_module._run_id_from_dt(run_dt)
+
+    _write_sidecar(
+        tmp_path,
+        run_id,
+        "snowfall_kuchera_total",
+        0,
+        quality="degraded",
+        quality_flags=["apcp_cumulative_fallback"],
+    )
+    _write_sidecar(
+        tmp_path,
+        run_id,
+        "snowfall_kuchera_total",
+        1,
+        quality="degraded",
+        quality_flags=["slr_fallback_10to1"],
+    )
+
+    attempted: list[tuple[str, int]] = []
+
+    def fake_build_one(
+        *,
+        model_id: str,
+        var_id: str,
+        fh: int,
+        run_dt: datetime,
+        data_root: Path,
+        plugin: object,
+    ) -> tuple[str, int, bool]:
+        del model_id, run_dt, plugin
+        attempted.append((var_id, fh))
+        _write_sidecar(
+            data_root,
+            run_id,
+            var_id,
+            fh,
+            quality="full",
+            quality_flags=[],
+        )
+        return var_id, fh, True
+
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", lambda *args, **kwargs: True)
+    monkeypatch.setattr(scheduler_module, "_build_one", fake_build_one)
+    monkeypatch.setattr(scheduler_module, "_should_promote", lambda *args, **kwargs: False)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler_module, "_kuchera_rebuild_profile_ready", lambda **kwargs: True)
+    monkeypatch.setattr(scheduler_module, "_run_is_superseded", lambda **kwargs: False)
+
+    scheduler_module._process_run(
+        plugin=_FakeKucheraPlugin(),
+        model_id="hrrr",
+        vars_to_build=["snowfall_kuchera_total"],
+        primary_vars=["snowfall_kuchera_total"],
+        run_dt=run_dt,
+        data_root=tmp_path,
+        workers=1,
+        keep_runs=2,
+        loop_pregenerate_enabled=False,
+        loop_cache_root=tmp_path / "loop-cache",
+        loop_workers=1,
+        loop_tier0_quality=82,
+        loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
+        loop_tier1_quality=86,
+        loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
+    )
+
+    assert attempted == [("snowfall_kuchera_total", 1)]
+
+
+def test_process_run_caps_degraded_rebuild_attempts_at_two(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_dt = datetime(2026, 3, 5, 17, tzinfo=timezone.utc)
+    run_id = scheduler_module._run_id_from_dt(run_dt)
+
+    _write_sidecar(
+        tmp_path,
+        run_id,
+        "snowfall_kuchera_total",
+        1,
+        quality="degraded",
+        quality_flags=["slr_fallback_10to1"],
+    )
+
+    attempted: list[tuple[str, int]] = []
+
+    def fake_build_one(
+        *,
+        model_id: str,
+        var_id: str,
+        fh: int,
+        run_dt: datetime,
+        data_root: Path,
+        plugin: object,
+    ) -> tuple[str, int, bool]:
+        del model_id, run_dt, data_root, plugin
+        attempted.append((var_id, fh))
+        return var_id, fh, False
+
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", lambda *args, **kwargs: True)
+    monkeypatch.setattr(scheduler_module, "_build_one", fake_build_one)
+    monkeypatch.setattr(scheduler_module, "_should_promote", lambda *args, **kwargs: False)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler_module, "_kuchera_rebuild_profile_ready", lambda **kwargs: True)
+    monkeypatch.setattr(scheduler_module, "_run_is_superseded", lambda **kwargs: False)
+
+    scheduler_module._process_run(
+        plugin=_FakeKucheraPlugin(),
+        model_id="hrrr",
+        vars_to_build=["snowfall_kuchera_total"],
+        primary_vars=["snowfall_kuchera_total"],
+        run_dt=run_dt,
+        data_root=tmp_path,
+        workers=1,
+        keep_runs=2,
+        loop_pregenerate_enabled=False,
+        loop_cache_root=tmp_path / "loop-cache",
+        loop_workers=1,
+        loop_tier0_quality=82,
+        loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
+        loop_tier1_quality=86,
+        loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
+    )
+
+    assert attempted == [
+        ("snowfall_kuchera_total", 1),
+        ("snowfall_kuchera_total", 1),
+    ]
+
+
+def test_process_run_abandons_rebuilds_when_superseded(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    run_dt = datetime(2026, 3, 5, 17, tzinfo=timezone.utc)
+    run_id = scheduler_module._run_id_from_dt(run_dt)
+
+    _write_sidecar(
+        tmp_path,
+        run_id,
+        "snowfall_kuchera_total",
+        1,
+        quality="degraded",
+        quality_flags=["slr_fallback_10to1"],
+    )
+
+    attempted: list[tuple[str, int]] = []
+
+    def fake_build_one(
+        *,
+        model_id: str,
+        var_id: str,
+        fh: int,
+        run_dt: datetime,
+        data_root: Path,
+        plugin: object,
+    ) -> tuple[str, int, bool]:
+        del model_id, run_dt, data_root, plugin
+        attempted.append((var_id, fh))
+        return var_id, fh, True
+
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", lambda *args, **kwargs: True)
+    monkeypatch.setattr(scheduler_module, "_build_one", fake_build_one)
+    monkeypatch.setattr(scheduler_module, "_should_promote", lambda *args, **kwargs: False)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(scheduler_module, "_kuchera_rebuild_profile_ready", lambda **kwargs: True)
+    monkeypatch.setattr(scheduler_module, "_run_is_superseded", lambda **kwargs: True)
+
+    scheduler_module._process_run(
+        plugin=_FakeKucheraPlugin(),
+        model_id="hrrr",
+        vars_to_build=["snowfall_kuchera_total"],
+        primary_vars=["snowfall_kuchera_total"],
+        run_dt=run_dt,
+        data_root=tmp_path,
+        workers=1,
+        keep_runs=2,
+        loop_pregenerate_enabled=False,
+        loop_cache_root=tmp_path / "loop-cache",
+        loop_workers=1,
+        loop_tier0_quality=82,
+        loop_tier0_max_dim=1600,
+        loop_tier0_fixed_w=1600,
+        loop_tier1_quality=86,
+        loop_tier1_max_dim=2400,
+        loop_tier1_fixed_w=2400,
+    )
+
+    assert attempted == []

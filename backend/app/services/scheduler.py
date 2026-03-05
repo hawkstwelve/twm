@@ -20,6 +20,7 @@ from rasterio.enums import Resampling
 
 from app.models.registry import MODEL_REGISTRY
 from app.services.builder.colorize import float_to_rgba
+from app.services.builder.fetch import HerbieTransientUnavailableError, fetch_variable
 from app.services.builder.pipeline import build_frame, build_frame_bundle
 from app.services.render_resampling import (
     compute_loop_output_shape,
@@ -440,6 +441,202 @@ def _frame_artifacts_exist(
             return False
 
     return _safe_exists(rgba) and _safe_exists(val) and _safe_exists(side)
+
+
+def _sidecar_quality(
+    data_root: Path,
+    model: str,
+    run_id: str,
+    var_id: str,
+    fh: int,
+) -> tuple[str, list[str]]:
+    sidecar_path = _frame_sidecar_path(data_root, model, run_id, var_id, fh)
+    if not sidecar_path.exists():
+        return "full", []
+    try:
+        payload = json.loads(sidecar_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        return "full", []
+
+    quality = str(payload.get("quality", "full")).strip().lower()
+    normalized_quality = "degraded" if quality == "degraded" else "full"
+    flags_raw = payload.get("quality_flags", [])
+    if not isinstance(flags_raw, list):
+        return normalized_quality, []
+    flags = [
+        item for item in dict.fromkeys(str(flag).strip() for flag in flags_raw)
+        if item
+    ]
+    return normalized_quality, flags
+
+
+def _collect_slr_rebuild_candidates(
+    *,
+    data_root: Path,
+    model_id: str,
+    run_id: str,
+    targets: list[tuple[str, int]],
+    attempts: dict[tuple[str, str, int], int],
+    max_attempts: int,
+) -> list[tuple[str, int]]:
+    seen: set[tuple[str, int]] = set()
+    candidates: list[tuple[str, int]] = []
+    for var_id, fh in targets:
+        key = (run_id, str(var_id), int(fh))
+        if int(attempts.get(key, 0)) >= int(max_attempts):
+            continue
+        quality, quality_flags = _sidecar_quality(
+            data_root,
+            model_id,
+            run_id,
+            str(var_id),
+            int(fh),
+        )
+        if quality != "degraded":
+            continue
+        if "slr_fallback_10to1" not in quality_flags:
+            continue
+        candidate = (str(var_id), int(fh))
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        candidates.append(candidate)
+    return sorted(candidates, key=lambda item: (item[1], item[0]))
+
+
+def _parse_hint_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _parse_hint_int(value: Any, *, default: int, minimum: int = 1) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(minimum, parsed)
+
+
+def _parse_kuchera_levels_hpa(value: Any) -> list[int]:
+    if value is None:
+        tokens = [925, 850, 700, 600, 500]
+    elif isinstance(value, (list, tuple, set)):
+        tokens = list(value)
+    else:
+        tokens = [item.strip() for item in str(value).replace(";", ",").split(",") if item.strip()]
+
+    levels: list[int] = []
+    for token in tokens:
+        try:
+            level = int(token)
+        except (TypeError, ValueError):
+            continue
+        if level <= 0 or level in levels:
+            continue
+        levels.append(level)
+    return levels if levels else [925, 850, 700, 600, 500]
+
+
+def _component_precheck_available(
+    *,
+    plugin: Any,
+    model_id: str,
+    product: str,
+    run_dt: datetime,
+    fh: int,
+    var_key: str,
+) -> bool:
+    spec = plugin.get_var(var_key) if hasattr(plugin, "get_var") else None
+    selectors = getattr(spec, "selectors", None)
+    search_patterns = list(getattr(selectors, "search", []) or [])
+    if not search_patterns:
+        return False
+
+    for pattern in search_patterns:
+        try:
+            fetch_variable(
+                model_id=model_id,
+                product=product,
+                search_pattern=str(pattern),
+                run_date=run_dt,
+                fh=int(fh),
+            )
+            return True
+        except (HerbieTransientUnavailableError, RuntimeError, ValueError):
+            continue
+        except Exception:
+            continue
+    return False
+
+
+def _kuchera_rebuild_profile_ready(
+    *,
+    plugin: Any,
+    model_id: str,
+    run_dt: datetime,
+    var_id: str,
+    fh: int,
+) -> bool:
+    normalized_var = (
+        plugin.normalize_var_id(var_id)
+        if hasattr(plugin, "normalize_var_id")
+        else str(var_id)
+    )
+    if normalized_var != "snowfall_kuchera_total":
+        return False
+
+    var_spec = plugin.get_var(normalized_var) if hasattr(plugin, "get_var") else None
+    selectors = getattr(var_spec, "selectors", None)
+    hints = dict(getattr(selectors, "hints", {}) or {})
+
+    profile_product_raw = str(hints.get("kuchera_profile_product", "")).strip()
+    profile_product = profile_product_raw or str(getattr(plugin, "product", "sfc"))
+    levels_hpa = _parse_kuchera_levels_hpa(hints.get("kuchera_levels_hpa"))
+    require_rh = _parse_hint_bool(hints.get("kuchera_require_rh"), default=True)
+    min_levels = _parse_hint_int(hints.get("kuchera_min_levels"), default=4, minimum=1)
+
+    available_levels = 0
+    for level_hpa in levels_hpa:
+        temp_ok = _component_precheck_available(
+            plugin=plugin,
+            model_id=model_id,
+            product=profile_product,
+            run_dt=run_dt,
+            fh=fh,
+            var_key=f"tmp{int(level_hpa)}",
+        )
+        if not temp_ok:
+            continue
+        if require_rh:
+            rh_ok = _component_precheck_available(
+                plugin=plugin,
+                model_id=model_id,
+                product=profile_product,
+                run_dt=run_dt,
+                fh=fh,
+                var_key=f"rh{int(level_hpa)}",
+            )
+            if not rh_ok:
+                continue
+        available_levels += 1
+
+    return available_levels >= min_levels
+
+
+def _run_is_superseded(*, plugin: Any, run_dt: datetime) -> bool:
+    try:
+        latest = _resolve_latest_run_dt(plugin=plugin, probe_var=None)
+    except Exception:
+        return False
+    return bool(latest > run_dt)
 
 
 def _build_one(
@@ -1032,6 +1229,8 @@ def _process_run(
     derive_bundle_enabled = _bool_from_env(ENV_DERIVE_BUNDLE, DEFAULT_DERIVE_BUNDLE)
     published_once = False
     built_ok_at_last_publish = -1
+    rebuild_attempts: dict[tuple[str, str, int], int] = {}
+    rebuild_max_attempts = 2
 
     def _publish_run_snapshot(*, reason: str) -> None:
         _promote_run(data_root, model_id, run_id)
@@ -1078,28 +1277,68 @@ def _process_run(
                 next_missing.append((var_id, fh))
                 break
 
-        if not next_missing:
-            break
+        rebuild_round = False
+        round_work: list[tuple[str, int]]
+        if next_missing:
+            round_work = list(next_missing)
+        else:
+            rebuild_candidates = _collect_slr_rebuild_candidates(
+                data_root=data_root,
+                model_id=model_id,
+                run_id=run_id,
+                targets=targets,
+                attempts=rebuild_attempts,
+                max_attempts=rebuild_max_attempts,
+            )
+            if not rebuild_candidates:
+                break
+            if _run_is_superseded(plugin=plugin, run_dt=run_dt):
+                logger.info(
+                    "Abandoning degraded rebuilds for superseded run=%s model=%s",
+                    run_id,
+                    model_id,
+                )
+                break
+
+            ready_rebuilds: list[tuple[str, int]] = []
+            for var_id, fh in rebuild_candidates:
+                if not _kuchera_rebuild_profile_ready(
+                    plugin=plugin,
+                    model_id=model_id,
+                    run_dt=run_dt,
+                    var_id=var_id,
+                    fh=fh,
+                ):
+                    continue
+                key = (run_id, str(var_id), int(fh))
+                rebuild_attempts[key] = int(rebuild_attempts.get(key, 0)) + 1
+                ready_rebuilds.append((var_id, int(fh)))
+
+            if not ready_rebuilds:
+                break
+            round_work = ready_rebuilds
+            rebuild_round = True
 
         rounds += 1
         logger.info(
-            "Run=%s model=%s coverage=%s targets=%d catchup_round=%d pending=%d blocked=%d",
+            "Run=%s model=%s coverage=%s targets=%d catchup_round=%d pending=%d blocked=%d rebuild_round=%s",
             run_id,
             model_id,
             CANONICAL_COVERAGE,
             total,
             rounds,
-            len(next_missing),
+            len(round_work),
             len(blocked_vars),
+            rebuild_round,
         )
 
         round_successes = 0
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
             futures: list[concurrent.futures.Future] = []
-            if derive_bundle_enabled:
+            if derive_bundle_enabled and not rebuild_round:
                 bundle_by_fh: dict[int, list[str]] = {}
                 single_jobs: list[tuple[str, int]] = []
-                for var_id, fh in next_missing:
+                for var_id, fh in round_work:
                     if _is_derive_bundle_candidate(plugin, var_id):
                         bundle_by_fh.setdefault(int(fh), []).append(var_id)
                         continue
@@ -1141,7 +1380,7 @@ def _process_run(
                         data_root=data_root,
                         plugin=plugin,
                     )
-                    for var_id, fh in next_missing
+                    for var_id, fh in round_work
                 ]
 
             for future in concurrent.futures.as_completed(futures):
@@ -1152,15 +1391,46 @@ def _process_run(
                     round_results = list(future_result)
 
                 for var_id, fh, ok in round_results:
+                    rebuild_key = (run_id, str(var_id), int(fh))
+                    is_rebuild_job = rebuild_round and rebuild_key in rebuild_attempts
                     if ok:
                         built_ok += 1
                         round_successes += 1
-                        logger.info("Build success: %s %s fh%03d", run_id, var_id, fh)
+                        if is_rebuild_job:
+                            quality, quality_flags = _sidecar_quality(
+                                data_root,
+                                model_id,
+                                run_id,
+                                str(var_id),
+                                int(fh),
+                            )
+                            logger.info(
+                                "Rebuild success: %s %s fh%03d quality=%s flags=%s attempt=%d/%d",
+                                run_id,
+                                var_id,
+                                fh,
+                                quality,
+                                quality_flags,
+                                int(rebuild_attempts.get(rebuild_key, 0)),
+                                rebuild_max_attempts,
+                            )
+                        else:
+                            logger.info("Build success: %s %s fh%03d", run_id, var_id, fh)
                     else:
-                        blocked_vars.add(var_id)
-                        logger.warning("Build skipped/failed: %s %s fh%03d", run_id, var_id, fh)
+                        if is_rebuild_job:
+                            logger.warning(
+                                "Rebuild skipped/failed: %s %s fh%03d attempt=%d/%d",
+                                run_id,
+                                var_id,
+                                fh,
+                                int(rebuild_attempts.get(rebuild_key, 0)),
+                                rebuild_max_attempts,
+                            )
+                        else:
+                            blocked_vars.add(var_id)
+                            logger.warning("Build skipped/failed: %s %s fh%03d", run_id, var_id, fh)
 
-        if round_successes == 0:
+        if round_successes == 0 and not rebuild_round:
             logger.info(
                 "Catch-up paused: run=%s no progress in round=%d; blocked_vars=%s",
                 run_id,

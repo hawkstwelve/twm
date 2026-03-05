@@ -403,6 +403,8 @@ def build_sidecar_json(
     var_spec_model: Any | None = None,
     contours: dict[str, Any] | None = None,
     value_downsample_factor: int = 1,
+    quality: str = "full",
+    quality_flags: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build the sidecar metadata dict per the artifact contract.
 
@@ -433,6 +435,11 @@ def build_sidecar_json(
         "min": colorize_meta.get("min"),
         "max": colorize_meta.get("max"),
         "legend": legend,
+        "quality": "degraded" if str(quality).strip().lower() == "degraded" else "full",
+        "quality_flags": [
+            item for item in dict.fromkeys(str(flag).strip() for flag in (quality_flags or []))
+            if item
+        ],
     }
 
     if region:
@@ -778,6 +785,8 @@ def build_frame(
     sidecar_path = staging_dir / f"{fh_str}.json"
     contour_geojson_path: Path | None = None
     contour_sidecar: dict[str, Any] | None = None
+    frame_quality = "full"
+    frame_quality_flags: list[str] = []
 
     try:
         if getattr(var_spec_model, "derived", False):
@@ -803,6 +812,18 @@ def build_frame(
                 ),
                 derive_component_resampling=warp_resampling if derive_component_warp_cache else None,
             )
+            quality_meta = local_fetch_ctx.derive_quality.get((var_key, int(fh)), {})
+            frame_quality = (
+                "degraded"
+                if str(quality_meta.get("quality", "full")).strip().lower() == "degraded"
+                else "full"
+            )
+            flags_raw = quality_meta.get("quality_flags", [])
+            if isinstance(flags_raw, list):
+                frame_quality_flags = [
+                    item for item in dict.fromkeys(str(flag).strip() for flag in flags_raw)
+                    if item
+                ]
         else:
             # --- Step 1: Fetch GRIB data ---
             logger.info("Step 1/6: Fetching GRIB data")
@@ -1002,6 +1023,8 @@ def build_frame(
             var_spec_model=var_spec_model,
             contours=contour_sidecar,
             value_downsample_factor=VALUE_HOVER_DOWNSAMPLE_FACTOR,
+            quality=frame_quality,
+            quality_flags=frame_quality_flags,
         )
         _write_json_atomic(sidecar_path, sidecar)
 

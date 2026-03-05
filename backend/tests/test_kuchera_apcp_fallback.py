@@ -69,7 +69,43 @@ def _build_fetch_stub(
             return data, crs, transform, meta
         return data, crs, transform
 
-    return _fake_fetch_component, crs, transform
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
+        del model_id, run_date, herbie_kwargs
+        step_fh = int(fh)
+        pattern = str(search_pattern)
+        expected_apcp_pattern = str(inventory_by_fh[step_fh])
+        if pattern.startswith(":APCP:surface:"):
+            if pattern != expected_apcp_pattern:
+                raise AssertionError(
+                    f"unexpected APCP pattern for fh={step_fh}: {pattern} != {expected_apcp_pattern}"
+                )
+            data = apcp_by_fh[step_fh]
+            meta = {"inventory_line": expected_apcp_pattern, "search_pattern": pattern, "fh": step_fh, "product": product}
+            return (data, crs, transform, meta) if return_meta else (data, crs, transform)
+
+        if pattern == ":TMP:850 mb:":
+            meta = {"inventory_line": "", "search_pattern": pattern, "fh": step_fh, "product": product}
+            return (temp_850, crs, transform, meta) if return_meta else (temp_850, crs, transform)
+        if pattern == ":RH:850 mb:":
+            meta = {"inventory_line": "", "search_pattern": pattern, "fh": step_fh, "product": product}
+            return (rh_850, crs, transform, meta) if return_meta else (rh_850, crs, transform)
+
+        raise AssertionError(f"unexpected search_pattern: {pattern}")
+
+    def _fake_inventory_lines(*, model_id, product, run_date, fh, search_pattern):
+        del model_id, product, run_date, search_pattern
+        return [str(inventory_by_fh[int(fh)])]
+
+    return _fake_fetch_component, _fake_fetch_variable, _fake_inventory_lines, crs, transform
 
 
 def test_kuchera_apcp_cumulative_fallback_differences_to_step(monkeypatch, caplog) -> None:
@@ -81,11 +117,13 @@ def test_kuchera_apcp_cumulative_fallback_differences_to_step(monkeypatch, caplo
         6: ":APCP:surface:0-6 hour acc fcst:",
         12: ":APCP:surface:0-12 hour acc fcst:",
     }
-    fake_fetch, crs, transform = _build_fetch_stub(
+    fake_fetch, fake_fetch_variable, fake_inventory_lines, crs, transform = _build_fetch_stub(
         apcp_by_fh=apcp_by_fh,
         inventory_by_fh=inventory_by_fh,
     )
     monkeypatch.setattr(derive_module, "_fetch_component", fake_fetch)
+    monkeypatch.setattr(derive_module, "fetch_variable", fake_fetch_variable)
+    monkeypatch.setattr(derive_module, "_kuchera_inventory_lines", fake_inventory_lines)
 
     with caplog.at_level("INFO"):
         data, out_crs, out_transform = derive_module._derive_snowfall_kuchera_total_cumulative(
@@ -121,11 +159,13 @@ def test_kuchera_apcp_interval_step_is_used_directly(monkeypatch) -> None:
         6: ":APCP:surface:0-6 hour acc fcst:",
         12: ":APCP:surface:6-12 hour acc fcst:",
     }
-    fake_fetch, crs, transform = _build_fetch_stub(
+    fake_fetch, fake_fetch_variable, fake_inventory_lines, crs, transform = _build_fetch_stub(
         apcp_by_fh=apcp_by_fh,
         inventory_by_fh=inventory_by_fh,
     )
     monkeypatch.setattr(derive_module, "_fetch_component", fake_fetch)
+    monkeypatch.setattr(derive_module, "fetch_variable", fake_fetch_variable)
+    monkeypatch.setattr(derive_module, "_kuchera_inventory_lines", fake_inventory_lines)
 
     data, out_crs, out_transform = derive_module._derive_snowfall_kuchera_total_cumulative(
         model_id="gfs",
