@@ -423,9 +423,7 @@ GFS_VARS: dict[str, VarSpec] = {
         name="APCP Step",
         selectors=VarSelectors(
             search=[
-                r":APCP:surface:[0-9]+-[0-9]+ hour acc@\(fcst,dt=[0-9]+ hour\),missing=0:$",
-                r":APCP:surface:[0-9]+-[0-9]+ hour acc@\(fcst,dt=[0-9]+ hour\):$",
-                r":APCP:surface:[0-9]+-[0-9]+ hour acc fcst:$",
+                r":APCP:surface:[0-9]+-[0-9]+ hour acc[^:]*:$",
             ],
             filter_by_keys={
                 "shortName": "apcp",
