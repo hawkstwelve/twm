@@ -69,6 +69,7 @@ class VariableCapability:
     default_fh: Optional[int] = None
     buildable: bool = True
     order: Optional[int] = None
+    group: Optional[str] = None
     legend_title: Optional[str] = None
     conversion: Optional[str] = None
     constraints: dict[str, Any] = field(default_factory=dict)

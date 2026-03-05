@@ -265,6 +265,13 @@ NBM_ORDER_BY_VAR_KEY: dict[str, int] = {
     "wspd10m": 4,
 }
 
+NBM_GROUP_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "Temperature",
+    "precip_total": "Precipitation",
+    "snowfall_total": "Precipitation",
+    "wspd10m": "Wind",
+}
+
 NBM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "precip_total": "kgm2_to_in",
@@ -299,6 +306,7 @@ def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapabi
         default_fh=NBM_DEFAULT_FH_BY_VAR_KEY.get(var_key),
         buildable=is_buildable,
         order=NBM_ORDER_BY_VAR_KEY.get(var_key),
+        group=NBM_GROUP_BY_VAR_KEY.get(var_key),
         conversion=NBM_CONVERSION_BY_VAR_KEY.get(var_key),
         constraints=dict(NBM_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
     )

@@ -1198,6 +1198,7 @@ def _serialize_variable_capability(capability: Any) -> dict[str, Any]:
         "kind": getattr(capability, "kind", None),
         "units": getattr(capability, "units", None),
         "order": getattr(capability, "order", None),
+        "group": getattr(capability, "group", None),
         "default_fh": getattr(capability, "default_fh", None),
         "buildable": bool(getattr(capability, "buildable", False)),
         "color_map_id": getattr(capability, "color_map_id", None),

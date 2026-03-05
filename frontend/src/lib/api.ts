@@ -11,6 +11,7 @@ export type CapabilityVariable = {
   kind?: string | null;
   units?: string | null;
   order?: number | null;
+  group?: string | null;
   default_fh?: number | null;
   buildable?: boolean;
   color_map_id?: string | null;

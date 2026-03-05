@@ -3,13 +3,19 @@ import { MapPin, Layers, CalendarClock, Boxes, Send } from "lucide-react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
 } from "@/components/ui/select";
 
 type Option = {
   value: string;
   label: string;
+};
+
+type VariableOption = Option & {
+  group: string | null;
 };
 
 type WeatherToolbarProps = {
@@ -24,7 +30,7 @@ type WeatherToolbarProps = {
   regions: Option[];
   models: Option[];
   runs: Option[];
-  variables: Option[];
+  variables: VariableOption[];
   disabled?: boolean;
   onPostToTwf?: () => void;
 };
@@ -34,12 +40,68 @@ function ToolbarSelect(props: {
   icon: ComponentType<{ className?: string }>;
   value: string;
   onValueChange: (value: string) => void;
-  options: Option[];
+  options: (Option | VariableOption)[];
   disabled?: boolean;
   placeholder: string;
+  grouped?: boolean;
 }) {
-  const { label, icon: Icon, value, onValueChange, options, disabled, placeholder } = props;
+  const { label, icon: Icon, value, onValueChange, options, disabled, placeholder, grouped } = props;
   const selectedLabel = options.find((opt) => opt.value === value)?.label ?? placeholder;
+
+  // Build grouped content when the `grouped` flag is set and options have a group field.
+  let content: React.ReactNode;
+  if (grouped) {
+    const GROUP_ORDER = ["Radar & Precipitation Type", "Temperature", "Precipitation", "Wind"];
+    const groups = new Map<string, Option[]>();
+    const ungrouped: Option[] = [];
+    for (const opt of options) {
+      const g = "group" in opt && typeof opt.group === "string" ? opt.group : null;
+      if (g) {
+        let list = groups.get(g);
+        if (!list) {
+          list = [];
+          groups.set(g, list);
+        }
+        list.push(opt);
+      } else {
+        ungrouped.push(opt);
+      }
+    }
+    const orderedGroups = GROUP_ORDER.filter((g) => groups.has(g));
+    // Include any groups not in GROUP_ORDER (future-proof).
+    for (const g of groups.keys()) {
+      if (!orderedGroups.includes(g)) {
+        orderedGroups.push(g);
+      }
+    }
+    content = (
+      <>
+        {orderedGroups.map((g) => (
+          <SelectGroup key={g}>
+            <SelectLabel className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70 px-2 pt-1.5 pb-0.5">
+              {g}
+            </SelectLabel>
+            {groups.get(g)!.map((opt) => (
+              <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
+                {opt.label}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        ))}
+        {ungrouped.map((opt) => (
+          <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
+            {opt.label}
+          </SelectItem>
+        ))}
+      </>
+    );
+  } else {
+    content = options.map((opt) => (
+      <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
+        {opt.label}
+      </SelectItem>
+    ));
+  }
 
   return (
     <div className="flex flex-col gap-1">
@@ -52,11 +114,7 @@ function ToolbarSelect(props: {
           <span className="whitespace-nowrap pr-1">{selectedLabel}</span>
         </SelectTrigger>
         <SelectContent>
-          {options.map((opt) => (
-            <SelectItem key={opt.value} value={opt.value} className="text-xs font-medium">
-              {opt.label}
-            </SelectItem>
-          ))}
+          {content}
         </SelectContent>
       </Select>
     </div>
@@ -126,6 +184,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
           options={variables}
           disabled={disabled}
           placeholder="Variable"
+          grouped
         />
 
         {onPostToTwf ? (

@@ -506,6 +506,18 @@ NAM_ORDER_BY_VAR_KEY: dict[str, int] = {
     "snowfall_kuchera_total": 8,
 }
 
+NAM_GROUP_BY_VAR_KEY: dict[str, str] = {
+    "radar_ptype": "Radar & Precipitation Type",
+    "tmp2m": "Temperature",
+    "dp2m": "Temperature",
+    "tmp850": "Temperature",
+    "precip_total": "Precipitation",
+    "snowfall_total": "Precipitation",
+    "snowfall_kuchera_total": "Precipitation",
+    "wspd10m": "Wind",
+    "wgst10m": "Wind",
+}
+
 NAM_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "dp2m": "c_to_f",
@@ -544,6 +556,7 @@ def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapabi
         default_fh=NAM_DEFAULT_FH_BY_VAR_KEY.get(var_key),
         buildable=is_buildable,
         order=NAM_ORDER_BY_VAR_KEY.get(var_key),
+        group=NAM_GROUP_BY_VAR_KEY.get(var_key),
         conversion=NAM_CONVERSION_BY_VAR_KEY.get(var_key),
         constraints=dict(NAM_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
     )

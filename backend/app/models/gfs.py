@@ -534,6 +534,20 @@ GFS_ORDER_BY_VAR_KEY: dict[str, int] = {
     "snowfall_kuchera_total": 11,
 }
 
+GFS_GROUP_BY_VAR_KEY: dict[str, str] = {
+    "tmp2m": "Temperature",
+    "dp2m": "Temperature",
+    "tmp850": "Temperature",
+    "precip_total": "Precipitation",
+    "snowfall_total": "Precipitation",
+    "snowfall_kuchera_total": "Precipitation",
+    "qpf6h": "Precipitation",
+    "wspd10m": "Wind",
+    "wgst10m": "Wind",
+    "precip_ptype": "Radar & Precipitation Type",
+    "refc": "Radar & Precipitation Type",
+}
+
 GFS_CONVERSION_BY_VAR_KEY: dict[str, str] = {
     "tmp2m": "c_to_f",
     "dp2m": "c_to_f",
@@ -576,6 +590,7 @@ def _capability_from_var_spec(var_key: str, var_spec: VarSpec) -> VariableCapabi
         default_fh=GFS_DEFAULT_FH_BY_VAR_KEY.get(var_key),
         buildable=is_buildable,
         order=GFS_ORDER_BY_VAR_KEY.get(var_key),
+        group=GFS_GROUP_BY_VAR_KEY.get(var_key),
         conversion=GFS_CONVERSION_BY_VAR_KEY.get(var_key),
         constraints=dict(GFS_CONSTRAINTS_BY_VAR_KEY.get(var_key, {})),
     )

@@ -80,6 +80,10 @@ type Option = {
   label: string;
 };
 
+type VariableOption = Option & {
+  group: string | null;
+};
+
 type VariableEntry = {
   id: string;
   displayName?: string;
@@ -87,6 +91,7 @@ type VariableEntry = {
   defaultFh?: number | null;
   buildable?: boolean;
   kind?: string | null;
+  group?: string | null;
 };
 
 type ModelEntry = {
@@ -210,6 +215,7 @@ function normalizeCapabilityVarRows(modelCapability: CapabilityModel | null | un
       defaultFh: variableDefaultFh(entry),
       buildable: entry.buildable !== false,
       kind: typeof entry.kind === "string" ? entry.kind : null,
+      group: typeof entry.group === "string" ? entry.group : null,
     }))
     .filter((entry) => Boolean(entry.id) && entry.buildable);
 
@@ -259,10 +265,11 @@ function normalizeManifestVarRows(
   return normalized;
 }
 
-function makeVariableOptions(entries: VariableEntry[]): Option[] {
+function makeVariableOptions(entries: VariableEntry[]): VariableOption[] {
   return entries.map((entry) => ({
     value: entry.id,
     label: makeVariableLabel(entry.id, entry.displayName),
+    group: entry.group ?? null,
   }));
 }
 
@@ -626,7 +633,7 @@ export default function App() {
   const [models, setModels] = useState<Option[]>([]);
   const [regions, setRegions] = useState<Option[]>([]);
   const [runs, setRuns] = useState<string[]>([]);
-  const [variables, setVariables] = useState<Option[]>([]);
+  const [variables, setVariables] = useState<VariableOption[]>([]);
   const [frameRows, setFrameRows] = useState<FrameRow[]>([]);
   const [runManifest, setRunManifest] = useState<RunManifestResponse | null>(null);
   const [loopManifest, setLoopManifest] = useState<LoopManifestResponse | null>(null);
