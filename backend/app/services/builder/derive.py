@@ -1714,6 +1714,56 @@ def _derive_snowfall_kuchera_total_cumulative(
     )
     del _prefetch_tasks, _warp_kw, _resolved_profile_product
 
+    # -- Build in-memory profile dict: (step_fh, level_hpa) → (temp, rh). --
+    # The parallel prefetch above warmed the FetchContext cache, so each
+    # _fetch_for_step call here is a fast cache hit.  This eliminates
+    # repeated cache-key construction and var-resolution overhead in the
+    # main accumulation loop.
+    _profile: dict[tuple[int, int], tuple[np.ndarray | None, np.ndarray | None]] = {}
+    for _blevel in levels_hpa:
+        if _blevel in unavailable_temp_levels:
+            for _bsfh in step_fhs:
+                _profile[(_bsfh, _blevel)] = (None, None)
+            continue
+        for _bsfh in step_fhs:
+            _btmp: np.ndarray | None = None
+            try:
+                _bt, _, _ = _fetch_for_step(
+                    _bsfh, f"tmp{_blevel}", component_product=profile_product,
+                )
+                _btmp = _bt.astype(np.float32, copy=False)
+            except ValueError:
+                unavailable_temp_levels.add(_blevel)
+                _profile[(_bsfh, _blevel)] = (None, None)
+                # Level doesn't exist in model — mark remaining steps too.
+                for _brem in step_fhs[step_fhs.index(_bsfh) + 1 :]:
+                    _profile[(_brem, _blevel)] = (None, None)
+                break
+            except (HerbieTransientUnavailableError, RuntimeError):
+                _profile[(_bsfh, _blevel)] = (None, None)
+                continue
+
+            _brh: np.ndarray | None = None
+            if _blevel not in unavailable_rh_levels:
+                try:
+                    _br, _, _ = _fetch_for_step(
+                        _bsfh, f"rh{_blevel}", component_product=profile_product,
+                    )
+                    _brh = _br.astype(np.float32, copy=False)
+                except ValueError:
+                    unavailable_rh_levels.add(_blevel)
+                except (HerbieTransientUnavailableError, RuntimeError):
+                    pass
+
+            _profile[(_bsfh, _blevel)] = (_btmp, _brh)
+
+    logger.debug(
+        "kuchera profile_dict entries=%d unavail_temp=%s unavail_rh=%s",
+        len(_profile),
+        unavailable_temp_levels or "none",
+        unavailable_rh_levels or "none",
+    )
+
     for step_index, step_fh in enumerate(step_fhs):
         expected_start_fh = 0 if step_index == 0 else int(step_fhs[step_index - 1])
         apcp_meta: dict[str, Any] = {}
@@ -1945,55 +1995,27 @@ def _derive_snowfall_kuchera_total_cumulative(
         step_temps: list[np.ndarray] = []
         step_rhs: list[np.ndarray | None] = []
         for level_hpa in levels_hpa:
-            if level_hpa in unavailable_temp_levels:
+            _entry = _profile.get((step_fh, level_hpa))
+            if _entry is None:
                 continue
-
-            temp_component = f"tmp{level_hpa}"
-            try:
-                temp_data, _, _ = _fetch_for_step(
-                    step_fh,
-                    temp_component,
-                    component_product=profile_product,
-                )
-            except (HerbieTransientUnavailableError, RuntimeError, ValueError) as exc:
-                if isinstance(exc, ValueError):
-                    unavailable_temp_levels.add(level_hpa)
+            _p_temp, _p_rh = _entry
+            if _p_temp is None:
                 continue
-
-            if temp_data.shape != step_apcp_clean.shape:
+            if require_rh and _p_rh is None:
+                continue
+            if _p_temp.shape != step_apcp_clean.shape:
                 raise ValueError(
                     f"Kuchera temp shape mismatch for {model_id}/{var_key} at fh{step_fh:03d} level={level_hpa}: "
-                    f"{temp_data.shape} != {step_apcp_clean.shape}"
+                    f"{_p_temp.shape} != {step_apcp_clean.shape}"
                 )
-
-            rh_data_for_level: np.ndarray | None = None
-            rh_component = f"rh{level_hpa}"
-            if require_rh and level_hpa in unavailable_rh_levels:
-                continue
-
-            if require_rh or level_hpa not in unavailable_rh_levels:
-                try:
-                    rh_data, _, _ = _fetch_for_step(
-                        step_fh,
-                        rh_component,
-                        component_product=profile_product,
-                    )
-                    if rh_data.shape != step_apcp_clean.shape:
-                        raise ValueError(
-                            f"Kuchera RH shape mismatch for {model_id}/{var_key} at fh{step_fh:03d} level={level_hpa}: "
-                            f"{rh_data.shape} != {step_apcp_clean.shape}"
-                        )
-                    rh_data_for_level = rh_data.astype(np.float32, copy=False)
-                except (HerbieTransientUnavailableError, RuntimeError, ValueError) as exc:
-                    if isinstance(exc, ValueError):
-                        unavailable_rh_levels.add(level_hpa)
-                    if require_rh:
-                        continue
-                    rh_data_for_level = None
-
+            if _p_rh is not None and _p_rh.shape != step_apcp_clean.shape:
+                raise ValueError(
+                    f"Kuchera RH shape mismatch for {model_id}/{var_key} at fh{step_fh:03d} level={level_hpa}: "
+                    f"{_p_rh.shape} != {step_apcp_clean.shape}"
+                )
             step_levels.append(level_hpa)
-            step_temps.append(temp_data.astype(np.float32, copy=False))
-            step_rhs.append(rh_data_for_level)
+            step_temps.append(_p_temp)
+            step_rhs.append(_p_rh)
 
         if len(step_levels) < min_levels:
             if not fallback_profile_logged:

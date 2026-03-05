@@ -114,7 +114,8 @@ def test_kuchera_apcp_tries_exact_pattern_first(monkeypatch) -> None:
     )
 
     assert calls
-    assert calls[0] == exact_pattern
+    apcp_calls = [c for c in calls if "APCP" in c]
+    assert apcp_calls and apcp_calls[0] == exact_pattern
     assert _APCP_SELECTOR_REGEX not in calls
     assert np.isfinite(data).all()
 
@@ -177,7 +178,8 @@ def test_kuchera_apcp_falls_back_once_when_exact_has_no_inventory(monkeypatch, c
             model_plugin=plugin,
         )
 
-    assert calls[0] == exact_pattern
+    apcp_calls = [c for c in calls if "APCP" in c]
+    assert apcp_calls and apcp_calls[0] == exact_pattern
     assert calls.count(_APCP_SELECTOR_REGEX) == 1
     assert "selector_fallback=true" in caplog.text
     assert "exact_guess_used=true" in caplog.text
