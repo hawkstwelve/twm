@@ -8,11 +8,14 @@ Builds derived fields directly from model component VarSpecs:
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import logging
 import os
 import re
+import time
 from typing import Any, Callable
 
 import numpy as np
@@ -60,6 +63,7 @@ class FetchContext:
     stats: dict[str, int] = field(default_factory=lambda: {"hits": 0, "misses": 0})
     warp_stats: dict[str, int] = field(default_factory=lambda: {"hits": 0, "misses": 0})
     coverage: str | None = None
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -316,13 +320,210 @@ def _selector_fingerprint(selectors: Any) -> str:
 def _record_fetch_stat(ctx: FetchContext | None, metric: str) -> None:
     if ctx is None:
         return
-    ctx.stats[metric] = int(ctx.stats.get(metric, 0)) + 1
+    with ctx._lock:
+        ctx.stats[metric] = int(ctx.stats.get(metric, 0)) + 1
 
 
 def _record_warp_stat(ctx: FetchContext | None, metric: str) -> None:
     if ctx is None:
         return
-    ctx.warp_stats[metric] = int(ctx.warp_stats.get(metric, 0)) + 1
+    with ctx._lock:
+        ctx.warp_stats[metric] = int(ctx.warp_stats.get(metric, 0)) + 1
+
+
+# ---------------------------------------------------------------------------
+# Bounded parallel prefetch for cumulative derive strategies
+# ---------------------------------------------------------------------------
+
+_PREFETCH_DEFAULT_WORKERS = 6
+_PREFETCH_ENV_WORKERS = "TWF_V3_DERIVE_PREFETCH_WORKERS"
+# If this fraction of prefetch tasks fail, stop launching new ones.
+_PREFETCH_FAIL_ABORT_RATIO = 0.5
+# Minimum tasks that must have completed before the abort ratio is evaluated.
+_PREFETCH_FAIL_ABORT_MIN_COMPLETED = 4
+# Brief sleep injected after a failed prefetch to back off upstream sources.
+_PREFETCH_BACKOFF_SECONDS = 0.3
+
+
+def _prefetch_max_workers() -> int:
+    """Resolve bounded worker count from env or default."""
+    raw = os.getenv(_PREFETCH_ENV_WORKERS, "").strip()
+    if raw:
+        try:
+            return max(1, min(int(raw), 12))
+        except ValueError:
+            pass
+    return _PREFETCH_DEFAULT_WORKERS
+
+
+@dataclass(frozen=True)
+class _PrefetchTask:
+    """Describes one GRIB component to pre-warm in the FetchContext cache."""
+    model_id: str
+    product: str
+    run_date: datetime
+    fh: int
+    model_plugin: Any
+    var_key: str
+    warped: bool = False
+    target_region: str = ""
+    target_grid_id: str = ""
+    resampling: str = ""
+
+    @property
+    def _dedup_key(self) -> tuple:
+        if self.warped:
+            return (self.model_id, self.product, self.fh, self.var_key,
+                    self.target_grid_id, self.resampling)
+        return (self.model_id, self.product, self.fh, self.var_key)
+
+
+def _prefetch_components_parallel(
+    tasks: list[_PrefetchTask],
+    ctx: FetchContext | None,
+    *,
+    label: str = "",
+) -> int:
+    """Prefetch GRIB components with bounded concurrency and backoff.
+
+    Warms the FetchContext cache so the subsequent sequential accumulation
+    loop sees near-100% cache hits.  Failures are silently skipped — the
+    main loop will attempt its own fetch and handle errors with existing
+    error-handling logic.
+
+    Returns the number of successfully prefetched items.
+    """
+    if not tasks or ctx is None:
+        return 0
+
+    # Deduplicate by cache-relevant fields.
+    seen: set[tuple] = set()
+    unique: list[_PrefetchTask] = []
+    for task in tasks:
+        key = task._dedup_key
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(task)
+
+    if not unique:
+        return 0
+
+    workers = min(_prefetch_max_workers(), len(unique))
+
+    # For very small task lists, skip the thread-pool overhead entirely.
+    if workers <= 1 or len(unique) <= 2:
+        return _prefetch_sequential(unique, ctx)
+
+    succeeded = 0
+    failed = 0
+    lock = threading.Lock()
+
+    def _run_one(task: _PrefetchTask) -> bool:
+        # Early abort check: if many tasks have already failed, skip new ones
+        # to avoid hammering a struggling upstream source.
+        with lock:
+            total_done = succeeded + failed
+            if (
+                total_done >= _PREFETCH_FAIL_ABORT_MIN_COMPLETED
+                and failed > total_done * _PREFETCH_FAIL_ABORT_RATIO
+            ):
+                return False
+        try:
+            if task.warped:
+                _fetch_component_warped(
+                    model_id=task.model_id,
+                    product=task.product,
+                    run_date=task.run_date,
+                    fh=task.fh,
+                    model_plugin=task.model_plugin,
+                    var_key=task.var_key,
+                    target_region=task.target_region,
+                    target_grid_id=task.target_grid_id,
+                    resampling=task.resampling,
+                    ctx=ctx,
+                )
+            else:
+                _fetch_component(
+                    model_id=task.model_id,
+                    product=task.product,
+                    run_date=task.run_date,
+                    fh=task.fh,
+                    model_plugin=task.model_plugin,
+                    var_key=task.var_key,
+                    ctx=ctx,
+                )
+            return True
+        except Exception:
+            # Backoff briefly so concurrent workers don't stampede a failing source.
+            time.sleep(_PREFETCH_BACKOFF_SECONDS)
+            return False
+
+    t0 = time.monotonic()
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_run_one, task): task for task in unique}
+        for future in as_completed(futures):
+            try:
+                ok = future.result()
+            except Exception:
+                ok = False
+            with lock:
+                if ok:
+                    succeeded += 1
+                else:
+                    failed += 1
+
+    elapsed_ms = (time.monotonic() - t0) * 1000
+    log_label = f" [{label}]" if label else ""
+    logger.info(
+        "prefetch%s complete: %d/%d ok, %d failed, workers=%d, %.0fms",
+        log_label,
+        succeeded,
+        len(unique),
+        failed,
+        workers,
+        elapsed_ms,
+    )
+    return succeeded
+
+
+def _prefetch_sequential(
+    tasks: list[_PrefetchTask],
+    ctx: FetchContext | None,
+) -> int:
+    """Fallback: prefetch a small task list without thread-pool overhead."""
+    if not tasks or ctx is None:
+        return 0
+    ok = 0
+    for task in tasks:
+        try:
+            if task.warped:
+                _fetch_component_warped(
+                    model_id=task.model_id,
+                    product=task.product,
+                    run_date=task.run_date,
+                    fh=task.fh,
+                    model_plugin=task.model_plugin,
+                    var_key=task.var_key,
+                    target_region=task.target_region,
+                    target_grid_id=task.target_grid_id,
+                    resampling=task.resampling,
+                    ctx=ctx,
+                )
+            else:
+                _fetch_component(
+                    model_id=task.model_id,
+                    product=task.product,
+                    run_date=task.run_date,
+                    fh=task.fh,
+                    model_plugin=task.model_plugin,
+                    var_key=task.var_key,
+                    ctx=ctx,
+                )
+            ok += 1
+        except Exception:
+            pass
+    return ok
 
 
 def _resolve_component_cache_identity(model_plugin: Any, var_key: str) -> tuple[str, str]:
@@ -1029,6 +1230,27 @@ def _derive_precip_total_cumulative(
     if use_warped_components and not target_grid_id:
         target_grid_id = f"{model_id}:{target_region}"
 
+    # -- Prefetch all APCP steps in parallel to warm the cache. --
+    _prefetch_components_parallel(
+        [
+            _PrefetchTask(
+                model_id=model_id,
+                product=product,
+                run_date=run_date,
+                fh=sfh,
+                model_plugin=model_plugin,
+                var_key=apcp_component,
+                warped=use_warped_components,
+                target_region=target_region,
+                target_grid_id=target_grid_id,
+                resampling=str(derive_component_resampling).strip() if use_warped_components else "",
+            )
+            for sfh in step_fhs
+        ],
+        ctx,
+        label=f"precip_total fh{fh:03d}",
+    )
+
     for step_fh in step_fhs:
         if use_warped_components:
             step_data, step_crs, step_transform = _fetch_component_warped(
@@ -1178,6 +1400,30 @@ def _derive_snowfall_total_10to1_cumulative(
     )
     if use_warped_components and not target_grid_id:
         target_grid_id = f"{model_id}:{target_region}"
+
+    # -- Prefetch all APCP steps + csnow samples in parallel. --
+    _prefetch_tasks: list[_PrefetchTask] = []
+    _warp_kw = dict(
+        warped=use_warped_components,
+        target_region=target_region,
+        target_grid_id=target_grid_id,
+        resampling=str(derive_component_resampling).strip() if use_warped_components else "",
+    )
+    for _pf_step_fh in step_fhs:
+        _prefetch_tasks.append(_PrefetchTask(
+            model_id=model_id, product=product, run_date=run_date,
+            fh=_pf_step_fh, model_plugin=model_plugin, var_key=apcp_component, **_warp_kw,
+        ))
+    for _pf_snow_fh in snow_step_fhs:
+        _prefetch_tasks.append(_PrefetchTask(
+            model_id=model_id, product=product, run_date=run_date,
+            fh=_pf_snow_fh, model_plugin=model_plugin, var_key=snow_component, **_warp_kw,
+        ))
+    _prefetch_components_parallel(
+        _prefetch_tasks, ctx,
+        label=f"snow10to1 fh{fh:03d}",
+    )
+    del _prefetch_tasks, _warp_kw
 
     for step_fh, _step_len, sample_fhs in interval_plan:
         if use_warped_components:
@@ -1436,6 +1682,37 @@ def _derive_snowfall_kuchera_total_cumulative(
     prev_apcp_cum_crs: rasterio.crs.CRS | None = None
     prev_apcp_cum_transform: rasterio.transform.Affine | None = None
     prev_apcp_cum_fh: int | None = None
+
+    # -- Prefetch temperature + RH profile components in parallel. --
+    # APCP is NOT prefetched here because Kuchera uses a complex
+    # exact-guess → inventory-select → regex-fallback APCP resolution
+    # state machine that can't be replicated by a simple cache warm.
+    _resolved_profile_product = str(profile_product or product)
+    _prefetch_tasks: list[_PrefetchTask] = []
+    _warp_kw = dict(
+        warped=use_warped_components,
+        target_region=target_region,
+        target_grid_id=target_grid_id,
+        resampling=str(derive_component_resampling).strip() if use_warped_components else "",
+    )
+    for _pf_step_fh in step_fhs:
+        for _pf_level in levels_hpa:
+            _prefetch_tasks.append(_PrefetchTask(
+                model_id=model_id, product=_resolved_profile_product,
+                run_date=run_date, fh=_pf_step_fh, model_plugin=model_plugin,
+                var_key=f"tmp{_pf_level}", **_warp_kw,
+            ))
+            if require_rh:
+                _prefetch_tasks.append(_PrefetchTask(
+                    model_id=model_id, product=_resolved_profile_product,
+                    run_date=run_date, fh=_pf_step_fh, model_plugin=model_plugin,
+                    var_key=f"rh{_pf_level}", **_warp_kw,
+                ))
+    _prefetch_components_parallel(
+        _prefetch_tasks, ctx,
+        label=f"kuchera_profile fh{fh:03d}",
+    )
+    del _prefetch_tasks, _warp_kw, _resolved_profile_product
 
     for step_index, step_fh in enumerate(step_fhs):
         expected_start_fh = 0 if step_index == 0 else int(step_fhs[step_index - 1])
