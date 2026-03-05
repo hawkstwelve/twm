@@ -75,7 +75,9 @@ def _smooth_display_data(data: np.ndarray, sigma: float) -> np.ndarray:
     num = gaussian_filter(data_filled, sigma=sigma, mode='nearest', truncate=3.0)
     den = gaussian_filter(weight, sigma=sigma, mode='nearest', truncate=3.0)
 
-    smoothed = np.where(den > 1e-6, num / den, np.nan).astype(np.float32, copy=False)
+    valid_den = den > 1e-6
+    smoothed = np.full(num.shape, np.nan, dtype=np.float32)
+    np.divide(num, den, out=smoothed, where=valid_den)
     smoothed[~finite_mask] = np.nan
     return smoothed
 
