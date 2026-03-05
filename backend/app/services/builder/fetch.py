@@ -90,6 +90,20 @@ class _InventoryCacheEntry:
     updated_at: float
 
 
+@dataclass
+class _TimerAggregate:
+    count: int = 0
+    total_ms: float = 0.0
+    max_ms: float = 0.0
+
+
+@dataclass
+class _InventorySearchResult:
+    inventory: Any | None
+    reason: str
+    idx_key: str = ""
+
+
 _IDX_NEGATIVE_CACHE: dict[tuple[str, str, str, int, str], _IdxNegativeCacheEntry] = {}
 _IDX_NEGATIVE_CACHE_LOCK = threading.Lock()
 _IDX_NEGATIVE_LOG_SUPPRESS: dict[tuple[str, str, str, int], float] = {}
@@ -97,6 +111,10 @@ _IDX_NEGATIVE_LOG_SUPPRESS: dict[tuple[str, str, str, int], float] = {}
 _INVENTORY_CACHE: dict[str, _InventoryCacheEntry] = {}
 _INVENTORY_CACHE_LOCK = threading.Lock()
 _INVENTORY_INFLIGHT: dict[str, threading.Event] = {}
+
+_FETCH_RUNTIME_COUNTERS: dict[str, int] = {}
+_FETCH_RUNTIME_TIMERS_MS: dict[str, _TimerAggregate] = {}
+_FETCH_RUNTIME_METRICS_LOCK = threading.Lock()
 
 
 def _priority_candidates(herbie_kwargs: dict[str, Any] | None) -> list[str]:
@@ -109,6 +127,53 @@ def _priority_candidates(herbie_kwargs: dict[str, Any] | None) -> list[str]:
         if parsed:
             return parsed
     return list(DEFAULT_HERBIE_PRIORITY)
+
+
+def _priority_normalized(priority: str) -> str:
+    return str(priority).strip().lower()
+
+
+def _is_prs_aws_priority(*, priority: str, product: str) -> bool:
+    return _priority_normalized(priority) == "aws" and str(product).strip().lower() == "prs"
+
+
+def _is_idx_lag_reason(reason: str) -> bool:
+    return str(reason).strip().lower() in {
+        "idx_missing",
+        "idx_missing_cached",
+        "idx_empty",
+        "idx_unparseable",
+        "pattern_missing",
+        "no_inventory",
+    }
+
+
+def _fallback_to_nomads_sequence(priority_sequence: list[str], *, current_index: int) -> list[str]:
+    if current_index < 0:
+        return ["nomads"]
+    return list(priority_sequence[: current_index + 1]) + ["nomads"]
+
+
+def _log_source_fallback(
+    *,
+    from_source: str,
+    to_source: str,
+    reason: str,
+    model_id: str,
+    run_date: datetime,
+    fh: int,
+    var_pattern: str,
+) -> None:
+    logger.warning(
+        "SOURCE_FALLBACK from=%s to=%s reason=%s model=%s run=%s fh=%03d var=%s",
+        from_source,
+        to_source,
+        reason,
+        model_id,
+        _run_id_from_date(run_date),
+        int(fh),
+        var_pattern,
+    )
 
 
 def _retry_count() -> int:
@@ -163,6 +228,45 @@ def _inventory_cache_ttl_seconds() -> float:
         DEFAULT_INVENTORY_CACHE_TTL_SECONDS,
         minimum=1.0,
     )
+
+
+def _metric_increment(name: str, amount: int = 1) -> None:
+    metric_name = str(name).strip()
+    if not metric_name:
+        return
+    with _FETCH_RUNTIME_METRICS_LOCK:
+        _FETCH_RUNTIME_COUNTERS[metric_name] = int(_FETCH_RUNTIME_COUNTERS.get(metric_name, 0)) + int(amount)
+
+
+def _metric_observe_ms(name: str, elapsed_ms: float) -> None:
+    metric_name = str(name).strip()
+    if not metric_name:
+        return
+    elapsed = max(0.0, float(elapsed_ms))
+    with _FETCH_RUNTIME_METRICS_LOCK:
+        aggregate = _FETCH_RUNTIME_TIMERS_MS.get(metric_name)
+        if aggregate is None:
+            aggregate = _TimerAggregate()
+            _FETCH_RUNTIME_TIMERS_MS[metric_name] = aggregate
+        aggregate.count += 1
+        aggregate.total_ms += elapsed
+        aggregate.max_ms = max(aggregate.max_ms, elapsed)
+
+
+def get_herbie_runtime_metrics_for_tests() -> dict[str, Any]:
+    """Return process-local Herbie fetch metrics (tests only)."""
+    with _FETCH_RUNTIME_METRICS_LOCK:
+        counters = {key: int(value) for key, value in _FETCH_RUNTIME_COUNTERS.items()}
+        timers = {
+            key: {
+                "count": int(value.count),
+                "sum_ms": float(value.total_ms),
+                "avg_ms": float(value.total_ms / value.count) if value.count > 0 else 0.0,
+                "max_ms": float(value.max_ms),
+            }
+            for key, value in _FETCH_RUNTIME_TIMERS_MS.items()
+        }
+    return {"counters": counters, "timers_ms": timers}
 
 
 def _run_id_from_date(run_date: datetime) -> str:
@@ -302,8 +406,40 @@ def _record_and_log_idx_missing(
     return ttl
 
 
-def _inventory_cache_key_from_idx(idx_ref: Any) -> str:
-    return str(idx_ref).strip()
+def _inventory_cache_key_from_idx(
+    idx_ref: Any,
+    *,
+    priority: str = "",
+    model_id: str = "",
+    run_date: datetime | None = None,
+    product: str = "",
+    fh: int | None = None,
+    grib_ref: Any = None,
+) -> str:
+    idx_url = str(idx_ref).strip()
+    if not idx_url:
+        return ""
+    run_id = "-"
+    if isinstance(run_date, datetime):
+        run_id = _run_id_from_date(run_date)
+    fh_token = "-"
+    if fh is not None:
+        try:
+            fh_token = f"{int(fh):03d}"
+        except Exception:
+            fh_token = str(fh).strip() or "-"
+    grib_token = str(grib_ref).strip() if grib_ref is not None else ""
+    return "|".join(
+        [
+            _priority_normalized(priority) or "-",
+            str(model_id).strip().lower() or "-",
+            run_id,
+            str(product).strip().lower() or "-",
+            fh_token,
+            idx_url,
+            grib_token or "-",
+        ]
+    )
 
 
 def _inventory_cache_get(key: str) -> Any | None:
@@ -335,6 +471,7 @@ def _inventory_index_dataframe(
 ) -> Any | None:
     cached = _inventory_cache_get(idx_key)
     if cached is not None:
+        _metric_increment("idx_cache_hit")
         return cached
 
     downloader = False
@@ -343,6 +480,7 @@ def _inventory_index_dataframe(
     with _INVENTORY_CACHE_LOCK:
         entry = _INVENTORY_CACHE.get(idx_key)
         if entry is not None and now < entry.expires_at:
+            _metric_increment("idx_cache_hit")
             return entry.data
         if entry is not None and now >= entry.expires_at:
             _INVENTORY_CACHE.pop(idx_key, None)
@@ -351,17 +489,39 @@ def _inventory_index_dataframe(
             inflight_event = threading.Event()
             _INVENTORY_INFLIGHT[idx_key] = inflight_event
             downloader = True
+            _metric_increment("idx_cache_miss")
         else:
             inflight_event = existing
 
     if not downloader:
         inflight_event.wait(timeout=max(5.0, _inventory_cache_ttl_seconds()))
-        return _inventory_cache_get(idx_key)
+        reused = _inventory_cache_get(idx_key)
+        if reused is not None:
+            _metric_increment("idx_cache_hit")
+            return reused
+        _metric_increment("idx_cache_miss")
+        return None
 
+    fetch_start = time.monotonic()
     try:
         dataframe = H.index_as_dataframe
-        _inventory_cache_set(idx_key, dataframe, _inventory_cache_ttl_seconds())
+        _metric_observe_ms("idx_fetch_ms", (time.monotonic() - fetch_start) * 1000.0)
+        if dataframe is None:
+            _metric_increment("idx_cache_error")
+            return None
+        try:
+            dataframe_len = len(dataframe)
+        except Exception:
+            _metric_increment("idx_cache_error")
+            raise
+        if dataframe_len > 0:
+            _inventory_cache_set(idx_key, dataframe, _inventory_cache_ttl_seconds())
+            _metric_increment("idx_cache_store")
         return dataframe
+    except Exception:
+        _metric_observe_ms("idx_fetch_ms", (time.monotonic() - fetch_start) * 1000.0)
+        _metric_increment("idx_cache_error")
+        raise
     finally:
         with _INVENTORY_CACHE_LOCK:
             event = _INVENTORY_INFLIGHT.pop(idx_key, None)
@@ -405,29 +565,65 @@ def _inventory_search(
     H: Any,
     *,
     search_pattern: str,
-) -> Any | None:
+    priority: str = "",
+    model_id: str = "",
+    run_date: datetime | None = None,
+    product: str = "",
+    fh: int | None = None,
+) -> _InventorySearchResult:
     idx_ref: Any
     try:
         idx_ref = getattr(H, "idx", None)
+    except Exception as exc:
+        if _is_missing_index_error(exc):
+            return _InventorySearchResult(inventory=None, reason="idx_missing")
+        return _InventorySearchResult(inventory=None, reason="idx_unparseable")
+    try:
+        grib_ref = getattr(H, "grib", None)
     except Exception:
-        return None
-    idx_key = _inventory_cache_key_from_idx(idx_ref)
+        grib_ref = None
+    priority_token = str(priority).strip() or str(getattr(H, "priority", "") or "")
+    model_token = str(model_id).strip() or str(getattr(H, "model", "") or "")
+    run_token = run_date if isinstance(run_date, datetime) else getattr(H, "date", None)
+    product_token = str(product).strip() or str(getattr(H, "product", "") or "")
+    fh_token = fh if fh is not None else getattr(H, "fxx", None)
+    idx_key = _inventory_cache_key_from_idx(
+        idx_ref,
+        priority=priority_token,
+        model_id=model_token,
+        run_date=run_token,
+        product=product_token,
+        fh=fh_token,
+        grib_ref=grib_ref,
+    )
     if not idx_key:
-        return None
+        return _InventorySearchResult(inventory=None, reason="idx_missing")
 
     try:
         index_df = _inventory_index_dataframe(H, idx_key=idx_key)
     except Exception:
-        index_df = None
-    if index_df is not None:
-        filtered = _inventory_filter(index_df, search_pattern)
-        if filtered is not None:
-            return filtered
+        return _InventorySearchResult(inventory=None, reason="idx_unparseable", idx_key=idx_key)
+    if index_df is None:
+        return _InventorySearchResult(inventory=None, reason="idx_empty", idx_key=idx_key)
 
     try:
-        return H.inventory(search_pattern)
+        if len(index_df) == 0:
+            return _InventorySearchResult(inventory=index_df, reason="idx_empty", idx_key=idx_key)
     except Exception:
-        return None
+        return _InventorySearchResult(inventory=None, reason="idx_unparseable", idx_key=idx_key)
+
+    parse_start = time.monotonic()
+    filtered = _inventory_filter(index_df, search_pattern)
+    _metric_observe_ms("idx_parse_ms", (time.monotonic() - parse_start) * 1000.0)
+    if filtered is None:
+        return _InventorySearchResult(inventory=None, reason="idx_unparseable", idx_key=idx_key)
+
+    try:
+        if len(filtered) == 0:
+            return _InventorySearchResult(inventory=filtered, reason="pattern_missing", idx_key=idx_key)
+    except Exception:
+        return _InventorySearchResult(inventory=None, reason="idx_unparseable", idx_key=idx_key)
+    return _InventorySearchResult(inventory=filtered, reason="ok", idx_key=idx_key)
 
 
 def _inventory_lines_from_rows(inventory: Any) -> list[str]:
@@ -459,6 +655,9 @@ def reset_herbie_runtime_caches_for_tests() -> None:
     with _INVENTORY_CACHE_LOCK:
         _INVENTORY_CACHE.clear()
         _INVENTORY_INFLIGHT.clear()
+    with _FETCH_RUNTIME_METRICS_LOCK:
+        _FETCH_RUNTIME_COUNTERS.clear()
+        _FETCH_RUNTIME_TIMERS_MS.clear()
 
 
 def inventory_lines_for_pattern(
@@ -481,9 +680,12 @@ def inventory_lines_for_pattern(
     if herbie_kwargs:
         kwargs.update(herbie_kwargs)
 
-    priority_list = _priority_candidates(herbie_kwargs)
+    priority_list = [_priority_normalized(item) for item in _priority_candidates(herbie_kwargs) if str(item).strip()]
     herbie_date = run_date.replace(tzinfo=None) if run_date.tzinfo else run_date
-    for priority in priority_list:
+    priority_sequence = list(priority_list)
+    priority_idx = 0
+    while priority_idx < len(priority_sequence):
+        priority = priority_sequence[priority_idx]
         cache_key = _idx_negative_key(
             model_id=model_id,
             run_date=run_date,
@@ -492,13 +694,16 @@ def inventory_lines_for_pattern(
             priority=priority,
         )
         if _idx_negative_cache_remaining(cache_key) > 0:
+            priority_idx += 1
             continue
         run_kwargs = dict(kwargs)
         run_kwargs["priority"] = priority
+        inv_reason = "unknown"
         try:
             H = Herbie(herbie_date, **run_kwargs)
             idx_ref = getattr(H, "idx", None)
             if not idx_ref:
+                inv_reason = "idx_missing"
                 _record_and_log_idx_missing(
                     model_id=model_id,
                     run_date=run_date,
@@ -508,13 +713,24 @@ def inventory_lines_for_pattern(
                     search_pattern=search_pattern,
                     source="inventory_lines",
                 )
-                continue
-            inventory = _inventory_search(H, search_pattern=search_pattern)
-            lines = _inventory_lines_from_rows(inventory)
-            if lines:
-                return lines
+            else:
+                inv_result = _inventory_search(
+                    H,
+                    search_pattern=search_pattern,
+                    priority=priority,
+                    model_id=model_id,
+                    run_date=run_date,
+                    product=product,
+                    fh=fh,
+                )
+                inventory = inv_result.inventory
+                inv_reason = inv_result.reason
+                lines = _inventory_lines_from_rows(inventory)
+                if lines:
+                    return lines
         except Exception as exc:
             if _is_missing_index_error(exc):
+                inv_reason = "idx_missing"
                 _record_and_log_idx_missing(
                     model_id=model_id,
                     run_date=run_date,
@@ -524,7 +740,24 @@ def inventory_lines_for_pattern(
                     search_pattern=search_pattern,
                     source="inventory_lines_exception",
                 )
-            continue
+            else:
+                inv_reason = "idx_unparseable"
+
+        if _is_prs_aws_priority(priority=priority, product=product) and _is_idx_lag_reason(inv_reason):
+            _metric_increment("prs_idx_lag_count")
+            _metric_increment("source_switch_count")
+            _log_source_fallback(
+                from_source="prs",
+                to_source="nomads",
+                reason="idx_lag",
+                model_id=model_id,
+                run_date=run_date,
+                fh=fh,
+                var_pattern=search_pattern,
+            )
+            priority_sequence = _fallback_to_nomads_sequence(priority_sequence, current_index=priority_idx)
+
+        priority_idx += 1
     return []
 
 
@@ -767,10 +1000,31 @@ def _precheck_subset_available(
         return False, "idx_missing"
 
     try:
-        inventory = _inventory_search(H, search_pattern=search_pattern)
-        if inventory is None or len(inventory) == 0:
+        inv_result = _inventory_search(
+            H,
+            search_pattern=search_pattern,
+            priority=priority,
+            model_id=model_id,
+            run_date=run_date,
+            product=product,
+            fh=fh,
+        )
+        if inv_result.reason == "ok":
+            return True, "ok"
+        if inv_result.reason == "idx_missing":
+            _record_and_log_idx_missing(
+                model_id=model_id,
+                run_date=run_date,
+                product=product,
+                fh=fh,
+                priority=priority,
+                search_pattern=search_pattern,
+                source="precheck_inventory_idx_missing",
+            )
+            return False, "idx_missing"
+        if inv_result.reason == "pattern_missing":
             logger.warning(
-                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): no inventory match",
+                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): inventory missing pattern",
                 model_id,
                 fh,
                 search_pattern,
@@ -778,8 +1032,39 @@ def _precheck_subset_available(
                 attempt_idx,
                 retries,
             )
-            return False, "no_inventory"
-        return True, "ok"
+            return False, "pattern_missing"
+        if inv_result.reason == "idx_empty":
+            logger.warning(
+                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): empty idx",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                attempt_idx,
+                retries,
+            )
+            return False, "idx_empty"
+        if inv_result.reason == "idx_unparseable":
+            logger.warning(
+                "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): idx unparseable",
+                model_id,
+                fh,
+                search_pattern,
+                priority,
+                attempt_idx,
+                retries,
+            )
+            return False, "idx_unparseable"
+        logger.warning(
+            "Herbie precheck unavailable (%s fh%03d %s; priority=%s; attempt=%d/%d): no inventory match",
+            model_id,
+            fh,
+            search_pattern,
+            priority,
+            attempt_idx,
+            retries,
+        )
+        return False, "no_inventory"
     except Exception as exc:
         if _is_missing_index_error(exc):
             _record_and_log_idx_missing(
@@ -838,15 +1123,33 @@ def _inventory_line_from_row(row: Any) -> str:
     return ""
 
 
-def _inventory_meta_from_herbie(H: Any, *, search_pattern: str, fh: int, product: str) -> dict[str, Any]:
+def _inventory_meta_from_herbie(
+    H: Any,
+    *,
+    search_pattern: str,
+    fh: int,
+    product: str,
+    model_id: str = "",
+    run_date: datetime | None = None,
+    priority: str = "",
+) -> dict[str, Any]:
     meta: dict[str, Any] = {
         "inventory_line": "",
         "search_pattern": str(search_pattern),
         "fh": int(fh),
         "product": str(product),
     }
-    inventory = _inventory_search(H, search_pattern=search_pattern)
-    if inventory is None or len(inventory) == 0:
+    inv_result = _inventory_search(
+        H,
+        search_pattern=search_pattern,
+        priority=priority,
+        model_id=model_id,
+        run_date=run_date,
+        product=product,
+        fh=fh,
+    )
+    inventory = inv_result.inventory
+    if inv_result.reason != "ok" or inventory is None or len(inventory) == 0:
         return meta
 
     try:
@@ -864,6 +1167,8 @@ def _manual_subset_download_with_corrected_range(
     search_pattern: str,
     out_path: Path,
     model_id: str,
+    run_date: datetime,
+    product: str,
     fh: int,
     priority: str,
 ) -> Path | None:
@@ -875,7 +1180,16 @@ def _manual_subset_download_with_corrected_range(
     This fallback computes `end_byte` from the next distinct start byte.
     """
     try:
-        inv = _inventory_search(H, search_pattern=search_pattern)
+        inv_result = _inventory_search(
+            H,
+            search_pattern=search_pattern,
+            priority=priority,
+            model_id=model_id,
+            run_date=run_date,
+            product=product,
+            fh=fh,
+        )
+        inv = inv_result.inventory
     except Exception:
         inv = None
 
@@ -916,7 +1230,15 @@ def _manual_subset_download_with_corrected_range(
     if end_byte is None:
         try:
             idx_ref = getattr(H, "idx", None)
-            idx_key = _inventory_cache_key_from_idx(idx_ref)
+            idx_key = _inventory_cache_key_from_idx(
+                idx_ref,
+                priority=priority,
+                model_id=model_id,
+                run_date=run_date,
+                product=product,
+                fh=fh,
+                grib_ref=getattr(H, "grib", None),
+            )
             full_idx = _inventory_index_dataframe(H, idx_key=idx_key) if idx_key else None
             if full_idx is None:
                 raise RuntimeError("full idx unavailable")
@@ -1082,7 +1404,7 @@ def fetch_variable(
     # Strip tzinfo to avoid pandas tz-naive vs tz-aware comparison errors.
     herbie_date = run_date.replace(tzinfo=None) if run_date.tzinfo else run_date
 
-    priority_list = _priority_candidates(herbie_kwargs)
+    priority_list = [_priority_normalized(item) for item in _priority_candidates(herbie_kwargs) if str(item).strip()]
     retries = _retry_count()
     sleep_s = _retry_sleep_seconds()
     lock_enabled = _grib_disk_cache_lock_enabled()
@@ -1098,8 +1420,13 @@ def fetch_variable(
         "fh": int(fh),
         "product": str(product),
     }
+    prs_idx_lag_reason: str | None = None
+    prs_fallback_triggered = False
     skipped_cached_priorities: list[tuple[str, float]] = []
-    for priority in priority_list:
+    priority_sequence = list(priority_list)
+    priority_idx = 0
+    while priority_idx < len(priority_sequence):
+        priority = priority_sequence[priority_idx]
         priority_cache_key = _idx_negative_key(
             model_id=model_id,
             run_date=run_date,
@@ -1110,10 +1437,14 @@ def fetch_variable(
         remaining_ttl = _idx_negative_cache_remaining(priority_cache_key)
         if remaining_ttl > 0.0:
             skipped_cached_priorities.append((priority, remaining_ttl))
+            priority_idx += 1
             continue
 
-        skip_remaining_attempts_for_priority = False
-        for attempt_idx in range(1, retries + 1):
+        is_prs_aws = _is_prs_aws_priority(priority=priority, product=product)
+        attempts_for_priority = 1 if is_prs_aws else retries
+        force_nomads_after_prs_idx_lag = False
+
+        for attempt_idx in range(1, attempts_for_priority + 1):
             run_kwargs = dict(kwargs)
             run_kwargs["priority"] = priority
             try:
@@ -1127,16 +1458,22 @@ def fetch_variable(
                     search_pattern=search_pattern,
                     priority=priority,
                     attempt_idx=attempt_idx,
-                    retries=retries,
+                    retries=attempts_for_priority,
                 )
                 if not precheck_ok:
                     if precheck_reason in {"idx_missing", "idx_missing_cached"}:
                         saw_missing_index = True
-                        skip_remaining_attempts_for_priority = True
+                        if is_prs_aws:
+                            prs_idx_lag_reason = precheck_reason
+                            force_nomads_after_prs_idx_lag = True
                         break
-                    # Inventory mismatch is usually transient publication lag.
+                    if is_prs_aws and _is_idx_lag_reason(precheck_reason):
+                        saw_missing_index = True
+                        prs_idx_lag_reason = precheck_reason
+                        force_nomads_after_prs_idx_lag = True
+                        break
                     saw_missing_subset_file = True
-                    if sleep_s > 0 and attempt_idx < retries:
+                    if sleep_s > 0 and attempt_idx < attempts_for_priority:
                         time.sleep(sleep_s)
                     continue
                 attempt_meta = _inventory_meta_from_herbie(
@@ -1144,6 +1481,9 @@ def fetch_variable(
                     search_pattern=search_pattern,
                     fh=fh,
                     product=product,
+                    model_id=model_id,
+                    run_date=run_date,
+                    priority=priority,
                 )
                 subset_hint: Path | None = None
                 if lock_enabled:
@@ -1165,7 +1505,7 @@ def fetch_variable(
                                 search_pattern,
                                 priority,
                                 attempt_idx,
-                                retries,
+                                attempts_for_priority,
                                 cached_size,
                             )
                             selected_meta = attempt_meta
@@ -1181,9 +1521,9 @@ def fetch_variable(
                                 search_pattern,
                                 priority,
                                 attempt_idx,
-                                retries,
+                                attempts_for_priority,
                             )
-                            if sleep_s > 0 and attempt_idx < retries:
+                            if sleep_s > 0 and attempt_idx < attempts_for_priority:
                                 time.sleep(sleep_s)
                             continue
                         subset_candidate = Path(subset_path)
@@ -1197,7 +1537,7 @@ def fetch_variable(
                                 search_pattern,
                                 priority,
                                 attempt_idx,
-                                retries,
+                                attempts_for_priority,
                                 subset_candidate,
                                 subset_size,
                             )
@@ -1206,6 +1546,8 @@ def fetch_variable(
                                 search_pattern=search_pattern,
                                 out_path=subset_candidate,
                                 model_id=model_id,
+                                run_date=run_date,
+                                product=product,
                                 fh=fh,
                                 priority=priority,
                             )
@@ -1218,7 +1560,7 @@ def fetch_variable(
                                     subset_candidate.unlink()
                             except OSError:
                                 pass
-                            if sleep_s > 0 and attempt_idx < retries:
+                            if sleep_s > 0 and attempt_idx < attempts_for_priority:
                                 time.sleep(sleep_s)
                             continue
 
@@ -1231,7 +1573,7 @@ def fetch_variable(
                             search_pattern,
                             priority,
                             attempt_idx,
-                            retries,
+                            attempts_for_priority,
                         )
                         selected_meta = attempt_meta
                         break
@@ -1246,9 +1588,9 @@ def fetch_variable(
                             search_pattern,
                             priority,
                             attempt_idx,
-                            retries,
+                            attempts_for_priority,
                         )
-                        if sleep_s > 0 and attempt_idx < retries:
+                        if sleep_s > 0 and attempt_idx < attempts_for_priority:
                             time.sleep(sleep_s)
                         continue
                     subset_candidate = Path(subset_path)
@@ -1263,7 +1605,7 @@ def fetch_variable(
                             search_pattern,
                             priority,
                             attempt_idx,
-                            retries,
+                            attempts_for_priority,
                             subset_candidate,
                             subset_size,
                         )
@@ -1272,6 +1614,8 @@ def fetch_variable(
                             search_pattern=search_pattern,
                             out_path=subset_candidate,
                             model_id=model_id,
+                            run_date=run_date,
+                            product=product,
                             fh=fh,
                             priority=priority,
                         )
@@ -1284,7 +1628,7 @@ def fetch_variable(
                                 subset_candidate.unlink()
                         except OSError:
                             pass
-                        if sleep_s > 0 and attempt_idx < retries:
+                        if sleep_s > 0 and attempt_idx < attempts_for_priority:
                             time.sleep(sleep_s)
                         continue
 
@@ -1297,7 +1641,7 @@ def fetch_variable(
                         search_pattern,
                         priority,
                         attempt_idx,
-                        retries,
+                        attempts_for_priority,
                     )
                     selected_meta = attempt_meta
                     break
@@ -1314,7 +1658,9 @@ def fetch_variable(
                         search_pattern=search_pattern,
                         source="subset_exception_missing_idx",
                     )
-                    skip_remaining_attempts_for_priority = True
+                    if is_prs_aws:
+                        prs_idx_lag_reason = "idx_missing_exception"
+                        force_nomads_after_prs_idx_lag = True
                     break
                 if _is_grib_not_found_error(exc):
                     saw_missing_subset_file = True
@@ -1325,9 +1671,9 @@ def fetch_variable(
                         search_pattern,
                         priority,
                         attempt_idx,
-                        retries,
+                        attempts_for_priority,
                     )
-                    if sleep_s > 0 and attempt_idx < retries:
+                    if sleep_s > 0 and attempt_idx < attempts_for_priority:
                         time.sleep(sleep_s)
                     continue
                 saw_non_transient_failure = True
@@ -1338,17 +1684,38 @@ def fetch_variable(
                     search_pattern,
                     priority,
                     attempt_idx,
-                    retries,
+                    attempts_for_priority,
                     exc,
                 )
-                if sleep_s > 0 and attempt_idx < retries:
+                if sleep_s > 0 and attempt_idx < attempts_for_priority:
                     time.sleep(sleep_s)
         if grib_path is not None:
             break
-        if skip_remaining_attempts_for_priority:
-            continue
+        if force_nomads_after_prs_idx_lag:
+            prs_fallback_triggered = True
+            _metric_increment("prs_idx_lag_count")
+            _metric_increment("source_switch_count")
+            _log_source_fallback(
+                from_source="prs",
+                to_source="nomads",
+                reason="idx_lag",
+                model_id=model_id,
+                run_date=run_date,
+                fh=fh,
+                var_pattern=search_pattern,
+            )
+            priority_sequence = _fallback_to_nomads_sequence(priority_sequence, current_index=priority_idx)
+        priority_idx += 1
 
     if grib_path is None:
+        if prs_fallback_triggered:
+            nomads_error = str(last_exc) if last_exc is not None else "unavailable"
+            raise HerbieTransientUnavailableError(
+                f"Herbie PRS idx-lag fallback failed (aws->nomads) for {model_id} "
+                f"run={_run_id_from_date(run_date)} product={product} fh{fh:03d} "
+                f"pattern={search_pattern!r}; aws_reason={prs_idx_lag_reason or 'idx_lag'}; "
+                f"nomads_error={nomads_error}"
+            ) from last_exc
         if len(skipped_cached_priorities) == len(priority_list) and priority_list:
             suppress_ttl = min(ttl for _, ttl in skipped_cached_priorities)
             _log_idx_missing_once(
