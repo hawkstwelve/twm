@@ -1,4 +1,10 @@
 import { API_ORIGIN, API_V4_BASE } from "@/lib/config";
+import {
+  type AnchorBatchPoint,
+  type AnchorBatchResponse,
+  type AnchorFeatureCollection,
+  isAnchorFeatureCollection,
+} from "@/lib/anchor-labels";
 
 export type ModelOption = {
   id: string;
@@ -329,6 +335,58 @@ export async function fetchLoopManifest(
   } catch {
     return null;
   }
+}
+
+export async function fetchAnchorFeatureCollection(options?: FetchOptions): Promise<AnchorFeatureCollection> {
+  const response = await fetch("/data/anchors_conus.geojson", {
+    credentials: "omit",
+    signal: options?.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Anchor data request failed: ${response.status} ${response.statusText}`);
+  }
+  const payload = (await response.json()) as unknown;
+  if (!isAnchorFeatureCollection(payload)) {
+    throw new Error("Invalid anchor GeoJSON shape");
+  }
+  return payload;
+}
+
+export async function fetchSampleBatch(params: {
+  model: string;
+  run: string;
+  variable: string;
+  forecastHour: number;
+  points: AnchorBatchPoint[];
+  signal?: AbortSignal;
+}): Promise<AnchorBatchResponse | null> {
+  const response = await fetch(`${API_V4_BASE}/sample/batch`, {
+    method: "POST",
+    credentials: "omit",
+    signal: params.signal,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: params.model,
+      run: params.run,
+      variable: params.variable,
+      forecast_hour: params.forecastHour,
+      points: params.points,
+    }),
+  });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`Batch sample request failed: ${response.status}`);
+  }
+
+  const payload = (await response.json()) as Partial<AnchorBatchResponse>;
+  return {
+    units: typeof payload.units === "string" ? payload.units : "",
+    values: payload.values && typeof payload.values === "object" ? payload.values : {},
+  };
 }
 
 // ── Sample (hover-for-data) ──────────────────────────────────────────

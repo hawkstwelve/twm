@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { MapPin, Layers, CalendarClock, Boxes, Send } from "lucide-react";
+import { cn } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -32,6 +33,8 @@ type WeatherToolbarProps = {
   runs: Option[];
   variables: VariableOption[];
   disabled?: boolean;
+  pointLabelsEnabled: boolean;
+  onPointLabelsEnabledChange: (next: boolean) => void;
   onPostToTwf?: () => void;
 };
 
@@ -136,6 +139,8 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     runs,
     variables,
     disabled = false,
+    pointLabelsEnabled,
+    onPointLabelsEnabledChange,
     onPostToTwf,
   } = props;
 
@@ -186,6 +191,27 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
           placeholder="Variable"
           grouped
         />
+
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+            Overlay
+          </span>
+          <button
+            type="button"
+            onClick={() => onPointLabelsEnabledChange(!pointLabelsEnabled)}
+            aria-pressed={pointLabelsEnabled}
+            className={cn(
+              "inline-flex h-8 items-center gap-1.5 rounded-md border px-2.5 text-xs font-semibold shadow-sm transition-all duration-150 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary/35",
+              pointLabelsEnabled
+                ? "border-white/20 bg-white/14 text-white hover:bg-white/20"
+                : "border-white/10 bg-black/25 text-white/70 hover:bg-black/35"
+            )}
+            title={pointLabelsEnabled ? "Hide point labels" : "Show point labels"}
+          >
+            <MapPin className="h-3.5 w-3.5" />
+            Point Labels
+          </button>
+        </div>
 
         {onPostToTwf ? (
           <div className="ml-auto">

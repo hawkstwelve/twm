@@ -950,7 +950,19 @@ async def twf_share_post(request: Request, body: SharePostIn) -> dict[str, Any]:
         "topicId": int(topic_id),
     }
 
-_wgs84_to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+
+class SampleBatchPointIn(BaseModel):
+    id: str = Field(..., min_length=1, max_length=128)
+    lat: float = Field(..., ge=-90, le=90)
+    lon: float = Field(..., ge=-180, le=180)
+
+
+class SampleBatchIn(BaseModel):
+    model: str = Field(..., min_length=1, max_length=64)
+    run: str = Field(..., min_length=1, max_length=32)
+    variable: str = Field(..., min_length=1, max_length=128)
+    forecast_hour: int = Field(..., ge=0)
+    points: list[SampleBatchPointIn] = Field(..., min_length=1, max_length=500)
 
 _ds_cache: dict[str, rasterio.DatasetReader] = {}
 _ds_cache_lock = threading.Lock()
@@ -1776,6 +1788,79 @@ def _sample_cache_key(model: str, run: str, var: str, fh: int, row: int, col: in
     return f"{model}:{run}:{var}:{fh}:{row}:{col}"
 
 
+def _sample_batch_cache_key(model: str, run: str, var: str, fh: int, points_hash: str) -> str:
+    return f"batch:{model}:{run}:{var}:{fh}:{points_hash}"
+
+
+def _sample_points_hash(points: list[SampleBatchPointIn]) -> str:
+    canonical_points = [
+        {
+            "id": point.id,
+            "lat": float(point.lat),
+            "lon": float(point.lon),
+        }
+        for point in sorted(points, key=lambda point: point.id)
+    ]
+    return hashlib.md5(
+        json.dumps(canonical_points, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+@lru_cache(maxsize=16)
+def _sample_transformer(dst_crs: str) -> Transformer:
+    return Transformer.from_crs("EPSG:4326", dst_crs, always_xy=True)
+
+
+def _sample_dataset_xy(ds: rasterio.DatasetReader, *, lon: float, lat: float) -> tuple[float, float]:
+    ds_crs = ds.crs
+    if ds_crs is None:
+        raise ValueError(f"Sample dataset missing CRS: {ds.name}")
+    dst_crs = ds_crs.to_string()
+    if dst_crs == "EPSG:4326":
+        return float(lon), float(lat)
+    return _sample_transformer(dst_crs).transform(lon, lat)
+
+
+def _sample_dataset_index(ds: rasterio.DatasetReader, *, lon: float, lat: float) -> tuple[int, int]:
+    x, y = _sample_dataset_xy(ds, lon=lon, lat=lat)
+    return ds.index(x, y)
+
+
+def _read_sample_value(
+    ds: rasterio.DatasetReader,
+    *,
+    row: int,
+    col: int,
+    masked: bool,
+) -> tuple[float | None, bool]:
+    if row < 0 or row >= ds.height or col < 0 or col >= ds.width:
+        return None, True
+
+    window = Window(col, row, 1, 1)  # type: ignore[call-arg]
+    pixel = ds.read(1, window=window, masked=masked)
+    raw_value = pixel[0, 0]
+    if np.ma.is_masked(raw_value):
+        return None, True
+
+    value = float(raw_value)
+    if np.isnan(value):
+        return None, True
+    return value, False
+
+
+def _sample_batch_values(
+    ds: rasterio.DatasetReader,
+    *,
+    points: list[SampleBatchPointIn],
+) -> dict[str, float | None]:
+    values: dict[str, float | None] = {}
+    for point in points:
+        row, col = _sample_dataset_index(ds, lon=point.lon, lat=point.lat)
+        value, no_data = _read_sample_value(ds, row=row, col=col, masked=True)
+        values[point.id] = None if no_data else round(float(value), 1)
+    return values
+
+
 def _sample_rate_limit_allow(client_id: str) -> tuple[bool, float]:
     if SAMPLE_RATE_LIMIT_MAX_REQUESTS <= 0:
         return True, 0.0
@@ -2274,9 +2359,8 @@ def sample(
         return Response(status_code=404, content='{"error": "val.cog.tif not found"}', media_type="application/json")
 
     try:
-        mx, my = _wgs84_to_3857.transform(lon, lat)
         ds = _get_cached_dataset(val_cog)
-        row, col = ds.index(mx, my)
+        row, col = _sample_dataset_index(ds, lon=lon, lat=lat)
         resolved_run = _resolve_run(model, run) or run
         sidecar = _resolve_sidecar(model, run, var, fh)
         units = sidecar.get("units", "") if sidecar else ""
@@ -2329,9 +2413,7 @@ def sample(
                 if payload is not None:
                     return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
 
-        window = Window(col, row, 1, 1)  # type: ignore[call-arg]
-        pixel = ds.read(1, window=window)
-        value = float(pixel[0, 0])
+        value, no_data = _read_sample_value(ds, row=row, col=col, masked=False)
 
         payload = _sample_payload(
             model=model,
@@ -2340,10 +2422,10 @@ def sample(
             fh=fh,
             lat=lat,
             lon=lon,
-            value=None if np.isnan(value) else value,
+            value=value,
             units=units,
             valid_time=valid_time,
-            no_data=bool(np.isnan(value)),
+            no_data=no_data,
         )
 
         with _sample_lock:
@@ -2370,6 +2452,94 @@ def sample(
             fh,
             lat,
             lon,
+        )
+        return Response(status_code=500, content='{"error": "internal error"}', media_type="application/json")
+
+
+@app.post("/api/v4/sample/batch")
+def sample_batch(request: Request, body: SampleBatchIn):
+    client_id = request.client.host if request.client and request.client.host else "unknown"
+    allowed, retry_after = _sample_rate_limit_allow(client_id)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"error": "rate limit exceeded", "retryAfterSec": retry_after},
+            headers={"Retry-After": str(int(max(1, retry_after)))},
+        )
+
+    val_cog = _resolve_val_cog(body.model, body.run, body.variable, body.forecast_hour)
+    if val_cog is None:
+        return Response(status_code=404, content='{"error": "val.cog.tif not found"}', media_type="application/json")
+
+    resolved_run = _resolve_run(body.model, body.run) or body.run
+    key = _sample_batch_cache_key(
+        body.model,
+        resolved_run,
+        body.variable,
+        body.forecast_hour,
+        _sample_points_hash(body.points),
+    )
+    now = time.monotonic()
+    inflight: _SampleInflight | None = None
+    is_leader = False
+
+    with _sample_lock:
+        cached = _sample_cache.get(key)
+        if cached is not None:
+            expires_at, payload = cached
+            if expires_at > now:
+                return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
+            _sample_cache.pop(key, None)
+
+        inflight = _sample_inflight.get(key)
+        if inflight is None:
+            inflight = _SampleInflight()
+            _sample_inflight[key] = inflight
+            is_leader = True
+
+    if not is_leader:
+        assert inflight is not None
+        inflight.event.wait(timeout=SAMPLE_INFLIGHT_WAIT_SECONDS)
+        with _sample_lock:
+            cached = _sample_cache.get(key)
+            if cached is not None:
+                expires_at, payload = cached
+                if expires_at > time.monotonic():
+                    return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
+            payload = inflight.payload
+            if payload is not None:
+                return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=300"})
+
+    try:
+        ds = _get_cached_dataset(val_cog)
+        sidecar = _resolve_sidecar(body.model, body.run, body.variable, body.forecast_hour)
+        units = sidecar.get("units", "") if sidecar else ""
+        payload = {
+            "units": units,
+            "values": _sample_batch_values(ds, points=body.points),
+        }
+
+        with _sample_lock:
+            _sample_cache[key] = (time.monotonic() + SAMPLE_CACHE_TTL_SECONDS, payload)
+            sample_inflight = _sample_inflight.pop(key, None)
+            if sample_inflight is not None:
+                sample_inflight.payload = payload
+                sample_inflight.event.set()
+
+        return JSONResponse(content=payload, headers={"Cache-Control": "private, max-age=86400"})
+
+    except Exception:
+        with _sample_lock:
+            sample_inflight = _sample_inflight.pop(key, None)
+            if sample_inflight is not None:
+                sample_inflight.event.set()
+        logger.exception(
+            "Batch sample query failed: %s/%s/%s/fh%03d points=%d",
+            body.model,
+            body.run,
+            body.variable,
+            body.forecast_hour,
+            len(body.points),
         )
         return Response(status_code=500, content='{"error": "internal error"}', media_type="application/json")
 

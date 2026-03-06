@@ -9,6 +9,7 @@ import { TwfShareModal, type SharePayload } from "@/components/twf-share-modal";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
   buildContourUrl,
+  fetchAnchorFeatureCollection,
   type CapabilitiesResponse,
   type CapabilityModel,
   type CapabilityVariable,
@@ -23,7 +24,14 @@ import {
   fetchLoopManifest,
   fetchRegionPresets,
   fetchRuns,
+  fetchSampleBatch,
 } from "@/lib/api";
+import {
+  anchorBatchPointsFromGeoJson,
+  buildAnchorDisplayGeoJson,
+  buildInactiveAnchorFeatureCollection,
+  type AnchorFeatureCollection,
+} from "@/lib/anchor-labels";
 import {
   API_ORIGIN,
   getPlaybackBufferPolicy,
@@ -638,6 +646,8 @@ export default function App() {
   const [runManifest, setRunManifest] = useState<RunManifestResponse | null>(null);
   const [loopManifest, setLoopManifest] = useState<LoopManifestResponse | null>(null);
   const [regionPresets, setRegionPresets] = useState<Record<string, RegionPreset>>({});
+  const [anchorBaseGeoJson, setAnchorBaseGeoJson] = useState<AnchorFeatureCollection | null>(null);
+  const [anchorDisplayGeoJson, setAnchorDisplayGeoJson] = useState<AnchorFeatureCollection | null>(null);
 
   const [model, setModel] = useState("");
   const [region, setRegion] = useState(MAP_VIEW_DEFAULTS.region);
@@ -661,6 +671,7 @@ export default function App() {
   const [scrubRequestedHour, setScrubRequestedHour] = useState<number | null>(null);
   const [opacity, setOpacity] = useState(OVERLAY_DEFAULT_OPACITY);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>(() => readBasemapModePreference());
+  const [pointLabelsEnabled, setPointLabelsEnabled] = useState(true);
   const [isPageVisible, setIsPageVisible] = useState(() =>
     typeof document === "undefined" ? true : !document.hidden
   );
@@ -698,6 +709,7 @@ export default function App() {
   const inFlightStartedAtRef = useRef<Map<number, number>>(new Map());
   const readyLatencyStatsRef = useRef({ totalMs: 0, count: 0 });
   const bufferVersionRef = useRef(0);
+  const [loadedFramesKey, setLoadedFramesKey] = useState("");
   // Tracks a pending RAF for coalescing bufferSnapshot updates (see markFrameReady).
   const bufferSnapshotRafRef = useRef<number | null>(null);
   // Stores the last committed snapshot stats so unchanged updates are skipped entirely.
@@ -745,6 +757,7 @@ export default function App() {
   const permalinkHydratedRef = useRef(false);
   const lastSyncedPermalinkSearchRef = useRef("");
   const suppressNextUrlSyncRef = useRef(true);
+  const anchorSelectionKeyRef = useRef("");
   // Pre-built Set of valid forecast hours, kept in sync with frameHours.
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
@@ -838,6 +851,11 @@ export default function App() {
       ])
     );
   }, [regionPresets]);
+
+  const anchorBatchPoints = useMemo(
+    () => anchorBatchPointsFromGeoJson(anchorBaseGeoJson),
+    [anchorBaseGeoJson]
+  );
 
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
   const latestRunId = useMemo(() => {
@@ -2283,15 +2301,18 @@ export default function App() {
         const requestedRegion = initialPermalink.region?.trim();
         const requestedRun = initialPermalink.run?.trim();
 
-        const [capabilitiesData, regionPresetData] = await Promise.all([
+        const [capabilitiesData, regionPresetData, anchorData] = await Promise.all([
           fetchCapabilities({ signal: controller.signal }),
           fetchRegionPresets({ signal: controller.signal }),
+          fetchAnchorFeatureCollection({ signal: controller.signal }).catch(() => null),
         ]);
         if (controller.signal.aborted || generation !== requestGenerationRef.current) {
           return;
         }
 
         setCapabilities(capabilitiesData);
+        setAnchorBaseGeoJson(anchorData);
+        setAnchorDisplayGeoJson(anchorData ? buildInactiveAnchorFeatureCollection(anchorData) : null);
 
         const supportedModelIds = capabilitiesData.supported_models.filter(
           (modelId) => Boolean(capabilitiesData.model_catalog?.[modelId])
@@ -2433,6 +2454,7 @@ export default function App() {
     setForecastHour(Number.POSITIVE_INFINITY);
     setTargetForecastHour(Number.POSITIVE_INFINITY);
     setLoopDisplayHour(null);
+    setLoadedFramesKey("");
   }, [model, run, variable]);
 
   useEffect(() => {
@@ -2479,6 +2501,7 @@ export default function App() {
         const { rows, hasFrameList } = resolveManifestFrames(runManifest, variable);
         if (hasFrameList) {
           setFrameRows((prevRows) => mergeManifestRowsWithPrevious(rows, prevRows));
+          setLoadedFramesKey(`${model}:${resolvedRunForRequests}:${variable}`);
           const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
           setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
           setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
@@ -2491,12 +2514,14 @@ export default function App() {
         const rows = await fetchFrames(model, framesRunKey, variable, { signal: controller.signal });
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         setFrameRows(rows);
+        setLoadedFramesKey(`${model}:${resolvedRunForRequests}:${variable}`);
         const frames = rows.map((row) => Number(row.fh)).filter(Number.isFinite);
         setForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
         setTargetForecastHour((prev) => resolveForecastHour(frames, prev, selectedVariableDefaultFh));
       } catch (err) {
         if (controller.signal.aborted || generation !== requestGenerationRef.current) return;
         if (!hydratedFromManifest) {
+          setLoadedFramesKey("");
           setError(err instanceof Error ? err.message : "Failed to load frames");
           setFrameRows([]);
         }
@@ -2508,6 +2533,84 @@ export default function App() {
       controller.abort();
     };
   }, [model, run, variable, resolvedRunForRequests, runManifest, selectedVariableDefaultFh, hasRenderableSelection]);
+
+  useEffect(() => {
+    const selectionKey = `${model}:${resolvedRunForRequests}:${variable}`;
+
+    if (!anchorBaseGeoJson) {
+      anchorSelectionKeyRef.current = selectionKey;
+      setAnchorDisplayGeoJson(null);
+      return;
+    }
+
+    if (anchorSelectionKeyRef.current !== selectionKey) {
+      anchorSelectionKeyRef.current = selectionKey;
+      setAnchorDisplayGeoJson(buildInactiveAnchorFeatureCollection(anchorBaseGeoJson));
+    }
+
+    if (
+      !hasRenderableSelection
+      || !model
+      || !variable
+      || !Number.isFinite(forecastHour)
+      || anchorBatchPoints.length === 0
+      || loadedFramesKey !== selectionKey
+    ) {
+      return;
+    }
+
+    const controller = new AbortController();
+    const generation = requestGenerationRef.current;
+
+    fetchSampleBatch({
+      model,
+      run: resolvedRunForRequests,
+      variable,
+      forecastHour,
+      points: anchorBatchPoints,
+      signal: controller.signal,
+    })
+      .then((payload) => {
+        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
+          return;
+        }
+        const nextGeoJson = buildAnchorDisplayGeoJson({
+          baseCollection: anchorBaseGeoJson,
+          varKey: variable,
+          values: payload?.values ?? {},
+          units: payload?.units ?? "",
+        });
+        setAnchorDisplayGeoJson(nextGeoJson);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") {
+          return;
+        }
+        if (generation !== requestGenerationRef.current) {
+          return;
+        }
+        console.warn("[anchors] batch sample request failed", {
+          model,
+          run: resolvedRunForRequests,
+          variable,
+          forecastHour,
+          error,
+        });
+      });
+
+    return () => {
+      controller.abort();
+    };
+  }, [
+    anchorBaseGeoJson,
+    anchorBatchPoints,
+    forecastHour,
+    hasRenderableSelection,
+    loadedFramesKey,
+    model,
+    resolvedRunForRequests,
+    variable,
+  ]);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
@@ -3133,6 +3236,8 @@ export default function App() {
         runs={runOptions}
         variables={variables}
         disabled={loading || models.length === 0}
+        pointLabelsEnabled={pointLabelsEnabled}
+        onPointLabelsEnabledChange={setPointLabelsEnabled}
         onPostToTwf={handleOpenShareModal}
       />
 
@@ -3140,6 +3245,8 @@ export default function App() {
         <MapCanvas
           tileUrl={tileUrl}
           contourGeoJsonUrl={contourGeoJsonUrl}
+          anchorGeoJson={anchorDisplayGeoJson}
+          pointLabelsEnabled={pointLabelsEnabled}
           region={region}
           regionViews={regionViews}
           opacity={opacity}

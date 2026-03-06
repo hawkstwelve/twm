@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 
+import type { AnchorFeatureCollection } from "@/lib/anchor-labels";
 import { MAP_VIEW_DEFAULTS, TILES_BASE } from "@/lib/config";
 
 const IS_HIDPI = typeof window !== "undefined" && window.devicePixelRatio > 1;
@@ -37,6 +38,7 @@ const CARTO_DARK_LABEL_TILES = [
 ];
 
 const BOUNDARIES_VECTOR_TILES_URL = `${TILES_BASE}/tiles/v3/boundaries/v1/tilejson.json`;
+const GLYPHS_URL = "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf";
 
 type RegionView = {
   center: [number, number];
@@ -88,6 +90,9 @@ const LAKE_MASK_LAYER_ID = "twf-lake-mask";
 const LAKE_SHORELINE_LAYER_ID = "twf-lake-shoreline";
 const LOOP_SOURCE_ID = "twf-loop-image";
 const LOOP_LAYER_ID = "twf-loop-image";
+const ANCHOR_SOURCE_ID = "twf-anchors";
+const ANCHOR_DOT_LAYER_ID = "twf-anchors-dot";
+const ANCHOR_LABEL_LAYER_ID = "twf-anchors-label";
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
   type: "FeatureCollection",
   features: [],
@@ -267,6 +272,28 @@ function setLayerVisibility(map: maplibregl.Map, id: string, visible: boolean) {
   map.setLayoutProperty(id, "visibility", visible ? "visible" : "none");
 }
 
+function getAnchorDotPaint(basemapMode: BasemapMode): Record<string, unknown> {
+  return {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 1.1, 5, 1.6, 8, 2.2],
+    "circle-color": basemapMode === "dark" ? "rgba(255,255,255,0.72)" : "rgba(255,255,255,0.6)",
+    "circle-stroke-color": basemapMode === "dark" ? "rgba(6,10,16,0.9)" : "rgba(16,24,32,0.78)",
+    "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0.9, 8, 1.15],
+    "circle-opacity": ["case", ["boolean", ["get", "active"], false], 0.8, 0],
+    "circle-stroke-opacity": ["case", ["boolean", ["get", "active"], false], 0.9, 0],
+    "circle-blur": 0.05,
+  };
+}
+
+function getAnchorLabelPaint(): Record<string, unknown> {
+  return {
+    "text-color": "rgba(255,255,255,0.96)",
+    "text-opacity": ["case", ["boolean", ["get", "active"], false], 1, 0],
+    "text-halo-color": "rgba(8,12,18,0.94)",
+    "text-halo-width": ["interpolate", ["linear"], ["zoom"], 3, 2.1, 8, 2.8],
+    "text-halo-blur": 0.7,
+  };
+}
+
 function styleFor(
   overlayUrl: string,
   opacity: number,
@@ -274,7 +301,9 @@ function styleFor(
   variableKind?: string | null,
   overlayFadeOutZoom?: { start: number; end: number } | null,
   contourGeoJsonUrl?: string | null,
-  basemapMode: BasemapMode = "light"
+  basemapMode: BasemapMode = "light",
+  anchorGeoJson?: AnchorFeatureCollection | null,
+  pointLabelsEnabled = true
 ): StyleSpecification {
   const resamplingMode = getResamplingMode(variableKind);
   const paintSettings = getOverlayPaintSettings(variable, basemapMode);
@@ -285,6 +314,8 @@ function styleFor(
   const lakeFillColor = getLakeFillColor(basemapMode);
   const basemapPaint = getBasemapPaintSettings(basemapMode);
   const labelPaint = getLabelPaintSettings(basemapMode);
+  const anchorDotPaint = getAnchorDotPaint(basemapMode);
+  const anchorLabelPaint = getAnchorLabelPaint();
   const overlayOpacity: any = overlayFadeOutZoom
     ? [
       "interpolate",
@@ -325,6 +356,7 @@ function styleFor(
 
   return {
     version: 8,
+    glyphs: GLYPHS_URL,
     sources: {
       "twf-basemap": {
         type: "raster",
@@ -354,6 +386,10 @@ function styleFor(
       [CONTOUR_SOURCE_ID]: {
         type: "geojson",
         data: contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION,
+      },
+      [ANCHOR_SOURCE_ID]: {
+        type: "geojson",
+        data: anchorGeoJson ?? EMPTY_FEATURE_COLLECTION,
       },
       [LOOP_SOURCE_ID]: {
         type: "image",
@@ -518,6 +554,34 @@ function styleFor(
         },
       },
       {
+        id: ANCHOR_DOT_LAYER_ID,
+        type: "circle",
+        source: ANCHOR_SOURCE_ID,
+        layout: {
+          visibility: pointLabelsEnabled ? "visible" : "none",
+        },
+        paint: anchorDotPaint as any,
+      },
+      {
+        id: ANCHOR_LABEL_LAYER_ID,
+        type: "symbol",
+        source: ANCHOR_SOURCE_ID,
+        layout: {
+          visibility: pointLabelsEnabled ? "visible" : "none",
+          "text-field": ["coalesce", ["get", "label"], ""],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 3, 9.5, 5.5, 10.5, 8, 11.5],
+          "text-anchor": "top",
+          "text-offset": [0, 0.9],
+          "text-padding": 3,
+          "text-allow-overlap": false,
+          "text-ignore-placement": false,
+          "text-optional": true,
+          "symbol-placement": "point",
+        },
+        paint: anchorLabelPaint as any,
+      },
+      {
         id: "twf-labels",
         type: "raster",
         source: "twf-labels",
@@ -530,6 +594,8 @@ function styleFor(
 type MapCanvasProps = {
   tileUrl: string;
   contourGeoJsonUrl?: string | null;
+  anchorGeoJson?: AnchorFeatureCollection | null;
+  pointLabelsEnabled?: boolean;
   region: string;
   regionViews?: Record<string, RegionView>;
   opacity: number;
@@ -559,6 +625,8 @@ type MapCanvasProps = {
 export function MapCanvas({
   tileUrl,
   contourGeoJsonUrl,
+  anchorGeoJson = null,
+  pointLabelsEnabled = true,
   region,
   regionViews,
   opacity,
@@ -609,6 +677,10 @@ export function MapCanvas({
   const isLoopToTileTransitioningRef = useRef(false);
   const onMapReadyRef = useRef(onMapReady);
   onMapReadyRef.current = onMapReady;
+  const anchorGeoJsonRef = useRef(anchorGeoJson);
+  anchorGeoJsonRef.current = anchorGeoJson;
+  const pointLabelsEnabledRef = useRef(pointLabelsEnabled);
+  pointLabelsEnabledRef.current = pointLabelsEnabled;
   const onViewportChangeRef = useRef(onViewportChange);
   onViewportChangeRef.current = onViewportChange;
 
@@ -729,7 +801,26 @@ export function MapCanvas({
     if (map.getLayer(LAKE_SHORELINE_LAYER_ID)) {
       map.moveLayer(LAKE_SHORELINE_LAYER_ID, "twf-labels");
     }
+    if (map.getLayer(ANCHOR_DOT_LAYER_ID)) {
+      map.moveLayer(ANCHOR_DOT_LAYER_ID, "twf-labels");
+    }
+    if (map.getLayer(ANCHOR_LABEL_LAYER_ID)) {
+      map.moveLayer(ANCHOR_LABEL_LAYER_ID, "twf-labels");
+    }
     map.moveLayer("twf-labels");
+  }, []);
+
+  const setAnchorSourceData = useCallback((map: maplibregl.Map, data: AnchorFeatureCollection | null) => {
+    const source = map.getSource(ANCHOR_SOURCE_ID) as maplibregl.GeoJSONSource | undefined;
+    if (!source || typeof source.setData !== "function") {
+      return;
+    }
+    source.setData((data ?? EMPTY_FEATURE_COLLECTION) as any);
+  }, []);
+
+  const setAnchorLayerVisibility = useCallback((map: maplibregl.Map, visible: boolean) => {
+    setLayerVisibility(map, ANCHOR_DOT_LAYER_ID, visible);
+    setLayerVisibility(map, ANCHOR_LABEL_LAYER_ID, visible);
   }, []);
 
   const notifySettled = useCallback(
@@ -991,7 +1082,17 @@ export function MapCanvas({
     let resizeRafId: number | null = null;
     const map = new maplibregl.Map({
       container: mapContainerRef.current,
-      style: styleFor(tileUrl, opacity, variable, variableKind, overlayFadeOutZoom, contourGeoJsonUrl, basemapMode),
+      style: styleFor(
+        tileUrl,
+        opacity,
+        variable,
+        variableKind,
+        overlayFadeOutZoom,
+        contourGeoJsonUrl,
+        basemapMode,
+        anchorGeoJson,
+        pointLabelsEnabled
+      ),
       center: view.center,
       zoom: view.zoom,
       minZoom: view.minZoom ?? 3,
@@ -1024,6 +1125,8 @@ export function MapCanvas({
       setIsLoaded(true);
       initializeSourceTracking(tileUrl);
       lastAppliedBasemapModeRef.current = basemapMode;
+      setAnchorSourceData(map, anchorGeoJsonRef.current);
+      setAnchorLayerVisibility(map, pointLabelsEnabledRef.current);
       enforceLayerOrder(map);
       onMapReadyRef.current?.(map);
     });
@@ -1044,7 +1147,7 @@ export function MapCanvas({
       mapRef.current = null;
       setIsLoaded(false);
     };
-  }, [cancelCrossfade, cancelLoopToTileTransition, enforceLayerOrder, initializeSourceTracking]);
+  }, [cancelCrossfade, cancelLoopToTileTransition, enforceLayerOrder, initializeSourceTracking, setAnchorLayerVisibility, setAnchorSourceData]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1057,6 +1160,16 @@ export function MapCanvas({
     }
     source.setData((contourGeoJsonUrl ?? EMPTY_FEATURE_COLLECTION) as any);
   }, [contourGeoJsonUrl, isLoaded]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) {
+      return;
+    }
+    setAnchorSourceData(map, anchorGeoJson);
+    setAnchorLayerVisibility(map, pointLabelsEnabled);
+    enforceLayerOrder(map);
+  }, [anchorGeoJson, isLoaded, enforceLayerOrder, pointLabelsEnabled, setAnchorLayerVisibility, setAnchorSourceData]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1091,7 +1204,9 @@ export function MapCanvas({
       variableKind,
       overlayFadeOutZoom,
       contourGeoJsonUrl,
-      basemapMode
+      basemapMode,
+      anchorGeoJson,
+      pointLabelsEnabled
     );
 
     const onStyleData = () => {
@@ -1141,6 +1256,9 @@ export function MapCanvas({
         variable === "tmp2m" && !loopActive && !isLoopToTileTransitioningRef.current
       );
 
+      setAnchorSourceData(map, anchorGeoJsonRef.current);
+      setAnchorLayerVisibility(map, pointLabelsEnabledRef.current);
+
       setLayerRasterPaint(map, layerId("a"), variable, variableKind, basemapMode);
       setLayerRasterPaint(map, layerId("b"), variable, variableKind, basemapMode);
       for (let idx = 1; idx <= PREFETCH_BUFFER_COUNT; idx += 1) {
@@ -1168,7 +1286,11 @@ export function MapCanvas({
     loopImageUrl,
     overlayFadeOutZoom,
     opacity,
+    anchorGeoJson,
+    pointLabelsEnabled,
     setLayerOpacity,
+    setAnchorLayerVisibility,
+    setAnchorSourceData,
     setLayerRasterPaint,
     variable,
     variableKind,

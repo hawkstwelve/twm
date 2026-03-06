@@ -8,7 +8,7 @@ node_modules/
 dist/
 
 # Project data (never commit artifacts)
-data/
+/data/
 herbie_cache/
 
 # OS
