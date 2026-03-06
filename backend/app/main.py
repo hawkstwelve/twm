@@ -31,7 +31,6 @@ from PIL import Image, ImageFilter
 from pyproj import Transformer
 from rasterio.enums import Resampling
 from rasterio.windows import Window
-from starlette.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from .config.regions import REGION_PRESETS
@@ -189,12 +188,21 @@ def _maybe_304(request: Request, *, etag: str, cache_control: str) -> Response |
 app = FastAPI(title="TWF API", version="4.0.0")
 
 origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+cors_allow_headers = [
+    "Accept",
+    "Accept-Language",
+    "Content-Language",
+    "Content-Type",
+    "Origin",
+    "Authorization",
+    "X-Requested-With",
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=cors_allow_headers,
 )
 
 @dataclass

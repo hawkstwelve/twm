@@ -18,6 +18,7 @@ os.environ.setdefault("TWF_CLIENT_ID", "client-id")
 os.environ.setdefault("TWF_CLIENT_SECRET", "client-secret")
 os.environ.setdefault("TWF_REDIRECT_URI", "https://example.com/callback")
 os.environ.setdefault("FRONTEND_RETURN", "https://example.com/app")
+os.environ.setdefault("CORS_ORIGINS", "https://theweathermodels.com")
 os.environ.setdefault("TOKEN_DB_PATH", "/tmp/twf_test_tokens.sqlite3")
 os.environ.setdefault("TOKEN_ENC_KEY", "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
 
@@ -61,6 +62,22 @@ async def test_non_twf_validation_still_422_detail(client: httpx.AsyncClient) ->
     payload = response.json()
     assert "detail" in payload
     assert isinstance(payload["detail"], list)
+
+
+async def test_sample_batch_cors_preflight_allows_content_type(client: httpx.AsyncClient) -> None:
+    response = await client.options(
+        "/api/v4/sample/batch",
+        headers={
+            "Origin": "https://theweathermodels.com",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "content-type",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://theweathermodels.com"
+    allow_headers = response.headers.get("access-control-allow-headers", "").lower()
+    assert "content-type" in allow_headers
 
 
 async def test_twf_share_post_invalid_payload_is_enveloped(client: httpx.AsyncClient) -> None:
