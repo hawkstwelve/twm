@@ -1,14 +1,12 @@
 import type { Feature, FeatureCollection, Point } from "geojson";
 
 export type AnchorFeatureProperties = {
-  st?: string;
-  state?: string;
-  n_for_state?: number;
-  area_km2?: number;
+  st?: string | null;
+  state?: string | null;
   label?: string;
   active?: boolean;
   value?: number | null;
-  units?: string;
+  units?: string | null;
 };
 
 export type AnchorFeature = Feature<Point, AnchorFeatureProperties> & {
@@ -72,6 +70,35 @@ export function formatAnchorValueLabel(value: number): string {
   return Number.isInteger(rounded) ? String(Math.round(rounded)) : rounded.toFixed(1);
 }
 
+function readAnchorString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function readAnchorNumber(value: unknown): number | null {
+  const numericValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function buildAnchorFeatureProperties(
+  feature: Feature<Point, AnchorFeatureProperties>,
+  overrides?: {
+    label?: string;
+    active?: boolean;
+    value?: number | null;
+    units?: string | null;
+  }
+): AnchorFeatureProperties {
+  const sourceProperties = feature.properties ?? {};
+  return {
+    st: readAnchorString(sourceProperties.st),
+    state: readAnchorString(sourceProperties.state),
+    label: typeof overrides?.label === "string" ? overrides.label : "",
+    active: overrides?.active === true,
+    value: readAnchorNumber(overrides?.value),
+    units: readAnchorString(overrides?.units),
+  };
+}
+
 export function anchorBatchPointsFromGeoJson(
   collection: AnchorFeatureCollection | null | undefined
 ): AnchorBatchPoint[] {
@@ -115,13 +142,12 @@ export function buildAnchorDisplayGeoJson(params: {
 
       return {
         ...feature,
-        properties: {
-          ...(feature.properties ?? {}),
+        properties: buildAnchorFeatureProperties(feature, {
           label: isActive ? formatAnchorValueLabel(numericValue) : "",
           active: isActive,
           value: isActive ? numericValue : null,
           units,
-        },
+        }),
       };
     }),
   };
@@ -135,13 +161,33 @@ export function buildInactiveAnchorFeatureCollection(
     type: "FeatureCollection",
     features: baseCollection.features.map((feature) => ({
       ...feature,
-      properties: {
-        ...(feature.properties ?? {}),
+      properties: buildAnchorFeatureProperties(feature, {
         label: "",
         active: false,
         value: null,
         units,
-      },
+      }),
+    })),
+  };
+}
+
+export function sanitizeAnchorFeatureCollection(
+  collection: AnchorFeatureCollection | null | undefined
+): AnchorFeatureCollection | null {
+  if (!collection) {
+    return null;
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: collection.features.map((feature) => ({
+      ...feature,
+      properties: buildAnchorFeatureProperties(feature as AnchorFeature, {
+        label: typeof feature.properties?.label === "string" ? feature.properties.label : "",
+        active: feature.properties?.active === true,
+        value: readAnchorNumber(feature.properties?.value),
+        units: readAnchorString(feature.properties?.units),
+      }),
     })),
   };
 }

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import maplibregl, { type StyleSpecification } from "maplibre-gl";
 import type { GeoJSON } from "geojson";
 
-import type { AnchorFeatureCollection } from "@/lib/anchor-labels";
+import { sanitizeAnchorFeatureCollection, type AnchorFeatureCollection } from "@/lib/anchor-labels";
 import { MAP_VIEW_DEFAULTS, TILES_BASE } from "@/lib/config";
 
 const IS_HIDPI = typeof window !== "undefined" && window.devicePixelRatio > 1;
@@ -294,6 +294,37 @@ function getAnchorLabelPaint(): Record<string, unknown> {
   };
 }
 
+function findUnsupportedAnchorProperty(
+  data: AnchorFeatureCollection | null | undefined
+): { featureId: string; key: string; valueType: string; value: unknown } | null {
+  if (!data) {
+    return null;
+  }
+
+  for (const feature of data.features) {
+    const featureId = typeof feature.id === "string" ? feature.id : String(feature.id ?? "unknown");
+    const properties = feature.properties ?? {};
+    for (const [key, value] of Object.entries(properties)) {
+      if (
+        value === null
+        || typeof value === "string"
+        || typeof value === "number"
+        || typeof value === "boolean"
+      ) {
+        continue;
+      }
+      return {
+        featureId,
+        key,
+        valueType: Array.isArray(value) ? "array" : typeof value,
+        value,
+      };
+    }
+  }
+
+  return null;
+}
+
 function styleFor(
   overlayUrl: string,
   opacity: number,
@@ -569,7 +600,7 @@ function styleFor(
         layout: {
           visibility: pointLabelsEnabled ? "visible" : "none",
           "text-field": ["coalesce", ["get", "label"], ""],
-          "text-font": ["Noto Sans Regular"],
+          "text-font": ["Noto Sans Regular", "Open Sans Regular"],
           "text-size": ["interpolate", ["linear"], ["zoom"], 3, 9.5, 5.5, 10.5, 8, 11.5],
           "text-anchor": "top",
           "text-offset": [0, 0.9],
@@ -815,7 +846,16 @@ export function MapCanvas({
     if (!source || typeof source.setData !== "function") {
       return;
     }
-    source.setData((data ?? EMPTY_FEATURE_COLLECTION) as any);
+
+    const invalidProperty = findUnsupportedAnchorProperty(data);
+    if (invalidProperty) {
+      console.warn("[anchors] unsupported property before setData", invalidProperty);
+    }
+
+    const payload = sanitizeAnchorFeatureCollection(data) ?? (EMPTY_FEATURE_COLLECTION as AnchorFeatureCollection);
+    const sampleFeature = payload.features[0] ?? null;
+    console.debug("[anchors] setData sample feature", sampleFeature);
+    source.setData(payload as any);
   }, []);
 
   const setAnchorLayerVisibility = useCallback((map: maplibregl.Map, visible: boolean) => {
