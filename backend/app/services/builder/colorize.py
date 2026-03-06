@@ -10,7 +10,6 @@ The tile server never touches colormaps — it reads RGBA and returns PNG.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import numpy as np
@@ -21,17 +20,6 @@ from ..colormaps import (
     build_discrete_lut,
     get_color_map_spec,
 )
-
-_BAYER4 = np.array(
-    [
-        [0, 8, 2, 10],
-        [12, 4, 14, 6],
-        [3, 11, 1, 9],
-        [15, 7, 13, 5],
-    ],
-    dtype=np.float32,
-)
-
 
 def float_to_rgba(
     data: np.ndarray,
@@ -89,88 +77,6 @@ def float_to_rgba(
 # ---------------------------------------------------------------------------
 
 
-def _continuous_dither_strength() -> float:
-    raw = os.getenv("TWF_V3_CONTINUOUS_DITHER_STRENGTH", "0.20").strip()
-    try:
-        return float(raw)
-    except ValueError:
-        return 0.20
-
-
-def _representative_continuous_step(spec: dict[str, Any]) -> float | None:
-    levels_raw = spec.get("levels")
-    if isinstance(levels_raw, (list, tuple)) and len(levels_raw) >= 2:
-        levels = np.asarray(levels_raw, dtype=np.float32)
-        diffs = np.diff(levels)
-        valid = diffs[np.isfinite(diffs) & (diffs > 0)]
-        if valid.size > 0:
-            return float(np.median(valid))
-
-    stops_raw = (
-        spec.get("stops")
-        or spec.get("color_anchors")
-        or spec.get("anchors")
-        or spec.get("legend_stops")
-    )
-    if not isinstance(stops_raw, (list, tuple)) or len(stops_raw) < 2:
-        return None
-
-    stop_values: list[float] = []
-    for item in stops_raw:
-        if not isinstance(item, (list, tuple)) or not item:
-            continue
-        try:
-            stop_values.append(float(item[0]))
-        except (TypeError, ValueError):
-            continue
-
-    if len(stop_values) < 2:
-        return None
-
-    vals = np.sort(np.asarray(stop_values, dtype=np.float32))
-    diffs = np.diff(vals)
-    valid = diffs[np.isfinite(diffs) & (diffs > 0)]
-    if valid.size == 0:
-        return None
-    return float(np.median(valid))
-
-
-def _ordered_bayer_noise(height: int, width: int) -> np.ndarray:
-    yy = np.arange(height, dtype=np.int32)[:, None] & 3
-    xx = np.arange(width, dtype=np.int32)[None, :] & 3
-    bayer = _BAYER4[yy, xx]
-    return (bayer / 16.0) - 0.5
-
-
-def _apply_continuous_ordered_dither(
-    data: np.ndarray,
-    spec: dict[str, Any],
-    *,
-    strength: float | None = None,
-) -> np.ndarray:
-    data_f32 = np.asarray(data, dtype=np.float32)
-    resolved_strength = _continuous_dither_strength() if strength is None else float(strength)
-    if resolved_strength <= 0:
-        return data_f32
-
-    step = _representative_continuous_step(spec)
-    if step is None or not np.isfinite(step) or step <= 0:
-        return data_f32
-
-    finite_mask = np.isfinite(data_f32)
-    if not finite_mask.any():
-        return data_f32
-
-    noise = _ordered_bayer_noise(data_f32.shape[0], data_f32.shape[1]).astype(np.float32, copy=False)
-    amplitude = np.float32(resolved_strength * step)
-    dithered = np.where(
-        finite_mask,
-        data_f32 + (noise * amplitude),
-        data_f32,
-    ).astype(np.float32, copy=False)
-    return dithered
-
-
 def _colorize_continuous(
     data: np.ndarray,
     var_key: str,
@@ -201,11 +107,9 @@ def _colorize_continuous(
         # Build 256-entry RGBA LUT from evenly spaced color ramp stops.
         lut = build_continuous_lut(colors, n=256)  # (256, 4) uint8
 
-    quantize_data = _apply_continuous_ordered_dither(data, spec)
-
     # Scale float values → 0–255 index
-    finite_mask = np.isfinite(quantize_data)
-    scale = np.where(finite_mask, (quantize_data - range_min) / (range_max - range_min), 0.0)
+    finite_mask = np.isfinite(data)
+    scale = np.where(finite_mask, (data - range_min) / (range_max - range_min), 0.0)
     indices = np.clip(np.rint(scale * 255.0), 0, 255).astype(np.uint8)
 
     # LUT lookup: (H, W) indices → (H, W, 4) RGBA
