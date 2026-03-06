@@ -60,6 +60,7 @@ const PRELOAD_STALL_MS = 8000;
 const FRAME_MAX_RETRIES = 3;
 const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
+const ANCHOR_SCRUB_SAMPLE_THROTTLE_MS = 140;
 const LOOP_PRELOAD_MIN_READY = 2;
 const LOOP_AHEAD_READY_TARGET = 8;
 const LOOP_MIN_PLAYABLE_AHEAD = 2;
@@ -655,6 +656,7 @@ export default function App() {
   const [run, setRun] = useState("latest");
   const [variable, setVariable] = useState("");
   const [forecastHour, setForecastHour] = useState(Number.POSITIVE_INFINITY);
+  const [anchorSampleForecastHour, setAnchorSampleForecastHour] = useState(Number.POSITIVE_INFINITY);
   const [targetForecastHour, setTargetForecastHour] = useState(Number.POSITIVE_INFINITY);
   const [, setZoomBucket] = useState(Math.round(MAP_VIEW_DEFAULTS.zoom));
   const [mapZoom, setMapZoom] = useState(MAP_VIEW_DEFAULTS.zoom);
@@ -718,6 +720,9 @@ export default function App() {
   const datasetGenerationRef = useRef(0);
   const requestGenerationRef = useRef(0);
   const scrubRafRef = useRef<number | null>(null);
+  const anchorSampleThrottleTimerRef = useRef<number | null>(null);
+  const anchorPendingForecastHourRef = useRef<number | null>(null);
+  const anchorLastSampleCommitAtRef = useRef(0);
   const pendingScrubHourRef = useRef<number | null>(null);
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
@@ -2558,7 +2563,7 @@ export default function App() {
       !hasRenderableSelection
       || !model
       || !variable
-      || !Number.isFinite(forecastHour)
+      || !Number.isFinite(anchorSampleForecastHour)
       || anchorBatchPoints.length === 0
       || loadedFramesKey !== selectionKey
     ) {
@@ -2572,7 +2577,7 @@ export default function App() {
       model,
       run: resolvedRunForRequests,
       variable,
-      forecastHour,
+      forecastHour: anchorSampleForecastHour,
       points: anchorBatchPoints,
       signal: controller.signal,
     })
@@ -2599,7 +2604,7 @@ export default function App() {
           model,
           run: resolvedRunForRequests,
           variable,
-          forecastHour,
+          forecastHour: anchorSampleForecastHour,
           error,
         });
       });
@@ -2610,7 +2615,7 @@ export default function App() {
   }, [
     anchorBaseGeoJson,
     anchorBatchPoints,
-    forecastHour,
+    anchorSampleForecastHour,
     hasRenderableSelection,
     loadedFramesKey,
     model,
@@ -3014,6 +3019,9 @@ export default function App() {
       if (scrubRafRef.current !== null) {
         window.cancelAnimationFrame(scrubRafRef.current);
       }
+      if (anchorSampleThrottleTimerRef.current !== null) {
+        window.clearTimeout(anchorSampleThrottleTimerRef.current);
+      }
       if (bufferSnapshotRafRef.current !== null) {
         window.cancelAnimationFrame(bufferSnapshotRafRef.current);
       }
@@ -3037,6 +3045,59 @@ export default function App() {
     }
     setForecastHour(nextTarget);
   }, [targetForecastHour, forecastHour, selectableFrameHours]);
+
+  useEffect(() => {
+    if (!Number.isFinite(forecastHour)) {
+      if (anchorSampleThrottleTimerRef.current !== null) {
+        window.clearTimeout(anchorSampleThrottleTimerRef.current);
+        anchorSampleThrottleTimerRef.current = null;
+      }
+      anchorPendingForecastHourRef.current = null;
+      setAnchorSampleForecastHour(forecastHour);
+      return;
+    }
+
+    if (!isScrubbing) {
+      if (anchorSampleThrottleTimerRef.current !== null) {
+        window.clearTimeout(anchorSampleThrottleTimerRef.current);
+        anchorSampleThrottleTimerRef.current = null;
+      }
+      anchorPendingForecastHourRef.current = null;
+      anchorLastSampleCommitAtRef.current = Date.now();
+      setAnchorSampleForecastHour(forecastHour);
+      return;
+    }
+
+    const now = Date.now();
+    const elapsedMs = now - anchorLastSampleCommitAtRef.current;
+    anchorPendingForecastHourRef.current = forecastHour;
+
+    if (elapsedMs >= ANCHOR_SCRUB_SAMPLE_THROTTLE_MS) {
+      if (anchorSampleThrottleTimerRef.current !== null) {
+        window.clearTimeout(anchorSampleThrottleTimerRef.current);
+        anchorSampleThrottleTimerRef.current = null;
+      }
+      anchorPendingForecastHourRef.current = null;
+      anchorLastSampleCommitAtRef.current = now;
+      setAnchorSampleForecastHour(forecastHour);
+      return;
+    }
+
+    if (anchorSampleThrottleTimerRef.current !== null) {
+      return;
+    }
+
+    anchorSampleThrottleTimerRef.current = window.setTimeout(() => {
+      anchorSampleThrottleTimerRef.current = null;
+      const pendingHour = anchorPendingForecastHourRef.current;
+      if (!Number.isFinite(pendingHour)) {
+        return;
+      }
+      anchorPendingForecastHourRef.current = null;
+      anchorLastSampleCommitAtRef.current = Date.now();
+      setAnchorSampleForecastHour(pendingHour as number);
+    }, Math.max(0, ANCHOR_SCRUB_SAMPLE_THROTTLE_MS - elapsedMs));
+  }, [forecastHour, isScrubbing]);
 
   const controlsIsPlaying = isPlaying || isPreloadingForPlay || isLoopPreloading;
   const preloadBufferedCount = isLoopPreloading
