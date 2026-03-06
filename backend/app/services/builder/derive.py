@@ -2101,6 +2101,12 @@ def _derive_snowfall_kuchera_total_cumulative(
         hints.get("kuchera_use_ptype_gate"),
         default=False,
     )
+    use_sfc_pressure_mask = _parse_hint_bool(
+        hints.get("kuchera_use_sfc_pressure_mask"),
+        default=False,
+    )
+    sfc_pressure_product_raw = str(hints.get("kuchera_sfc_pressure_product", "")).strip()
+    resolved_sfc_pressure_product = sfc_pressure_product_raw or product
     min_step_lwe_raw = hints.get("min_step_lwe_kgm2", "0.01")
     try:
         min_step_lwe = float(min_step_lwe_raw)
@@ -2142,6 +2148,8 @@ def _derive_snowfall_kuchera_total_cumulative(
     )
 
     resolved_profile_product = str(profile_product or product)
+    sfc_pressure_mask_logged = False
+    sfc_pressure_fetch_failed_logged = False
     fallback_used = False
     fallback_profile_logged = False
     missing_level_warning_logged = False
@@ -2332,6 +2340,34 @@ def _derive_snowfall_kuchera_total_cumulative(
 
             step_levels: list[int] = []
             step_temps: list[np.ndarray] = []
+
+            step_sfc_pressure: np.ndarray | None = None
+            if use_sfc_pressure_mask:
+                try:
+                    sfc_pres_data, _, _ = _fetch_step_component(
+                        model_id=model_id,
+                        product=resolved_sfc_pressure_product,
+                        run_date=run_date,
+                        step_fh=step_fh,
+                        model_plugin=model_plugin,
+                        var_key="pres_sfc",
+                        use_warped=use_warped,
+                        target_region=target_region,
+                        target_grid_id=target_grid_id,
+                        resampling=resampling,
+                        ctx=ctx,
+                    )
+                    step_sfc_pressure = sfc_pres_data.astype(np.float32, copy=False)
+                except (HerbieTransientUnavailableError, RuntimeError, ValueError) as exc:
+                    if not sfc_pressure_fetch_failed_logged:
+                        logger.warning(
+                            "kuchera_sfc_pressure_mask fetch_failed step_fh=%03d reason=%s; "
+                            "proceeding without below-ground filtering",
+                            step_fh,
+                            exc,
+                        )
+                        sfc_pressure_fetch_failed_logged = True
+
             for level_hpa in profile_levels_hpa:
                 try:
                     step_temp, _, _ = _fetch_step_component(
@@ -2357,7 +2393,24 @@ def _derive_snowfall_kuchera_total_cumulative(
                         f"level={level_hpa}: {step_temp.shape} != {step_apcp_clean.shape}"
                     )
                 step_levels.append(int(level_hpa))
-                step_temps.append(step_temp.astype(np.float32, copy=False))
+                step_temp_clean = step_temp.astype(np.float32, copy=False)
+                if step_sfc_pressure is not None and step_temp_clean.shape == step_sfc_pressure.shape:
+                    level_pa = np.float32(int(level_hpa) * 100)
+                    below_ground = np.isfinite(step_sfc_pressure) & (level_pa > step_sfc_pressure)
+                    masked_count = int(np.count_nonzero(below_ground))
+                    if masked_count > 0:
+                        step_temp_clean = np.where(below_ground, np.nan, step_temp_clean).astype(np.float32, copy=False)
+                        if not sfc_pressure_mask_logged:
+                            logger.info(
+                                "kuchera_sfc_pressure_mask active step_fh=%03d level=%d "
+                                "masked_pixels=%d/%d",
+                                step_fh,
+                                level_hpa,
+                                masked_count,
+                                step_temp_clean.size,
+                            )
+                            sfc_pressure_mask_logged = True
+                step_temps.append(step_temp_clean)
 
             step_max_t_k = np.full(step_apcp_clean.shape, np.nan, dtype=np.float32)
             if not step_levels:

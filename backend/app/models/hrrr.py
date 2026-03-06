@@ -235,6 +235,7 @@ HRRR_VARS: dict[str, VarSpec] = {
                 "kuchera_profile_product": "prs",
                 "kuchera_use_ptype_gate": "true",
                 "kuchera_profile_mode": "simplified",
+                "kuchera_use_sfc_pressure_mask": "true",
                 **kuchera_hint_overrides(
                     levels_hpa=(850, 700, 600, 500),
                     require_rh=False,
@@ -318,6 +319,18 @@ HRRR_VARS: dict[str, VarSpec] = {
             hints={
                 "upstream_var": "refc",
             },
+        ),
+    ),
+    "pres_sfc": VarSpec(
+        id="pres_sfc",
+        name="Surface Pressure",
+        selectors=VarSelectors(
+            search=[":PRES:surface:"],
+            filter_by_keys={
+                "shortName": "sp",
+                "typeOfLevel": "surface",
+            },
+            hints={"upstream_var": "sp"},
         ),
     ),
     "crain": VarSpec(
