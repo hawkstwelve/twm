@@ -60,7 +60,6 @@ const PRELOAD_STALL_MS = 8000;
 const FRAME_MAX_RETRIES = 3;
 const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
-const ANCHOR_SCRUB_SAMPLE_THROTTLE_MS = 140;
 const LOOP_PRELOAD_MIN_READY = 2;
 const LOOP_AHEAD_READY_TARGET = 8;
 const LOOP_MIN_PLAYABLE_AHEAD = 2;
@@ -83,6 +82,17 @@ type BufferSnapshot = {
   queueDepth: number;
   statusText: string;
   version: number;
+};
+
+type AnchorBatchRequestContext = {
+  selectionKey: string;
+  generation: number;
+  model: string;
+  run: string;
+  variable: string;
+  baseCollection: AnchorFeatureCollection;
+  points: Array<{ id: string; lat: number; lon: number }>;
+  isScrubbing: boolean;
 };
 
 type Option = {
@@ -656,7 +666,6 @@ export default function App() {
   const [run, setRun] = useState("latest");
   const [variable, setVariable] = useState("");
   const [forecastHour, setForecastHour] = useState(Number.POSITIVE_INFINITY);
-  const [anchorSampleForecastHour, setAnchorSampleForecastHour] = useState(Number.POSITIVE_INFINITY);
   const [targetForecastHour, setTargetForecastHour] = useState(Number.POSITIVE_INFINITY);
   const [, setZoomBucket] = useState(Math.round(MAP_VIEW_DEFAULTS.zoom));
   const [mapZoom, setMapZoom] = useState(MAP_VIEW_DEFAULTS.zoom);
@@ -720,9 +729,6 @@ export default function App() {
   const datasetGenerationRef = useRef(0);
   const requestGenerationRef = useRef(0);
   const scrubRafRef = useRef<number | null>(null);
-  const anchorSampleThrottleTimerRef = useRef<number | null>(null);
-  const anchorPendingForecastHourRef = useRef<number | null>(null);
-  const anchorLastSampleCommitAtRef = useRef(0);
   const pendingScrubHourRef = useRef<number | null>(null);
   const autoplayPrimedRef = useRef(false);
   const frameStatusTimerRef = useRef<number | null>(null);
@@ -764,6 +770,13 @@ export default function App() {
   const lastSyncedPermalinkSearchRef = useRef("");
   const suppressNextUrlSyncRef = useRef(true);
   const anchorSelectionKeyRef = useRef("");
+  const anchorBatchAbortRef = useRef<AbortController | null>(null);
+  const anchorBatchInFlightHourRef = useRef<number | null>(null);
+  const anchorBatchInFlightSelectionKeyRef = useRef("");
+  const anchorBatchPendingHourRef = useRef<number | null>(null);
+  const anchorBatchLastAppliedHourRef = useRef<number | null>(null);
+  const anchorBatchLastAppliedSelectionKeyRef = useRef("");
+  const anchorBatchContextRef = useRef<AnchorBatchRequestContext | null>(null);
   // Pre-built Set of valid forecast hours, kept in sync with frameHours.
   // updateBufferSnapshot reads from this ref instead of constructing a new Set
   // on every tile event (which fired 20-40×/sec during animation).
@@ -861,6 +874,106 @@ export default function App() {
   const anchorBatchPoints = useMemo(
     () => anchorBatchPointsFromGeoJson(anchorBaseGeoJson),
     [anchorBaseGeoJson]
+  );
+
+  const resetAnchorBatchQueue = useCallback((abortInFlight = false) => {
+    anchorBatchPendingHourRef.current = null;
+    anchorBatchContextRef.current = null;
+    if (abortInFlight && anchorBatchAbortRef.current) {
+      anchorBatchAbortRef.current.abort();
+    }
+    anchorBatchAbortRef.current = null;
+    anchorBatchInFlightHourRef.current = null;
+    anchorBatchInFlightSelectionKeyRef.current = "";
+  }, []);
+
+  const startAnchorBatchRequest = useCallback(
+    (requestedHour: number, context: AnchorBatchRequestContext) => {
+      if (!Number.isFinite(requestedHour)) {
+        return;
+      }
+
+      const controller = new AbortController();
+      anchorBatchAbortRef.current = controller;
+      anchorBatchInFlightHourRef.current = requestedHour;
+      anchorBatchInFlightSelectionKeyRef.current = context.selectionKey;
+
+      fetchSampleBatch({
+        model: context.model,
+        run: context.run,
+        variable: context.variable,
+        forecastHour: requestedHour,
+        points: context.points,
+        signal: controller.signal,
+      })
+        .then((payload) => {
+          if (controller.signal.aborted || context.generation !== requestGenerationRef.current) {
+            return;
+          }
+          const latestContext = anchorBatchContextRef.current;
+          if (!latestContext || latestContext.selectionKey !== context.selectionKey) {
+            return;
+          }
+          anchorBatchLastAppliedHourRef.current = requestedHour;
+          anchorBatchLastAppliedSelectionKeyRef.current = context.selectionKey;
+          setAnchorDisplayGeoJson(
+            buildAnchorDisplayGeoJson({
+              baseCollection: context.baseCollection,
+              varKey: context.variable,
+              values: payload?.values ?? {},
+              units: payload?.units ?? "",
+            })
+          );
+        })
+        .catch((error) => {
+          if (error instanceof DOMException && error.name === "AbortError") {
+            return;
+          }
+          if (context.generation !== requestGenerationRef.current) {
+            return;
+          }
+          const latestContext = anchorBatchContextRef.current;
+          if (!latestContext || latestContext.selectionKey !== context.selectionKey) {
+            return;
+          }
+          console.warn("[anchors] batch sample request failed", {
+            model: context.model,
+            run: context.run,
+            variable: context.variable,
+            forecastHour: requestedHour,
+            error,
+          });
+        })
+        .finally(() => {
+          if (anchorBatchAbortRef.current === controller) {
+            anchorBatchAbortRef.current = null;
+            anchorBatchInFlightHourRef.current = null;
+            anchorBatchInFlightSelectionKeyRef.current = "";
+          }
+
+          const latestContext = anchorBatchContextRef.current;
+          if (!latestContext || latestContext.selectionKey !== context.selectionKey) {
+            return;
+          }
+          if (latestContext.generation !== requestGenerationRef.current) {
+            return;
+          }
+          if (!latestContext.isScrubbing) {
+            anchorBatchPendingHourRef.current = null;
+            return;
+          }
+
+          const pendingHour = anchorBatchPendingHourRef.current;
+          if (!Number.isFinite(pendingHour) || pendingHour === requestedHour) {
+            anchorBatchPendingHourRef.current = null;
+            return;
+          }
+
+          anchorBatchPendingHourRef.current = null;
+          startAnchorBatchRequest(pendingHour as number, latestContext);
+        });
+    },
+    []
   );
 
   const currentFrame = frameByHour.get(forecastHour) ?? frameRows[0] ?? null;
@@ -2542,19 +2655,29 @@ export default function App() {
 
   useEffect(() => {
     const selectionKey = `${model}:${resolvedRunForRequests}:${variable}`;
+    const generation = requestGenerationRef.current;
 
     if (!anchorBaseGeoJson) {
       anchorSelectionKeyRef.current = selectionKey;
+      anchorBatchLastAppliedHourRef.current = null;
+      anchorBatchLastAppliedSelectionKeyRef.current = "";
+      resetAnchorBatchQueue(true);
       setAnchorDisplayGeoJson(null);
       return;
     }
 
     if (anchorSelectionKeyRef.current !== selectionKey) {
       anchorSelectionKeyRef.current = selectionKey;
+      anchorBatchLastAppliedHourRef.current = null;
+      anchorBatchLastAppliedSelectionKeyRef.current = "";
+      resetAnchorBatchQueue(true);
       setAnchorDisplayGeoJson(buildInactiveAnchorFeatureCollection(anchorBaseGeoJson));
     }
 
     if (variable && resolveAnchorDisplayRule(variable).mode === "hidden") {
+      anchorBatchLastAppliedHourRef.current = null;
+      anchorBatchLastAppliedSelectionKeyRef.current = "";
+      resetAnchorBatchQueue(true);
       setAnchorDisplayGeoJson(buildInactiveAnchorFeatureCollection(anchorBaseGeoJson));
       return;
     }
@@ -2563,63 +2686,81 @@ export default function App() {
       !hasRenderableSelection
       || !model
       || !variable
-      || !Number.isFinite(anchorSampleForecastHour)
+      || !Number.isFinite(forecastHour)
       || anchorBatchPoints.length === 0
       || loadedFramesKey !== selectionKey
     ) {
+      anchorBatchContextRef.current = null;
       return;
     }
 
-    const controller = new AbortController();
-    const generation = requestGenerationRef.current;
-
-    fetchSampleBatch({
+    const context: AnchorBatchRequestContext = {
+      selectionKey,
+      generation,
       model,
       run: resolvedRunForRequests,
       variable,
-      forecastHour: anchorSampleForecastHour,
+      baseCollection: anchorBaseGeoJson,
       points: anchorBatchPoints,
-      signal: controller.signal,
-    })
-      .then((payload) => {
-        if (controller.signal.aborted || generation !== requestGenerationRef.current) {
-          return;
-        }
-        const nextGeoJson = buildAnchorDisplayGeoJson({
-          baseCollection: anchorBaseGeoJson,
-          varKey: variable,
-          values: payload?.values ?? {},
-          units: payload?.units ?? "",
-        });
-        setAnchorDisplayGeoJson(nextGeoJson);
-      })
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") {
-          return;
-        }
-        if (generation !== requestGenerationRef.current) {
-          return;
-        }
-        console.warn("[anchors] batch sample request failed", {
-          model,
-          run: resolvedRunForRequests,
-          variable,
-          forecastHour: anchorSampleForecastHour,
-          error,
-        });
-      });
-
-    return () => {
-      controller.abort();
+      isScrubbing,
     };
+
+    anchorBatchContextRef.current = context;
+
+    if (!isScrubbing) {
+      anchorBatchPendingHourRef.current = null;
+      if (
+        anchorBatchLastAppliedSelectionKeyRef.current === selectionKey
+        && anchorBatchLastAppliedHourRef.current === forecastHour
+        && anchorBatchInFlightHourRef.current === null
+      ) {
+        return;
+      }
+      if (
+        anchorBatchAbortRef.current
+        && anchorBatchInFlightSelectionKeyRef.current === selectionKey
+        && anchorBatchInFlightHourRef.current === forecastHour
+      ) {
+        return;
+      }
+      if (anchorBatchAbortRef.current) {
+        resetAnchorBatchQueue(true);
+        anchorBatchContextRef.current = context;
+      }
+      startAnchorBatchRequest(forecastHour, context);
+      return;
+    }
+
+    if (anchorBatchAbortRef.current && anchorBatchInFlightSelectionKeyRef.current === selectionKey) {
+      if (anchorBatchInFlightHourRef.current === forecastHour) {
+        anchorBatchPendingHourRef.current = null;
+        return;
+      }
+      anchorBatchPendingHourRef.current = forecastHour;
+      return;
+    }
+
+    if (
+      anchorBatchLastAppliedSelectionKeyRef.current === selectionKey
+      && anchorBatchLastAppliedHourRef.current === forecastHour
+    ) {
+      anchorBatchPendingHourRef.current = null;
+      return;
+    }
+
+    anchorBatchPendingHourRef.current = null;
+    startAnchorBatchRequest(forecastHour, context);
   }, [
     anchorBaseGeoJson,
     anchorBatchPoints,
-    anchorSampleForecastHour,
+    forecastHour,
     hasRenderableSelection,
+    isScrubbing,
     loadedFramesKey,
     model,
+    resetAnchorBatchQueue,
     resolvedRunForRequests,
+    startAnchorBatchRequest,
     variable,
   ]);
 
@@ -3019,9 +3160,7 @@ export default function App() {
       if (scrubRafRef.current !== null) {
         window.cancelAnimationFrame(scrubRafRef.current);
       }
-      if (anchorSampleThrottleTimerRef.current !== null) {
-        window.clearTimeout(anchorSampleThrottleTimerRef.current);
-      }
+      resetAnchorBatchQueue(true);
       if (bufferSnapshotRafRef.current !== null) {
         window.cancelAnimationFrame(bufferSnapshotRafRef.current);
       }
@@ -3032,7 +3171,7 @@ export default function App() {
       loopDecodedCacheRef.current.clear();
       loopDecodedCacheBytesRef.current = 0;
     };
-  }, [clearFrameStatusTimer]);
+  }, [clearFrameStatusTimer, resetAnchorBatchQueue]);
 
   useEffect(() => {
     if (selectableFrameHours.length === 0) {
@@ -3045,59 +3184,6 @@ export default function App() {
     }
     setForecastHour(nextTarget);
   }, [targetForecastHour, forecastHour, selectableFrameHours]);
-
-  useEffect(() => {
-    if (!Number.isFinite(forecastHour)) {
-      if (anchorSampleThrottleTimerRef.current !== null) {
-        window.clearTimeout(anchorSampleThrottleTimerRef.current);
-        anchorSampleThrottleTimerRef.current = null;
-      }
-      anchorPendingForecastHourRef.current = null;
-      setAnchorSampleForecastHour(forecastHour);
-      return;
-    }
-
-    if (!isScrubbing) {
-      if (anchorSampleThrottleTimerRef.current !== null) {
-        window.clearTimeout(anchorSampleThrottleTimerRef.current);
-        anchorSampleThrottleTimerRef.current = null;
-      }
-      anchorPendingForecastHourRef.current = null;
-      anchorLastSampleCommitAtRef.current = Date.now();
-      setAnchorSampleForecastHour(forecastHour);
-      return;
-    }
-
-    const now = Date.now();
-    const elapsedMs = now - anchorLastSampleCommitAtRef.current;
-    anchorPendingForecastHourRef.current = forecastHour;
-
-    if (elapsedMs >= ANCHOR_SCRUB_SAMPLE_THROTTLE_MS) {
-      if (anchorSampleThrottleTimerRef.current !== null) {
-        window.clearTimeout(anchorSampleThrottleTimerRef.current);
-        anchorSampleThrottleTimerRef.current = null;
-      }
-      anchorPendingForecastHourRef.current = null;
-      anchorLastSampleCommitAtRef.current = now;
-      setAnchorSampleForecastHour(forecastHour);
-      return;
-    }
-
-    if (anchorSampleThrottleTimerRef.current !== null) {
-      return;
-    }
-
-    anchorSampleThrottleTimerRef.current = window.setTimeout(() => {
-      anchorSampleThrottleTimerRef.current = null;
-      const pendingHour = anchorPendingForecastHourRef.current;
-      if (!Number.isFinite(pendingHour)) {
-        return;
-      }
-      anchorPendingForecastHourRef.current = null;
-      anchorLastSampleCommitAtRef.current = Date.now();
-      setAnchorSampleForecastHour(pendingHour as number);
-    }, Math.max(0, ANCHOR_SCRUB_SAMPLE_THROTTLE_MS - elapsedMs));
-  }, [forecastHour, isScrubbing]);
 
   const controlsIsPlaying = isPlaying || isPreloadingForPlay || isLoopPreloading;
   const preloadBufferedCount = isLoopPreloading
