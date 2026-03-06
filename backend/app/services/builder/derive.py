@@ -45,7 +45,7 @@ _KUCHERA_VENDOR_T0_K = np.float32(271.16)
 _KUCHERA_RATIO_CLAMP_MIN = np.float32(5.0)
 _KUCHERA_RATIO_CLAMP_MAX = np.float32(30.0)
 _KUCHERA_INCREMENTAL_WINDOW_DEFAULT = 6
-_KUCHERA_SIMPLIFIED_PROFILE_MAX_LEVELS = 2
+_KUCHERA_SIMPLIFIED_PROFILE_MAX_LEVELS = 4
 _APCP_ACCUM_WINDOW_RE = re.compile(r":APCP:surface:(\d+)-(\d+)\s*hour acc(?:\s*fcst|@\([^)]*\))", re.IGNORECASE)
 
 
@@ -188,8 +188,9 @@ def _run_id_from_date(run_date: datetime) -> str:
 def _kuchera_select_profile_levels(levels_hpa: list[int], *, simplified: bool) -> list[int]:
     """Select Kuchera profile levels deterministically for operational mode.
 
-    In simplified mode we cap profile fetches to a small fixed set (prefer 850/700 hPa)
-    to keep per-frame cost low while retaining a stable warm-layer estimate.
+    In simplified mode we cap profile fetches to a small fixed set (prefer
+    850/700/600/500 hPa) to keep per-frame cost low while retaining a stable
+    warm-layer estimate.
     """
     if not levels_hpa:
         return []

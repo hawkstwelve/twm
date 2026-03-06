@@ -130,5 +130,9 @@ def test_kuchera_can_use_distinct_profile_product_without_rh_fetch(monkeypatch) 
     temp_fetches = [(product, var_key, fh) for product, var_key, fh in seen_products if var_key.startswith("tmp")]
     assert temp_fetches
     assert all(product == "prs" for product, _, _ in temp_fetches)
-    assert len(temp_fetches) <= 2
+    assert ("prs", "tmp850", 1) in temp_fetches
+    assert ("prs", "tmp700", 1) in temp_fetches
+    assert ("prs", "tmp600", 1) in temp_fetches
+    assert ("prs", "tmp500", 1) in temp_fetches
+    assert len(temp_fetches) <= 4
     assert not any(var_key.startswith("rh") for _, var_key, _ in seen_products)

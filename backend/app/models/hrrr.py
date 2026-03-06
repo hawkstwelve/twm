@@ -236,7 +236,7 @@ HRRR_VARS: dict[str, VarSpec] = {
                 "kuchera_use_ptype_gate": "true",
                 "kuchera_profile_mode": "simplified",
                 **kuchera_hint_overrides(
-                    levels_hpa=(850, 700),
+                    levels_hpa=(850, 700, 600, 500),
                     require_rh=False,
                 ),
             }
