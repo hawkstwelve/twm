@@ -272,7 +272,6 @@ type AnchorMarkerRecord = {
   marker: maplibregl.Marker;
   element: HTMLDivElement;
   chip: HTMLDivElement;
-  tooltip: HTMLDivElement;
 };
 
 type ActiveAnchorMarker = {
@@ -814,8 +813,8 @@ export function MapCanvas({
           if (existing.chip.textContent !== activeMarker.label) {
             existing.chip.textContent = activeMarker.label;
           }
-          if (existing.tooltip.textContent !== activeMarker.cityName) {
-            existing.tooltip.textContent = activeMarker.cityName;
+          if (existing.chip.getAttribute("data-city") !== activeMarker.cityName) {
+            existing.chip.setAttribute("data-city", activeMarker.cityName);
             existing.chip.setAttribute("aria-label", activeMarker.cityName);
           }
           existing.marker.setLngLat(activeMarker.lngLat);
@@ -829,14 +828,10 @@ export function MapCanvas({
         const chip = document.createElement("div");
         chip.className = "map-anchor-marker__chip";
         chip.textContent = activeMarker.label;
+        chip.setAttribute("data-city", activeMarker.cityName);
         chip.setAttribute("aria-label", activeMarker.cityName);
 
-        const tooltip = document.createElement("div");
-        tooltip.className = "map-anchor-marker__tooltip glass";
-        tooltip.textContent = activeMarker.cityName;
-
         element.appendChild(chip);
-        element.appendChild(tooltip);
 
         const marker = new maplibregl.Marker({
           element,
@@ -850,7 +845,6 @@ export function MapCanvas({
           marker,
           element,
           chip,
-          tooltip,
         });
       }
     },
