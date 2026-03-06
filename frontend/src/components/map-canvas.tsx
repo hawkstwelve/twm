@@ -274,6 +274,12 @@ type AnchorMarkerRecord = {
   chip: HTMLDivElement;
 };
 
+type AnchorTooltipState = {
+  cityName: string;
+  x: number;
+  y: number;
+};
+
 type ActiveAnchorMarker = {
   id: string;
   lngLat: [number, number];
@@ -637,6 +643,7 @@ export function MapCanvas({
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
   const [showAttribution, setShowAttribution] = useState(false);
+  const [anchorTooltip, setAnchorTooltip] = useState<AnchorTooltipState | null>(null);
   const activeBufferRef = useRef<OverlayBuffer>("a");
   const activeTileUrlRef = useRef(tileUrl);
   const swapTokenRef = useRef(0);
@@ -783,10 +790,24 @@ export function MapCanvas({
   }, []);
 
   const clearAnchorMarkers = useCallback(() => {
+    setAnchorTooltip(null);
     for (const record of anchorMarkersRef.current.values()) {
       record.marker.remove();
     }
     anchorMarkersRef.current.clear();
+  }, []);
+
+  const showAnchorTooltip = useCallback((map: maplibregl.Map, cityName: string, lngLat: [number, number]) => {
+    const projected = map.project(lngLat);
+    setAnchorTooltip({
+      cityName,
+      x: projected.x,
+      y: projected.y,
+    });
+  }, []);
+
+  const hideAnchorTooltip = useCallback(() => {
+    setAnchorTooltip(null);
   }, []);
 
   const syncAnchorMarkers = useCallback(
@@ -813,8 +834,7 @@ export function MapCanvas({
           if (existing.chip.textContent !== activeMarker.label) {
             existing.chip.textContent = activeMarker.label;
           }
-          if (existing.chip.getAttribute("data-city") !== activeMarker.cityName) {
-            existing.chip.setAttribute("data-city", activeMarker.cityName);
+          if (existing.chip.getAttribute("aria-label") !== activeMarker.cityName) {
             existing.chip.setAttribute("aria-label", activeMarker.cityName);
           }
           existing.marker.setLngLat(activeMarker.lngLat);
@@ -828,8 +848,15 @@ export function MapCanvas({
         const chip = document.createElement("div");
         chip.className = "map-anchor-marker__chip";
         chip.textContent = activeMarker.label;
-        chip.setAttribute("data-city", activeMarker.cityName);
         chip.setAttribute("aria-label", activeMarker.cityName);
+        chip.addEventListener("mouseenter", () => {
+          showAnchorTooltip(map, activeMarker.cityName, activeMarker.lngLat);
+        });
+        chip.addEventListener("mouseleave", hideAnchorTooltip);
+        chip.addEventListener("focus", () => {
+          showAnchorTooltip(map, activeMarker.cityName, activeMarker.lngLat);
+        });
+        chip.addEventListener("blur", hideAnchorTooltip);
 
         element.appendChild(chip);
 
@@ -848,8 +875,27 @@ export function MapCanvas({
         });
       }
     },
-    [clearAnchorMarkers]
+    [clearAnchorMarkers, hideAnchorTooltip, showAnchorTooltip]
   );
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isLoaded) {
+      return;
+    }
+
+    const hideTooltipOnMove = () => {
+      setAnchorTooltip(null);
+    };
+
+    map.on("movestart", hideTooltipOnMove);
+    map.on("zoomstart", hideTooltipOnMove);
+
+    return () => {
+      map.off("movestart", hideTooltipOnMove);
+      map.off("zoomstart", hideTooltipOnMove);
+    };
+  }, [isLoaded]);
 
   const notifySettled = useCallback(
     (map: maplibregl.Map, source: string, url: string) => {
@@ -2024,6 +2070,19 @@ export function MapCanvas({
         style={{ backgroundColor: getMapBackgroundColor(basemapMode) }}
         aria-label="Weather map"
       />
+
+      {anchorTooltip && (
+        <div
+          className="pointer-events-none absolute z-[60] rounded-xl glass px-2.5 py-1.5 text-[11px] font-medium text-white/95 shadow-xl"
+          style={{
+            left: anchorTooltip.x,
+            top: anchorTooltip.y,
+            transform: "translate(-50%, calc(-100% - 10px))",
+          }}
+        >
+          {anchorTooltip.cityName}
+        </div>
+      )}
 
       <div className="pointer-events-none absolute left-4 top-[7.5rem] z-50">
         <div className="pointer-events-auto overflow-hidden rounded-xl border border-white/10 bg-black/40 shadow-[0_8px_32px_rgba(0,0,0,0.35)] backdrop-blur-md">
