@@ -234,7 +234,7 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
   return (
     <header role="toolbar" aria-label="Weather model controls" className="fixed top-[4.35rem] z-50 w-full px-3 sm:px-4">
       <div className="hidden sm:block">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex items-start">
           <div className="glass-strong inline-flex max-w-[calc(100vw-9rem)] items-end gap-2.5 rounded-2xl border border-white/12 px-4 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.34)]">
             <ToolbarSelect
               label="Region"
@@ -281,12 +281,6 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
               triggerClassName="min-w-[224px] max-w-[260px]"
             />
           </div>
-
-          {onPostToTwf ? (
-            <div className="shrink-0 pt-4">
-              <ShareButton onClick={onPostToTwf} />
-            </div>
-          ) : null}
         </div>
       </div>
 
