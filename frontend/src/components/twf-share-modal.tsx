@@ -41,6 +41,15 @@ type SharePostResult = {
   topicId: number;
 };
 
+type ShareTopicResult = {
+  topicId: number;
+  topicUrl: string;
+  forumId: number;
+  title: string;
+};
+
+type ShareMode = "existing" | "new";
+
 type TwfShareModalProps = {
   open: boolean;
   onClose: () => void;
@@ -298,12 +307,15 @@ export function TwfShareModal({
   const [topicSearch, setTopicSearch] = useState("");
   const [selectedTopicId, setSelectedTopicId] = useState<number | null>(initialSharePrefs.topicId ?? null);
   const [pastedTopicUrl, setPastedTopicUrl] = useState("");
+  const [shareMode, setShareMode] = useState<ShareMode>("existing");
 
   const [content, setContent] = useState("");
+  const [newTopicTitle, setNewTopicTitle] = useState("");
   const [submitBusy, setSubmitBusy] = useState(false);
   const [submitError, setSubmitError] = useState<ApiErrorInfo | null>(null);
   const [retryAfterSeconds, setRetryAfterSeconds] = useState<number | null>(null);
   const [submitSuccess, setSubmitSuccess] = useState<SharePostResult | null>(null);
+  const [submitTopicSuccess, setSubmitTopicSuccess] = useState<ShareTopicResult | null>(null);
   const [submitTopicTitle, setSubmitTopicTitle] = useState<string | null>(null);
   const [clipboardStatus, setClipboardStatus] = useState<string | null>(null);
   const [showAdvancedTopic, setShowAdvancedTopic] = useState(false);
@@ -334,6 +346,7 @@ export function TwfShareModal({
   const defaultContent = useMemo(() => {
     return `${payload.summary}\n${payload.permalink}`;
   }, [payload.permalink, payload.summary]);
+  const defaultTopicTitle = useMemo(() => payload.summary.trim().slice(0, 255), [payload.summary]);
   const selectedTopicTitle = useMemo(() => {
     const topicId = parsedTopicIdFromUrl ?? selectedTopicId;
     if (!Number.isFinite(topicId) || Number(topicId) <= 0) {
@@ -360,12 +373,15 @@ export function TwfShareModal({
     setSelectedForumId(persistedForumId);
     setShowOtherForums(prefs.forumMode === "other" || !isQuickForumId(persistedForumId));
     setSelectedTopicId(prefs.topicId ?? null);
+    setShareMode("existing");
     setContent(defaultContent);
+    setNewTopicTitle(defaultTopicTitle);
     setContentDirty(false);
     setIsMessageExpanded(false);
     setHasExpandedMessageEditor(false);
     setSubmitError(null);
     setSubmitSuccess(null);
+    setSubmitTopicSuccess(null);
     setSubmitTopicTitle(null);
     setRetryAfterSeconds(null);
     setClipboardStatus(null);
@@ -381,7 +397,7 @@ export function TwfShareModal({
       }
       return null;
     });
-  }, [open, defaultContent]);
+  }, [open, defaultContent, defaultTopicTitle]);
 
   useEffect(() => {
     if (!open || contentDirty) {
@@ -389,6 +405,13 @@ export function TwfShareModal({
     }
     setContent(defaultContent);
   }, [open, defaultContent, contentDirty]);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setNewTopicTitle((current) => (current.trim() ? current : defaultTopicTitle));
+  }, [open, defaultTopicTitle]);
 
   useEffect(() => {
     return () => {
@@ -516,6 +539,7 @@ export function TwfShareModal({
     setTopicsLoading(true);
     setTopicsError(null);
     setSubmitSuccess(null);
+    setSubmitTopicSuccess(null);
     setSubmitTopicTitle(null);
 
     fetch(`${API_ORIGIN}/twf/topics?${params.toString()}`, {
@@ -611,15 +635,12 @@ export function TwfShareModal({
   const handleSubmitPost = async () => {
     setSubmitError(null);
     setSubmitSuccess(null);
+    setSubmitTopicSuccess(null);
     setSubmitTopicTitle(null);
     setRetryAfterSeconds(null);
 
     if (twfStatus.linked !== true) {
       setSubmitError({ message: "Connect your TWF account before posting." });
-      return;
-    }
-    if (!Number.isFinite(effectiveTopicId) || Number(effectiveTopicId) <= 0) {
-      setSubmitError({ message: "Select a topic to post." });
       return;
     }
     const resolvedContent = (hasExpandedMessageEditor ? content : defaultContent).trim();
@@ -631,15 +652,38 @@ export function TwfShareModal({
 
     setSubmitBusy(true);
     try {
-      const response = await fetch(`${API_ORIGIN}/twf/share/post`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          topic_id: Number(effectiveTopicId),
-          content: trimmedContent,
-        }),
-      });
+      let response: Response;
+      if (shareMode === "new") {
+        const trimmedTitle = newTopicTitle.trim();
+        if (!trimmedTitle) {
+          setSubmitError({ message: "Topic title is required." });
+          return;
+        }
+        response = await fetch(`${API_ORIGIN}/twf/share/topic`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            forum_id: selectedForumId,
+            title: trimmedTitle,
+            content: trimmedContent,
+          }),
+        });
+      } else {
+        if (!Number.isFinite(effectiveTopicId) || Number(effectiveTopicId) <= 0) {
+          setSubmitError({ message: "Select a topic to post." });
+          return;
+        }
+        response = await fetch(`${API_ORIGIN}/twf/share/post`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            topic_id: Number(effectiveTopicId),
+            content: trimmedContent,
+          }),
+        });
+      }
 
       if (!response.ok) {
         const apiError = await readApiError(response);
@@ -653,13 +697,27 @@ export function TwfShareModal({
         return;
       }
 
-      const result = (await response.json()) as SharePostResult;
-      if (!Number.isFinite(Number(result.postId)) || typeof result.postUrl !== "string") {
-        setSubmitError({ message: "Unexpected response from server." });
-        return;
+      if (shareMode === "new") {
+        const result = (await response.json()) as ShareTopicResult;
+        if (
+          !Number.isFinite(Number(result.topicId)) ||
+          typeof result.topicUrl !== "string" ||
+          typeof result.title !== "string"
+        ) {
+          setSubmitError({ message: "Unexpected response from server." });
+          return;
+        }
+        setSubmitTopicSuccess(result);
+        setSubmitTopicTitle(result.title);
+      } else {
+        const result = (await response.json()) as SharePostResult;
+        if (!Number.isFinite(Number(result.postId)) || typeof result.postUrl !== "string") {
+          setSubmitError({ message: "Unexpected response from server." });
+          return;
+        }
+        setSubmitSuccess(result);
+        setSubmitTopicTitle(selectedTopicTitle ?? "Selected topic");
       }
-      setSubmitSuccess(result);
-      setSubmitTopicTitle(selectedTopicTitle ?? "Selected topic");
     } catch {
       setSubmitError({ message: "Request failed. Please try again." });
     } finally {
@@ -820,24 +878,25 @@ export function TwfShareModal({
                   {statusError ? <span className="text-xs text-red-200">{statusError}</span> : null}
                 </div>
               </div>
-            ) : submitSuccess ? (
+            ) : submitSuccess || submitTopicSuccess ? (
               <div className="space-y-3">
                 <div className="flex items-center gap-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-2 text-sm text-emerald-50">
                   <CheckCircle2 className="h-4 w-4" />
-                  Posted successfully.
+                  {submitTopicSuccess ? "Topic created successfully." : "Posted successfully."}
                 </div>
                 <div className="text-xs text-white/70">
-                  Posted to: <span className="text-white">{submitTopicTitle ?? "Selected topic"}</span>
+                  {submitTopicSuccess ? "Created topic:" : "Posted to:"}{" "}
+                  <span className="text-white">{submitTopicTitle ?? "Selected topic"}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <a
-                    href={submitSuccess.postUrl}
+                    href={submitTopicSuccess ? submitTopicSuccess.topicUrl : submitSuccess?.postUrl}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    Open post
+                    {submitTopicSuccess ? "Open topic" : "Open post"}
                   </a>
                   <button
                     type="button"
@@ -851,6 +910,36 @@ export function TwfShareModal({
             ) : (
               <div className="space-y-4">
                 <div className="grid gap-2">
+                  <div>
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Share mode</div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShareMode("existing")}
+                        className={[
+                          "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                          shareMode === "existing"
+                            ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                            : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                        ].join(" ")}
+                      >
+                        Existing topic
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setShareMode("new")}
+                        className={[
+                          "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                          shareMode === "new"
+                            ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                            : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                        ].join(" ")}
+                      >
+                        New topic
+                      </button>
+                    </div>
+                  </div>
+
                   <div>
                     <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Choose forum</div>
                     <div className="flex flex-wrap items-center gap-2">
@@ -909,66 +998,86 @@ export function TwfShareModal({
                     ) : null}
                   </div>
 
-                  <div>
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic</div>
-                    {topicsLoading ? (
-                      <div className="flex items-center gap-2 text-xs text-white/70">
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        Loading topics...
+                  {shareMode === "existing" ? (
+                    <>
+                      <div>
+                        <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic</div>
+                        {topicsLoading ? (
+                          <div className="flex items-center gap-2 text-xs text-white/70">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Loading topics...
+                          </div>
+                        ) : topicOptions.length > 0 ? (
+                          <select
+                            value={selectedTopicId !== null ? String(selectedTopicId) : ""}
+                            onChange={(event) => setSelectedTopicId(Number(event.target.value))}
+                            className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                          >
+                            {topicOptions.map((topic) => (
+                              <option key={topic.id} value={String(topic.id)}>
+                                {(topic.pinned ? "[PIN] " : "") + topic.title}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <div className="text-xs text-white/65">No topics loaded for this forum.</div>
+                        )}
+                        {topicsError ? <div className="mt-1 text-xs text-red-200">{topicsError}</div> : null}
+                        <button
+                          type="button"
+                          onClick={() => setShowAdvancedTopic((current) => !current)}
+                          className="mt-2 text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
+                        >
+                          {showAdvancedTopic ? "Advanced ▾" : "Advanced ▸"}
+                        </button>
                       </div>
-                    ) : topicOptions.length > 0 ? (
-                      <select
-                        value={selectedTopicId !== null ? String(selectedTopicId) : ""}
-                        onChange={(event) => setSelectedTopicId(Number(event.target.value))}
-                        className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                      >
-                        {topicOptions.map((topic) => (
-                          <option key={topic.id} value={String(topic.id)}>
-                            {(topic.pinned ? "[PIN] " : "") + topic.title}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div className="text-xs text-white/65">No topics loaded for this forum.</div>
-                    )}
-                    {topicsError ? <div className="mt-1 text-xs text-red-200">{topicsError}</div> : null}
-                    <button
-                      type="button"
-                      onClick={() => setShowAdvancedTopic((current) => !current)}
-                      className="mt-2 text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
-                    >
-                      {showAdvancedTopic ? "Advanced ▾" : "Advanced ▸"}
-                    </button>
-                  </div>
 
-                  {showAdvancedTopic ? (
-                    <div className="space-y-2">
-                      <div>
-                        <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">
-                          Search loaded topics
+                      {showAdvancedTopic ? (
+                        <div className="space-y-2">
+                          <div>
+                            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">
+                              Search loaded topics
+                            </div>
+                            <input
+                              value={topicSearch}
+                              onChange={(event) => setTopicSearch(event.target.value)}
+                              placeholder="Search loaded topics"
+                              className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                            />
+                          </div>
+                          <div>
+                            <div className="mb-1 text-xs uppercase tracking-wider text-white/60">
+                              Paste topic URL (optional)
+                            </div>
+                            <input
+                              value={pastedTopicUrl}
+                              onChange={(event) => setPastedTopicUrl(event.target.value)}
+                              placeholder="https://www.theweatherforums.com/topic/123..."
+                              className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                            />
+                            {pastedTopicUrlError ? <div className="mt-1 text-xs text-red-200">{pastedTopicUrlError}</div> : null}
+                            {parsedTopicIdFromUrl ? (
+                              <div className="mt-1 text-xs text-emerald-200/90">Using selected topic from pasted URL.</div>
+                            ) : null}
+                          </div>
                         </div>
-                        <input
-                          value={topicSearch}
-                          onChange={(event) => setTopicSearch(event.target.value)}
-                          placeholder="Search loaded topics"
-                          className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
-                        />
-                      </div>
-                      <div>
-                      <div className="mb-1 text-xs uppercase tracking-wider text-white/60">Paste topic URL (optional)</div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div>
+                      <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic title</div>
                       <input
-                        value={pastedTopicUrl}
-                        onChange={(event) => setPastedTopicUrl(event.target.value)}
-                        placeholder="https://www.theweatherforums.com/topic/123..."
+                        value={newTopicTitle}
+                        onChange={(event) => setNewTopicTitle(event.target.value)}
+                        maxLength={255}
+                        placeholder="Enter a topic title"
                         className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
                       />
-                      {pastedTopicUrlError ? <div className="mt-1 text-xs text-red-200">{pastedTopicUrlError}</div> : null}
-                      {parsedTopicIdFromUrl ? (
-                        <div className="mt-1 text-xs text-emerald-200/90">Using selected topic from pasted URL.</div>
-                      ) : null}
+                      <div className="mt-1 text-[11px] text-white/55">
+                        New topic will be posted in the selected forum.
                       </div>
                     </div>
-                  ) : null}
+                  )}
 
                   <div>
                     <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Post content</div>
@@ -1009,7 +1118,11 @@ export function TwfShareModal({
 
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="text-xs text-white/60">
-                    {selectedTopicTitle ? `Posting in: ${selectedTopicTitle}` : "Select a topic to post"}
+                    {shareMode === "new"
+                      ? `Creating a new topic in forum ${selectedForumId}`
+                      : selectedTopicTitle
+                        ? `Posting in: ${selectedTopicTitle}`
+                        : "Select a topic to post"}
                   </div>
                   <button
                     type="button"
@@ -1020,7 +1133,7 @@ export function TwfShareModal({
                     className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200/35 bg-[linear-gradient(to_top_right,#244238_0%,#5f7f6f_100%)] px-3 text-sm font-semibold text-emerald-50 shadow-[0_0_12px_rgba(94,164,135,0.16)] hover:brightness-110 disabled:opacity-60 disabled:hover:brightness-100"
                   >
                     {submitBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                    {submitBusy ? "Posting..." : "Post to TWF"}
+                    {submitBusy ? "Posting..." : shareMode === "new" ? "Create Topic on TWF" : "Post to TWF"}
                   </button>
                 </div>
               </div>
