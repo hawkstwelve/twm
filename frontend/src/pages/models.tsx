@@ -185,6 +185,30 @@ export default function Models() {
           { k: "Horizon", v: "Short-to-mid range" },
         ],
       },
+      {
+        id: "nbm",
+        name: "NBM",
+        oneLiner: "National Blend guidance for calibrated temperature, wind, precip, and snowfall context.",
+        pills: ["CONUS + PNW", "Every 3 hours", "~13 km"],
+        bestFor: [
+          "Blended baseline for sensible weather expectations",
+          "Temperature, precip, snowfall, and wind overview without model-to-model noise",
+          "Quick consensus checks before diving into deterministic detail",
+        ],
+        limitations: [
+          "Not designed for storm-scale structure or convective evolution",
+          "Smoother blend can mute sharp mesoscale gradients",
+          "Shorter horizon than true long-range global guidance",
+        ],
+        notes: [
+          "Current frontend rollout mirrors the system's initial NBM catalog and forecast-hour availability.",
+        ],
+        specs: [
+          { k: "Domain", v: "CONUS, PNW" },
+          { k: "Cadence", v: "Every 3 hours" },
+          { k: "Horizon", v: "0-120h in 6h steps" },
+        ],
+      },
     ],
     []
   );

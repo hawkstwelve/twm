@@ -62,6 +62,13 @@ export default function Home() {
         notes: "Mesoscale",
       },
       {
+        key: "NBM",
+        modelId: "nbm",
+        update: "Every 3 hours",
+        forecast: "0-120h",
+        notes: "Blended guidance",
+      },
+      {
         key: "GFS",
         modelId: "gfs",
         update: "3h to 240h, then 6h",
