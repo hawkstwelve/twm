@@ -584,6 +584,7 @@ type MapCanvasProps = {
   contourGeoJsonUrl?: string | null;
   anchorGeoJson?: AnchorFeatureCollection | null;
   pointLabelsEnabled?: boolean;
+  showZoomControls?: boolean;
   region: string;
   regionViews?: Record<string, RegionView>;
   opacity: number;
@@ -615,6 +616,7 @@ export function MapCanvas({
   contourGeoJsonUrl,
   anchorGeoJson = null,
   pointLabelsEnabled = true,
+  showZoomControls = false,
   region,
   regionViews,
   opacity,
@@ -2130,7 +2132,9 @@ export function MapCanvas({
         </div>
       )}
 
-      <div className="pointer-events-none fixed left-4 top-36 z-50 hidden sm:block">
+      <div
+        className={`pointer-events-none fixed left-4 top-[4.35rem] z-50 hidden sm:block${showZoomControls ? "" : " sm:hidden"}`}
+      >
         <div className="pointer-events-auto overflow-hidden rounded-xl border border-white/10 bg-black/40 shadow-[0_8px_32px_rgba(0,0,0,0.35)] backdrop-blur-md">
           <button
             type="button"

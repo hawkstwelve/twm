@@ -246,7 +246,7 @@ export function MapLegend({
     return (
       <div
         ref={containerRef}
-        className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "right-3 top-40" : "right-4 top-36")}
+        className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "right-3 top-40" : "right-4 top-[4.35rem]")}
       >
         <UnavailablePlaceholder />
       </div>
@@ -269,7 +269,7 @@ export function MapLegend({
       className={cn(
         "fixed z-[55] flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
         showPrecipPtypeRows ? "w-[220px]" : "w-[120px]",
-        isSmallScreen ? "right-3 top-40 max-w-[min(72vw,220px)]" : "right-4 top-36"
+        isSmallScreen ? "right-3 top-40 max-w-[min(72vw,220px)]" : "right-4 top-[4.35rem]"
       )}
       role="complementary"
       aria-label="Map legend"

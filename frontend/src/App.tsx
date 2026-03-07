@@ -684,6 +684,7 @@ export default function App() {
   const [opacity, setOpacity] = useState(OVERLAY_DEFAULT_OPACITY);
   const [basemapMode, setBasemapMode] = useState<BasemapMode>(() => readBasemapModePreference());
   const [pointLabelsEnabled, setPointLabelsEnabled] = useState(true);
+  const [zoomControlsVisible, setZoomControlsVisible] = useState(false);
   const [legendVisible, setLegendVisible] = useState(() =>
     typeof window === "undefined" ? true : window.innerWidth >= 640
   );
@@ -3431,6 +3432,7 @@ export default function App() {
           contourGeoJsonUrl={contourGeoJsonUrl}
           anchorGeoJson={anchorDisplayGeoJson}
           pointLabelsEnabled={pointLabelsEnabled}
+          showZoomControls={zoomControlsVisible}
           region={region}
           regionViews={regionViews}
           opacity={opacity}
@@ -3534,9 +3536,9 @@ export default function App() {
             </button>
           ) : null}
 
-          <div>
+          <div className="relative flex flex-col items-end">
             {displayPanelOpen ? (
-              <div className="glass mb-3 w-[220px] rounded-2xl px-3 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.35)]">
+              <div className="glass absolute right-0 bottom-full mb-3 w-[220px] rounded-2xl px-3 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.35)]">
               <div className="mb-3">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/48">Display</div>
                 <div className="pt-1 text-xs text-white/62">Map overlays and reference aids.</div>
@@ -3582,6 +3584,27 @@ export default function App() {
                   </div>
                   <div className={legendVisible ? "text-xs font-semibold text-[#354d42]" : "text-xs font-semibold text-white/42"}>
                     {legendVisible ? "On" : "Off"}
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setZoomControlsVisible((current) => !current)}
+                  aria-pressed={zoomControlsVisible}
+                  className={
+                    zoomControlsVisible
+                      ? "flex w-full items-center justify-between gap-3 rounded-lg border border-[#354d42] bg-[rgba(53,77,66,0.22)] px-3 py-2 text-left transition-all duration-150 hover:bg-[rgba(53,77,66,0.3)]"
+                      : "flex w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/18 px-3 py-2 text-left transition-all duration-150 hover:bg-black/28"
+                  }
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                      <SlidersHorizontal className="h-4 w-4 text-white/72" />
+                      Zoom Controls
+                    </div>
+                  </div>
+                  <div className={zoomControlsVisible ? "text-xs font-semibold text-[#354d42]" : "text-xs font-semibold text-white/42"}>
+                    {zoomControlsVisible ? "On" : "Off"}
                   </div>
                 </button>
 
