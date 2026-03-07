@@ -234,54 +234,56 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
   return (
     <header role="toolbar" aria-label="Weather model controls" className="fixed top-[4.35rem] z-50 w-full px-3 sm:px-4">
       <div className="hidden sm:block">
-        <div className="glass-strong mx-auto flex max-w-[calc(100vw-2rem)] items-end gap-2.5 rounded-2xl border border-white/12 px-4 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.34)]">
-          <ToolbarSelect
-            label="Region"
-            icon={MapPin}
-            value={region}
-            onValueChange={onRegionChange}
-            options={regions}
-            disabled={disabled}
-            placeholder="Region"
-            triggerClassName="min-w-[160px]"
-          />
+        <div className="flex items-start justify-between gap-4">
+          <div className="glass-strong inline-flex max-w-[calc(100vw-9rem)] items-end gap-2.5 rounded-2xl border border-white/12 px-4 py-3 shadow-[0_18px_40px_rgba(0,0,0,0.34)]">
+            <ToolbarSelect
+              label="Region"
+              icon={MapPin}
+              value={region}
+              onValueChange={onRegionChange}
+              options={regions}
+              disabled={disabled}
+              placeholder="Region"
+              triggerClassName="min-w-[160px]"
+            />
 
-          <ToolbarSelect
-            label="Model"
-            icon={Boxes}
-            value={model}
-            onValueChange={onModelChange}
-            options={models}
-            disabled={disabled}
-            placeholder="Model"
-            triggerClassName="min-w-[160px]"
-          />
+            <ToolbarSelect
+              label="Model"
+              icon={Boxes}
+              value={model}
+              onValueChange={onModelChange}
+              options={models}
+              disabled={disabled}
+              placeholder="Model"
+              triggerClassName="min-w-[160px]"
+            />
 
-          <ToolbarSelect
-            label="Run"
-            icon={CalendarClock}
-            value={run}
-            onValueChange={onRunChange}
-            options={runs}
-            disabled={disabled}
-            placeholder="Run"
-            triggerClassName="min-w-[160px]"
-          />
+            <ToolbarSelect
+              label="Run"
+              icon={CalendarClock}
+              value={run}
+              onValueChange={onRunChange}
+              options={runs}
+              disabled={disabled}
+              placeholder="Run"
+              triggerClassName="min-w-[160px]"
+            />
 
-          <ToolbarSelect
-            label="Variable"
-            icon={Layers}
-            value={variable}
-            onValueChange={onVariableChange}
-            options={variables}
-            disabled={disabled}
-            placeholder="Variable"
-            grouped
-            triggerClassName="min-w-[224px]"
-          />
+            <ToolbarSelect
+              label="Variable"
+              icon={Layers}
+              value={variable}
+              onValueChange={onVariableChange}
+              options={variables}
+              disabled={disabled}
+              placeholder="Variable"
+              grouped
+              triggerClassName="min-w-[224px] max-w-[260px]"
+            />
+          </div>
 
           {onPostToTwf ? (
-            <div className="ml-auto pl-2">
+            <div className="shrink-0 pt-4">
               <ShareButton onClick={onPostToTwf} />
             </div>
           ) : null}
