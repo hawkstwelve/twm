@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -46,6 +47,8 @@ type WeatherToolbarProps = {
   onPointLabelsEnabledChange: (next: boolean) => void;
   legendVisible: boolean;
   onLegendVisibleChange: (next: boolean) => void;
+  opacity: number;
+  onOpacityChange: (next: number) => void;
   onPostToTwf?: () => void;
 };
 
@@ -215,6 +218,8 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     onPointLabelsEnabledChange,
     legendVisible,
     onLegendVisibleChange,
+    opacity,
+    onOpacityChange,
     onPostToTwf,
   } = props;
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
@@ -312,14 +317,14 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
         </div>
 
         <div className="flex items-center gap-2 px-3 pb-2 text-[11px]">
+          <span className="rounded-full border border-white/10 bg-white/8 px-2 py-1 font-medium text-white/68">
+            {selectedRunLabel}
+          </span>
           <span className="rounded-full border border-white/10 bg-white/8 px-2 py-1 font-medium text-white/82">
             {selectedModelLabel}
           </span>
           <span className="truncate rounded-full border border-white/10 bg-white/8 px-2 py-1 font-medium text-white/74">
             {selectedVariableLabel}
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/8 px-2 py-1 font-medium text-white/68">
-            {selectedRunLabel}
           </span>
         </div>
 
@@ -388,7 +393,43 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
                   checked={legendVisible}
                   onToggle={() => onLegendVisibleChange(!legendVisible)}
                 />
+                <div className="rounded-lg border border-white/10 bg-black/18 px-3 py-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-white">Opacity</span>
+                    <span className="font-mono text-[10px] text-white/62">{Math.round(opacity * 100)}%</span>
+                  </div>
+                  <Slider
+                    value={[Math.round(opacity * 100)]}
+                    onValueChange={([value]) => onOpacityChange((value ?? 100) / 100)}
+                    min={0}
+                    max={100}
+                    step={1}
+                    className="w-full [&>*:first-child]:h-2 [&>*:first-child]:bg-secondary/55 [&>*:nth-child(2)]:h-4 [&>*:nth-child(2)]:w-4"
+                  />
+                </div>
               </div>
+            </div>
+
+            <div className="mt-4 border-t border-white/10 pt-3 text-[10px] leading-relaxed text-white/52">
+              Maps:{" "}
+              <a href="https://www.maplibre.org/" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                MapLibre
+              </a>
+              {" "}|
+              {" "}
+              <a
+                href="https://www.openstreetmap.org/copyright"
+                target="_blank"
+                rel="noreferrer"
+                className="underline underline-offset-2"
+              >
+                OSM
+              </a>
+              {" "}|
+              {" "}
+              <a href="https://carto.com/attributions" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                CARTO
+              </a>
             </div>
           </div>
         ) : null}

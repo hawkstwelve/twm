@@ -2153,7 +2153,7 @@ export function MapCanvas({
         </div>
       </div>
 
-      <div className="pointer-events-none absolute bottom-[7.25rem] left-4 z-50 sm:bottom-24">
+      <div className="pointer-events-none absolute bottom-[7.25rem] left-4 z-50 hidden sm:block sm:bottom-24">
         <div className="pointer-events-auto">
           <button
             type="button"

@@ -3420,6 +3420,8 @@ export default function App() {
         onPointLabelsEnabledChange={setPointLabelsEnabled}
         legendVisible={legendVisible}
         onLegendVisibleChange={setLegendVisible}
+        opacity={opacity}
+        onOpacityChange={setOpacity}
         onPostToTwf={handleOpenShareModal}
       />
 
@@ -3518,7 +3520,7 @@ export default function App() {
           </div>
         )}
 
-        <div className="absolute bottom-28 right-20 z-40 hidden sm:block">
+        <div className="absolute bottom-28 right-4 z-40 hidden sm:block">
           {displayPanelOpen ? (
             <div className="glass mb-3 w-[220px] rounded-2xl px-3 py-3 shadow-[0_12px_30px_rgba(0,0,0,0.35)]">
               <div className="mb-3">
@@ -3562,6 +3564,40 @@ export default function App() {
                     {legendVisible ? "On" : "Off"}
                   </div>
                 </button>
+
+                <div className="rounded-lg border border-white/10 bg-black/18 px-3 py-2">
+                  <div className="mb-1 flex items-center justify-between">
+                    <span className="text-sm font-semibold text-white">Opacity</span>
+                    <span className="font-mono text-[10px] text-white/62">{Math.round(opacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(opacity * 100)}
+                    onChange={(event) => setOpacity(Number(event.target.value) / 100)}
+                    className="h-2 w-full cursor-pointer accent-emerald-300"
+                    aria-label="Overlay opacity"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setBasemapMode(basemapMode === "dark" ? "light" : "dark")}
+                  className="flex w-full items-center justify-between gap-3 rounded-lg border border-white/10 bg-black/18 px-3 py-2 text-left transition-all duration-150 hover:bg-black/28"
+                >
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                      {basemapMode === "dark" ? <Moon className="h-4 w-4 text-white/72" /> : <Sun className="h-4 w-4 text-white/72" />}
+                      Basemap
+                    </div>
+                    <div className="pt-0.5 text-[11px] text-white/56">Switch between dark and light map styles.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-emerald-300">
+                    {basemapMode === "dark" ? "Dark" : "Light"}
+                  </div>
+                </button>
               </div>
             </div>
           ) : null}
@@ -3582,7 +3618,7 @@ export default function App() {
 
         <button
           type="button"
-          className="glass absolute bottom-28 right-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-white/95 hover:bg-white/10 sm:bottom-24"
+          className="glass absolute bottom-28 right-4 z-40 inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/15 text-white/95 hover:bg-white/10 sm:hidden"
           aria-pressed={basemapMode === "dark"}
           aria-label={basemapMode === "dark" ? "Switch to light basemap" : "Switch to dark basemap"}
           title={basemapMode === "dark" ? "Switch to light basemap" : "Switch to dark basemap"}
@@ -3591,7 +3627,7 @@ export default function App() {
           {basemapMode === "dark" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
 
-        {legendVisible ? <MapLegend legend={legend} onOpacityChange={setOpacity} /> : null}
+        {legendVisible ? <MapLegend legend={legend} onOpacityChange={setOpacity} showOpacityControl={false} /> : null}
 
         <BottomForecastControls
           forecastHour={forecastHour}

@@ -207,9 +207,15 @@ type MapLegendProps = {
   legend: LegendPayload | null;
   onOpacityChange: (opacity: number) => void;
   containerRef?: Ref<HTMLDivElement>;
+  showOpacityControl?: boolean;
 };
 
-export function MapLegend({ legend, onOpacityChange, containerRef }: MapLegendProps) {
+export function MapLegend({
+  legend,
+  onOpacityChange,
+  containerRef,
+  showOpacityControl = true,
+}: MapLegendProps) {
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsedPreference());
   const [isSmallScreen, setIsSmallScreen] = useState(false);
   const [fadeKey, setFadeKey] = useState(0);
@@ -240,7 +246,7 @@ export function MapLegend({ legend, onOpacityChange, containerRef }: MapLegendPr
     return (
       <div
         ref={containerRef}
-        className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "right-3 top-24" : "right-4 top-36")}
+        className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "right-3 top-32" : "right-4 top-36")}
       >
         <UnavailablePlaceholder />
       </div>
@@ -263,7 +269,7 @@ export function MapLegend({ legend, onOpacityChange, containerRef }: MapLegendPr
       className={cn(
         "fixed z-[55] flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
         showPrecipPtypeRows ? "w-[220px]" : "w-[120px]",
-        isSmallScreen ? "right-3 top-24 max-w-[min(72vw,220px)]" : "right-4 top-36"
+        isSmallScreen ? "right-3 top-32 max-w-[min(72vw,220px)]" : "right-4 top-36"
       )}
       role="complementary"
       aria-label="Map legend"
@@ -362,24 +368,26 @@ export function MapLegend({ legend, onOpacityChange, containerRef }: MapLegendPr
                   ))}
             </div>
 
-            <div className="border-t border-border/30 pt-1.5">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-[10px] font-medium uppercase tracking-wider text-foreground/65">
-                  Opacity
-                </span>
-                <span className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/90">
-                  {opacityPercent}%
-                </span>
+            {showOpacityControl ? (
+              <div className="border-t border-border/30 pt-1.5">
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[10px] font-medium uppercase tracking-wider text-foreground/65">
+                    Opacity
+                  </span>
+                  <span className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/90">
+                    {opacityPercent}%
+                  </span>
+                </div>
+                <Slider
+                  value={[opacityPercent]}
+                  onValueChange={([value]) => onOpacityChange((value ?? 100) / 100)}
+                  min={0}
+                  max={100}
+                  step={1}
+                  className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:nth-child(2)]:h-[18px] [&>*:nth-child(2)]:w-[18px]"
+                />
               </div>
-              <Slider
-                value={[opacityPercent]}
-                onValueChange={([value]) => onOpacityChange((value ?? 100) / 100)}
-                min={0}
-                max={100}
-                step={1}
-                className="w-full transition-opacity duration-150 [&>*:first-child]:h-2.5 [&>*:first-child]:bg-secondary/55 [&>*:nth-child(2)]:h-[18px] [&>*:nth-child(2)]:w-[18px]"
-              />
-            </div>
+            ) : null}
           </div>
         </div>
       </div>
