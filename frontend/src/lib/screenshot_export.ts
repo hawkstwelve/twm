@@ -123,7 +123,11 @@ function waitForMapIdle(map: maplibregl.Map): Promise<void> {
 function defaultOverlayLines(state: ScreenshotExportState, legend?: LegendPayload | null): string[] {
   const model = state.model.trim() || "Model";
   const run = state.run.trim() || "Run";
-  const variableLabel = legend ? compactLegendTitle(legend) : state.variable.label.trim() || state.variable.key.trim() || "Variable";
+  const baseVariableLabel = state.variable.label.trim() || state.variable.key.trim() || "Variable";
+  const units = legend?.units?.trim();
+  const variableLabel = units && !baseVariableLabel.toLowerCase().includes(`(${units.toLowerCase()})`)
+    ? `${baseVariableLabel} (${units})`
+    : baseVariableLabel;
   return [`${model} • ${run} • FH ${state.fh}`, variableLabel];
 }
 
@@ -398,10 +402,10 @@ function drawBottomLegend(
       const sectionWidth = (contentWidth - gap * (rows.length - 1)) / rows.length;
       rows.forEach((row, index) => {
         const x = contentX + index * (sectionWidth + gap);
-        ctx.font = "700 9px system-ui, -apple-system, Segoe UI, sans-serif";
+        ctx.font = "700 10px system-ui, -apple-system, Segoe UI, sans-serif";
         drawLegendLabel(ctx, row.label.toUpperCase(), x, bandY + 16);
-        ctx.font = "600 10px system-ui, -apple-system, Segoe UI, sans-serif";
-        drawLegendLabel(ctx, `${formatLegendValue(row.min)}-${formatLegendValue(row.max)}`, x, bandY + 29);
+        ctx.font = "600 11px system-ui, -apple-system, Segoe UI, sans-serif";
+        drawLegendLabel(ctx, `${formatLegendValue(row.min)}-${formatLegendValue(row.max)}`, x, bandY + 31);
         fillHorizontalGradient(ctx, x, barY, sectionWidth, barHeight, row.colors);
         ctx.strokeStyle = "rgba(255,255,255,0.18)";
         ctx.stroke();
@@ -418,7 +422,7 @@ function drawBottomLegend(
       const sectionWidth = (contentWidth - gap * (groups.length - 1)) / groups.length;
       groups.forEach((group, groupIndex) => {
         const x = contentX + groupIndex * (sectionWidth + gap);
-        ctx.font = "700 9px system-ui, -apple-system, Segoe UI, sans-serif";
+        ctx.font = "700 10px system-ui, -apple-system, Segoe UI, sans-serif";
         drawLegendLabel(ctx, group.label.toUpperCase(), x, bandY + 16);
         const values = group.entries.slice().reverse();
         const swatchCount = Math.min(4, values.length);
@@ -430,8 +434,8 @@ function drawBottomLegend(
           ctx.fillStyle = entry.color;
           drawRoundedRect(ctx, swatchX, barY, swatchWidth, barHeight, 5);
           ctx.fill();
-          ctx.font = "600 9px system-ui, -apple-system, Segoe UI, sans-serif";
-          drawLegendLabel(ctx, formatLegendValue(entry.value), swatchX, bandY + 29);
+          ctx.font = "600 10px system-ui, -apple-system, Segoe UI, sans-serif";
+          drawLegendLabel(ctx, formatLegendValue(entry.value), swatchX, bandY + 31);
         }
       });
       ctx.restore();
@@ -452,13 +456,13 @@ function drawBottomLegend(
     Math.min(legend.entries.length - 1, Math.max(0, Math.round((legend.entries.length - 1) * ratio)))
   );
   const dedupedIndices = labelIndices.filter((value, index) => index === 0 || value !== labelIndices[index - 1]);
-  ctx.font = "600 10px system-ui, -apple-system, Segoe UI, sans-serif";
+  ctx.font = "600 11px system-ui, -apple-system, Segoe UI, sans-serif";
   dedupedIndices.forEach((entryIndex, index) => {
     const entry = legend.entries[entryIndex];
     const ratio = dedupedIndices.length === 1 ? 0 : index / (dedupedIndices.length - 1);
     const labelX = contentX + ratio * contentWidth;
     const align: CanvasTextAlign = index === 0 ? "left" : index === dedupedIndices.length - 1 ? "right" : "center";
-    drawLegendLabel(ctx, formatLegendValue(entry.value), labelX, bandY + 16, align);
+    drawLegendLabel(ctx, formatLegendValue(entry.value), labelX, bandY + 18, align);
   });
   ctx.restore();
 }
