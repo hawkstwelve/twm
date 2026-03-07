@@ -3540,7 +3540,6 @@ export default function App() {
                       <MapPin className="h-4 w-4 text-white/72" />
                       City Labels
                     </div>
-                    <div className="pt-0.5 text-[11px] text-white/56">Show sampled location labels.</div>
                   </div>
                   <div className={pointLabelsEnabled ? "text-xs font-semibold text-emerald-300" : "text-xs font-semibold text-white/42"}>
                     {pointLabelsEnabled ? "On" : "Off"}
@@ -3558,7 +3557,6 @@ export default function App() {
                       <Eye className="h-4 w-4 text-white/72" />
                       Legend
                     </div>
-                    <div className="pt-0.5 text-[11px] text-white/56">Toggle the scale and opacity panel.</div>
                   </div>
                   <div className={legendVisible ? "text-xs font-semibold text-emerald-300" : "text-xs font-semibold text-white/42"}>
                     {legendVisible ? "On" : "Off"}
@@ -3592,7 +3590,6 @@ export default function App() {
                       {basemapMode === "dark" ? <Moon className="h-4 w-4 text-white/72" /> : <Sun className="h-4 w-4 text-white/72" />}
                       Basemap
                     </div>
-                    <div className="pt-0.5 text-[11px] text-white/56">Switch between dark and light map styles.</div>
                   </div>
                   <div className="text-xs font-semibold text-emerald-300">
                     {basemapMode === "dark" ? "Dark" : "Light"}

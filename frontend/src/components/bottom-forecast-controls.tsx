@@ -118,14 +118,10 @@ export function BottomForecastControls({
           <div className="sm:hidden">
             <div className="mb-2 flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wider text-foreground/65">
-                  <Clock className="h-3 w-3" />
-                  Forecast Hour
-                </div>
                 {validTime ? (
-                  <div className="truncate pt-1 text-xs font-semibold text-foreground">{validTime.primary}</div>
+                  <div className="truncate text-xs font-semibold text-foreground">{validTime.primary}</div>
                 ) : (
-                  <div className="pt-1 text-[10px] text-muted-foreground">Valid time unavailable</div>
+                  <div className="text-[10px] text-muted-foreground">Valid time unavailable</div>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
@@ -135,9 +131,6 @@ export function BottomForecastControls({
                     {transientStatus}
                   </div>
                 ) : null}
-                <span className="font-mono text-xs font-semibold tabular-nums tracking-tight text-foreground/95">
-                  {forecastHour}h
-                </span>
               </div>
             </div>
 

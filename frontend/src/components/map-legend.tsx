@@ -246,7 +246,7 @@ export function MapLegend({
     return (
       <div
         ref={containerRef}
-        className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "right-3 top-32" : "right-4 top-36")}
+        className={cn("pointer-events-none fixed z-[55]", isSmallScreen ? "right-3 top-36" : "right-4 top-36")}
       >
         <UnavailablePlaceholder />
       </div>
@@ -269,7 +269,7 @@ export function MapLegend({
       className={cn(
         "fixed z-[55] flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
         showPrecipPtypeRows ? "w-[220px]" : "w-[120px]",
-        isSmallScreen ? "right-3 top-32 max-w-[min(72vw,220px)]" : "right-4 top-36"
+        isSmallScreen ? "right-3 top-36 max-w-[min(72vw,220px)]" : "right-4 top-36"
       )}
       role="complementary"
       aria-label="Map legend"
@@ -287,12 +287,9 @@ export function MapLegend({
         aria-expanded={!collapsed}
         aria-controls="legend-body"
       >
-        <div className="flex min-w-0 flex-col gap-0.5 overflow-hidden">
-          <span className="truncate text-sm font-semibold tracking-tight text-foreground/95">{legend.title}</span>
-          {legend.units && (
-            <span className="text-[10px] font-medium text-foreground/65">{legend.units}</span>
-          )}
-        </div>
+        <span className="truncate text-sm font-semibold tracking-tight text-foreground/95">
+          {legend.units ? `${legend.title} (${legend.units})` : legend.title}
+        </span>
         {collapsed ? (
           <ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform duration-150" />
         ) : (
