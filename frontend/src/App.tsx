@@ -754,7 +754,6 @@ export default function App() {
   const tierFailoverCycleRef = useRef<{ key: string; emitted: boolean }>({ key: "", emitted: false });
   const runsLoadedForModelRef = useRef<string>("");
   const mapInstanceRef = useRef<MapLibreMap | null>(null);
-  const legendContainerRef = useRef<HTMLDivElement | null>(null);
   const mapViewRef = useRef({
     lat: MAP_VIEW_DEFAULTS.center[0],
     lon: MAP_VIEW_DEFAULTS.center[1],
@@ -3500,7 +3499,7 @@ export default function App() {
           {basemapMode === "dark" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
 
-        <MapLegend legend={legend} onOpacityChange={setOpacity} containerRef={legendContainerRef} />
+        <MapLegend legend={legend} onOpacityChange={setOpacity} />
 
         <BottomForecastControls
           forecastHour={forecastHour}
@@ -3521,7 +3520,7 @@ export default function App() {
         onClose={() => setIsShareModalOpen(false)}
         payload={sharePayload}
         buildScreenshotState={buildScreenshotExportState}
-        getLegendElement={() => legendContainerRef.current}
+        getLegend={() => legend}
       />
     </div>
   );

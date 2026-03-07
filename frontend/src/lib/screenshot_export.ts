@@ -1,5 +1,5 @@
 import maplibregl from "maplibre-gl";
-import { toPng } from "html-to-image";
+import type { LegendPayload } from "@/components/map-legend";
 
 export type ScreenshotExportState = {
   style: any;
@@ -19,7 +19,7 @@ export type ScreenshotExportOptions = {
   width?: number;
   height?: number;
   pixelRatio?: number;
-  legendEl?: HTMLElement | null;
+  legend?: LegendPayload | null;
   overlayLines?: string[];
 };
 
@@ -32,16 +32,6 @@ const MAP_IDLE_TIMEOUT_MS = 15_000;
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
     window.setTimeout(resolve, ms);
-  });
-}
-
-function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.decoding = "async";
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Failed to load image for screenshot compositing."));
-    image.src = src;
   });
 }
 
@@ -167,124 +157,271 @@ function drawOverlay(
   ctx.restore();
 }
 
-function buildLegendExportClone(legendEl: HTMLElement): { host: HTMLDivElement; clone: HTMLElement } {
-  const rect = legendEl.getBoundingClientRect();
-  const host = document.createElement("div");
-  host.style.position = "fixed";
-  host.style.left = "-10000px";
-  host.style.top = "0";
-  host.style.pointerEvents = "none";
-  host.style.zIndex = "-1";
-  host.style.padding = "0";
-  host.style.margin = "0";
+type LegendEntry = LegendPayload["entries"][number];
+type RadarLegendGroup = {
+  label: string;
+  entries: LegendEntry[];
+};
+type PrecipPtypeLegendRow = {
+  label: string;
+  min: number;
+  max: number;
+  colors: string[];
+};
 
-  const clone = legendEl.cloneNode(true) as HTMLElement;
-  clone.style.position = "static";
-  clone.style.left = "auto";
-  clone.style.right = "auto";
-  clone.style.top = "auto";
-  clone.style.bottom = "auto";
-  clone.style.transform = "none";
-  clone.style.width = `${Math.max(120, Math.ceil(rect.width || legendEl.offsetWidth || 220))}px`;
-  clone.style.maxHeight = "none";
-  clone.style.height = "auto";
-  clone.style.overflow = "visible";
-  clone.style.backgroundColor = "rgba(0, 0, 0, 0.72)";
-  clone.style.border = "1px solid rgba(255, 255, 255, 0.14)";
-  clone.style.boxShadow = "0 8px 24px rgba(0, 0, 0, 0.32)";
-  clone.style.backdropFilter = "none";
-  clone.style.setProperty("-webkit-backdrop-filter", "none");
-  clone.style.setProperty("--foreground", "0 0% 95%");
-  clone.style.setProperty("--muted-foreground", "0 0% 62%");
-  clone.style.setProperty("--border", "0 0% 100%");
-  clone.style.setProperty("--secondary", "0 0% 100%");
-  clone.style.setProperty("--muted", "0 0% 100%");
+const RADAR_GROUP_LABELS = ["Rain", "Snow", "Sleet", "Freezing Rain"];
+const DEFAULT_PTYPE_ORDER = ["rain", "snow", "sleet", "frzr"];
 
-  const body = clone.querySelector<HTMLElement>("#legend-body");
-  if (body) {
-    body.style.gridTemplateRows = "1fr";
-    body.style.overflow = "visible";
-  }
-
-  const headerButton = clone.querySelector<HTMLButtonElement>("button[aria-controls='legend-body']");
-  if (headerButton) {
-    headerButton.setAttribute("aria-expanded", "true");
-  }
-
-  clone.querySelectorAll<HTMLElement>("*").forEach((node) => {
-    node.style.animation = "none";
-    node.style.transition = "none";
-    node.style.transform = "none";
-    node.style.filter = "none";
-    node.style.backdropFilter = "none";
-    node.style.setProperty("-webkit-backdrop-filter", "none");
-    node.style.textOverflow = "clip";
-    node.style.maxHeight = "none";
-
-    if (node.classList.contains("truncate")) {
-      node.style.whiteSpace = "normal";
-      node.style.overflow = "visible";
-    }
-
-    if (node.classList.contains("legend-scroll")) {
-      node.style.maxHeight = "none";
-      node.style.overflow = "visible";
-      node.style.scrollbarWidth = "none";
-    }
-  });
-
-  host.appendChild(clone);
-  document.body.appendChild(host);
-  return { host, clone };
+function formatLegendValue(value: number): string {
+  if (Number.isInteger(value)) return value.toString();
+  if (Math.abs(value) < 0.1) return value.toFixed(2);
+  return value.toFixed(1);
 }
 
-async function drawLegend(
+function radarGroupLabelForCode(code: string, index: number): string {
+  const normalized = code.toLowerCase();
+  if (normalized === "rain") return "Rain";
+  if (normalized === "snow") return "Snow";
+  if (normalized === "sleet") return "Sleet";
+  if (normalized === "frzr") return "Freezing Rain";
+  return RADAR_GROUP_LABELS[index] ?? `Type ${index + 1}`;
+}
+
+function isRadarPtypeLegend(legend: LegendPayload): boolean {
+  const kind = legend.kind?.toLowerCase() ?? "";
+  const id = legend.id?.toLowerCase() ?? "";
+  return (
+    kind.includes("radar_ptype") ||
+    kind.includes("radar_ptype_combo") ||
+    id.includes("radar") ||
+    id === "radar_ptype"
+  );
+}
+
+function isPrecipPtypeLegend(legend: LegendPayload): boolean {
+  const kind = legend.kind?.toLowerCase() ?? "";
+  const id = legend.id?.toLowerCase() ?? "";
+  return kind.includes("precip_ptype") || id === "precip_ptype";
+}
+
+function groupRadarEntries(legend: LegendPayload): RadarLegendGroup[] {
+  const isZero = (value: number) => Math.abs(value) < 1e-9;
+
+  if (legend.ptype_breaks) {
+    const orderedTypes = (
+      Array.isArray(legend.ptype_order) && legend.ptype_order.length > 0 ? legend.ptype_order : DEFAULT_PTYPE_ORDER
+    ).filter((ptype) => legend.ptype_breaks?.[ptype]);
+    const groupedByMeta: RadarLegendGroup[] = [];
+
+    for (let index = 0; index < orderedTypes.length; index += 1) {
+      const ptype = orderedTypes[index];
+      const boundary = legend.ptype_breaks?.[ptype];
+      if (!boundary) continue;
+      const offset = Number(boundary.offset);
+      const count = Number(boundary.count);
+      if (!Number.isFinite(offset) || !Number.isFinite(count) || offset < 0 || count <= 0) continue;
+      const slice = legend.entries.slice(offset, offset + count);
+      if (slice.length === 0) continue;
+      groupedByMeta.push({ label: radarGroupLabelForCode(ptype, index), entries: slice });
+    }
+
+    if (groupedByMeta.length > 0) {
+      return groupedByMeta;
+    }
+  }
+
+  const fallbackGroups: RadarLegendGroup[] = [];
+  let current: LegendEntry[] = [];
+  for (const entry of legend.entries) {
+    if (isZero(entry.value)) {
+      if (current.length > 0) {
+        fallbackGroups.push({
+          label: RADAR_GROUP_LABELS[fallbackGroups.length] ?? `Type ${fallbackGroups.length + 1}`,
+          entries: current,
+        });
+        current = [];
+      }
+      continue;
+    }
+    current.push(entry);
+  }
+
+  if (current.length > 0) {
+    fallbackGroups.push({
+      label: RADAR_GROUP_LABELS[fallbackGroups.length] ?? `Type ${fallbackGroups.length + 1}`,
+      entries: current,
+    });
+  }
+
+  return fallbackGroups;
+}
+
+function groupPrecipPtypeRows(legend: LegendPayload): PrecipPtypeLegendRow[] {
+  if (!legend.ptype_breaks) return [];
+  const orderedTypes = (Array.isArray(legend.ptype_order) && legend.ptype_order.length > 0 ? legend.ptype_order : [])
+    .filter((ptype) => legend.ptype_breaks?.[ptype]);
+  if (orderedTypes.length === 0) return [];
+
+  const rows: PrecipPtypeLegendRow[] = [];
+  for (let index = 0; index < orderedTypes.length; index += 1) {
+    const ptype = orderedTypes[index];
+    const boundary = legend.ptype_breaks[ptype];
+    const offset = Number(boundary.offset);
+    const count = Number(boundary.count);
+    if (!Number.isFinite(offset) || !Number.isFinite(count) || offset < 0 || count <= 0) continue;
+    const segment = legend.entries.slice(offset, offset + count);
+    if (segment.length === 0) continue;
+    const colors = segment.map((entry) => entry.color).filter(Boolean);
+    const min = Number(segment[0]?.value);
+    const max = Number(segment[segment.length - 1]?.value);
+    if (colors.length === 0 || !Number.isFinite(min) || !Number.isFinite(max)) continue;
+    rows.push({ label: radarGroupLabelForCode(ptype, index), min, max, colors });
+  }
+
+  return rows;
+}
+
+function fillHorizontalGradient(
   ctx: CanvasRenderingContext2D,
-  legendEl: HTMLElement,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  colors: string[]
+): void {
+  const gradient = ctx.createLinearGradient(x, 0, x + width, 0);
+  const steps = Math.max(1, colors.length - 1);
+  colors.forEach((color, index) => {
+    gradient.addColorStop(index / steps, color);
+  });
+  ctx.fillStyle = gradient;
+  drawRoundedRect(ctx, x, y, width, height, 8);
+  ctx.fill();
+}
+
+function drawLegendLabel(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  align: CanvasTextAlign = "left"
+): void {
+  ctx.textAlign = align;
+  ctx.textBaseline = "alphabetic";
+  ctx.fillStyle = "rgba(255,255,255,0.95)";
+  ctx.fillText(text, x, y);
+}
+
+function drawBottomLegend(
+  ctx: CanvasRenderingContext2D,
+  legend: LegendPayload,
   width: number,
   height: number,
   watermarkReserve: number
-): Promise<void> {
-  const { host, clone } = buildLegendExportClone(legendEl);
+): void {
+  const outerPadding = 18;
+  const bandHeight = 128;
+  const bandX = outerPadding;
+  const bandY = height - outerPadding - watermarkReserve - bandHeight;
+  const bandWidth = width - outerPadding * 2;
+  const contentX = bandX + 20;
+  const contentY = bandY + 18;
+  const contentWidth = bandWidth - 40;
+  const contentBottom = bandY + bandHeight - 16;
+  const barY = contentBottom - 26;
+  const sectionTop = contentY + 44;
 
-  try {
-    if ("fonts" in document) {
-      await document.fonts.ready;
-    }
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.66)";
+  drawRoundedRect(ctx, bandX, bandY, bandWidth, bandHeight, 16);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.12)";
+  ctx.lineWidth = 1;
+  ctx.stroke();
 
-    const legendDataUrl = await toPng(clone, {
-      cacheBust: true,
-      backgroundColor: "transparent",
-      pixelRatio: 2,
-    });
-    const legendImage = await loadImage(legendDataUrl);
+  ctx.font = "700 20px system-ui, -apple-system, Segoe UI, sans-serif";
+  drawLegendLabel(ctx, legend.title, contentX, contentY + 18);
 
-    const maxWidth = 520;
-    const maxHeight = 220;
-    const scale = Math.min(1, maxWidth / legendImage.width, maxHeight / legendImage.height);
-    const drawWidth = Math.max(1, Math.round(legendImage.width * scale));
-    const drawHeight = Math.max(1, Math.round(legendImage.height * scale));
-    const padding = 18;
-    const platePadding = 10;
-    const x = width - padding - drawWidth;
-    const y = height - padding - watermarkReserve - drawHeight;
-
-    ctx.save();
-    ctx.fillStyle = "rgba(0,0,0,0.55)";
-    drawRoundedRect(
-      ctx,
-      x - platePadding,
-      y - platePadding,
-      drawWidth + platePadding * 2,
-      drawHeight + platePadding * 2,
-      10
-    );
-    ctx.fill();
-    ctx.drawImage(legendImage, x, y, drawWidth, drawHeight);
-    ctx.restore();
-  } finally {
-    host.remove();
+  if (legend.units) {
+    ctx.font = "600 12px system-ui, -apple-system, Segoe UI, sans-serif";
+    drawLegendLabel(ctx, legend.units, contentX, contentY + 36);
   }
+
+  if (isPrecipPtypeLegend(legend)) {
+    const rows = groupPrecipPtypeRows(legend);
+    if (rows.length > 0) {
+      const gap = 14;
+      const sectionWidth = (contentWidth - gap * (rows.length - 1)) / rows.length;
+      rows.forEach((row, index) => {
+        const x = contentX + index * (sectionWidth + gap);
+        ctx.font = "700 11px system-ui, -apple-system, Segoe UI, sans-serif";
+        drawLegendLabel(ctx, row.label.toUpperCase(), x, sectionTop + 10);
+        ctx.font = "600 12px system-ui, -apple-system, Segoe UI, sans-serif";
+        drawLegendLabel(
+          ctx,
+          `${formatLegendValue(row.min)}-${formatLegendValue(row.max)}${legend.units ? ` ${legend.units}` : ""}`,
+          x,
+          sectionTop + 28
+        );
+        fillHorizontalGradient(ctx, x, barY, sectionWidth, 18, row.colors);
+        ctx.strokeStyle = "rgba(255,255,255,0.18)";
+        ctx.stroke();
+      });
+      ctx.restore();
+      return;
+    }
+  }
+
+  if (isRadarPtypeLegend(legend)) {
+    const groups = groupRadarEntries(legend);
+    if (groups.length > 0) {
+      const gap = 14;
+      const sectionWidth = (contentWidth - gap * (groups.length - 1)) / groups.length;
+      groups.forEach((group, groupIndex) => {
+        const x = contentX + groupIndex * (sectionWidth + gap);
+        ctx.font = "700 11px system-ui, -apple-system, Segoe UI, sans-serif";
+        drawLegendLabel(ctx, group.label.toUpperCase(), x, sectionTop + 10);
+        const values = group.entries.slice().reverse();
+        const swatchCount = Math.min(5, values.length);
+        const swatchGap = 8;
+        const swatchWidth = (sectionWidth - swatchGap * Math.max(0, swatchCount - 1)) / Math.max(1, swatchCount);
+        for (let index = 0; index < swatchCount; index += 1) {
+          const entry = values[Math.round((index / Math.max(1, swatchCount - 1)) * (values.length - 1))];
+          const swatchX = x + index * (swatchWidth + swatchGap);
+          ctx.fillStyle = entry.color;
+          drawRoundedRect(ctx, swatchX, barY, swatchWidth, 18, 6);
+          ctx.fill();
+          ctx.font = "600 10px system-ui, -apple-system, Segoe UI, sans-serif";
+          drawLegendLabel(ctx, formatLegendValue(entry.value), swatchX, barY - 6);
+        }
+      });
+      ctx.restore();
+      return;
+    }
+  }
+
+  if (legend.entries.length === 0) {
+    ctx.restore();
+    return;
+  }
+
+  fillHorizontalGradient(ctx, contentX, barY, contentWidth, 20, legend.entries.map((entry) => entry.color));
+  ctx.strokeStyle = "rgba(255,255,255,0.18)";
+  ctx.stroke();
+
+  const labelIndices = [0, 0.25, 0.5, 0.75, 1].map((ratio) =>
+    Math.min(legend.entries.length - 1, Math.max(0, Math.round((legend.entries.length - 1) * ratio)))
+  );
+  const dedupedIndices = labelIndices.filter((value, index) => index === 0 || value !== labelIndices[index - 1]);
+  ctx.font = "600 12px system-ui, -apple-system, Segoe UI, sans-serif";
+  dedupedIndices.forEach((entryIndex, index) => {
+    const entry = legend.entries[entryIndex];
+    const ratio = dedupedIndices.length === 1 ? 0 : index / (dedupedIndices.length - 1);
+    const labelX = contentX + ratio * contentWidth;
+    const align: CanvasTextAlign = index === 0 ? "left" : index === dedupedIndices.length - 1 ? "right" : "center";
+    drawLegendLabel(ctx, formatLegendValue(entry.value), labelX, barY - 8, align);
+  });
+  ctx.restore();
 }
 
 function drawWatermark(ctx: CanvasRenderingContext2D, width: number, height: number): void {
@@ -368,12 +505,8 @@ export async function exportViewerScreenshotPng(
     drawOverlay(outputCtx, overlayLines, width);
 
     const watermarkReserve = 34;
-    if (opts.legendEl) {
-      try {
-        await drawLegend(outputCtx, opts.legendEl, width, height, watermarkReserve);
-      } catch (error) {
-        console.warn("[screenshot] Legend capture failed; continuing without legend.", error);
-      }
+    if (opts.legend) {
+      drawBottomLegend(outputCtx, opts.legend, width, height, watermarkReserve);
     }
     drawWatermark(outputCtx, width, height);
 

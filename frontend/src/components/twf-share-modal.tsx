@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Copy, Download, ExternalLink, Image, Loader2, Send, X } from "lucide-react";
 
+import type { LegendPayload } from "@/components/map-legend";
 import { API_ORIGIN } from "@/lib/config";
 import { exportViewerScreenshotPng, type ScreenshotExportState } from "@/lib/screenshot_export";
 import { getSharePrefs, setSharePrefs, type SharePrefs } from "@/lib/share_prefs";
@@ -55,7 +56,7 @@ type TwfShareModalProps = {
   onClose: () => void;
   payload: SharePayload;
   buildScreenshotState?: () => ScreenshotExportState | null;
-  getLegendElement?: () => HTMLElement | null;
+  getLegend?: () => LegendPayload | null;
 };
 
 const QUICK_FORUMS: Array<{ id: number; label: string }> = [
@@ -285,7 +286,7 @@ export function TwfShareModal({
   onClose,
   payload,
   buildScreenshotState,
-  getLegendElement,
+  getLegend,
 }: TwfShareModalProps) {
   const initialSharePrefs = useMemo(() => getSharePrefs(), []);
   const wasOpenRef = useRef(false);
@@ -593,7 +594,7 @@ export function TwfShareModal({
     setScreenshotBusy(true);
     try {
       const blob = await exportViewerScreenshotPng(state, {
-        legendEl: getLegendElement?.() ?? null,
+        legend: getLegend?.() ?? null,
       });
       const objectUrl = URL.createObjectURL(blob);
       setScreenshotFilenameValue(screenshotFilename(state));
