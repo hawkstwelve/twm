@@ -336,6 +336,7 @@ export function TwfShareModal({
   const [screenshotKey, setScreenshotKey] = useState<string | null>(null);
   const [screenshotCopyStatus, setScreenshotCopyStatus] = useState<string | null>(null);
   const [includeScreenshotInPost, setIncludeScreenshotInPost] = useState(false);
+  const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
 
   const parsedTopicIdFromUrl = useMemo(() => parseTopicIdFromUrl(pastedTopicUrl), [pastedTopicUrl]);
   const pastedTopicUrlHasValue = pastedTopicUrl.trim().length > 0;
@@ -368,6 +369,38 @@ export function TwfShareModal({
     }
     return parsedTopicIdFromUrl ? "Custom topic URL" : null;
   }, [parsedTopicIdFromUrl, selectedTopicId, topics]);
+  const selectedForumLabel = useMemo(() => {
+    const quickForum = QUICK_FORUMS.find((forum) => forum.id === selectedForumId);
+    if (!showOtherForums && quickForum) {
+      return quickForum.label;
+    }
+    const customForum = forums.find((forum) => forum.id === selectedForumId);
+    return customForum?.path ?? customForum?.name ?? `Forum ${selectedForumId}`;
+  }, [forums, selectedForumId, showOtherForums]);
+  const postingTargetSummary = useMemo(() => {
+    if (shareMode === "new") {
+      const title = newTopicTitle.trim();
+      return title ? `New topic in ${selectedForumLabel}: ${title}` : `New topic in ${selectedForumLabel}`;
+    }
+    return selectedTopicTitle ? `${selectedTopicTitle} in ${selectedForumLabel}` : `Select a topic in ${selectedForumLabel}`;
+  }, [newTopicTitle, selectedForumLabel, selectedTopicTitle, shareMode]);
+  const screenshotStatus = useMemo(() => {
+    if (screenshotBusy) {
+      return "Generating screenshot...";
+    }
+    if (screenshotUploadBusy) {
+      return "Uploading screenshot...";
+    }
+    if (screenshotUrl) {
+      return includeScreenshotInPost ? "Screenshot ready to include" : "Screenshot ready but excluded";
+    }
+    if (screenshotBlobUrl) {
+      return "Screenshot generated locally";
+    }
+    return "No screenshot prepared";
+  }, [includeScreenshotInPost, screenshotBlobUrl, screenshotBusy, screenshotUploadBusy, screenshotUrl]);
+  const canPrepareScreenshot = Boolean(buildScreenshotState);
+  const postButtonDisabled = submitBusy || screenshotBusy || screenshotUploadBusy;
 
   useEffect(() => {
     if (!open) {
@@ -409,6 +442,7 @@ export function TwfShareModal({
     setScreenshotKey(null);
     setScreenshotCopyStatus(null);
     setIncludeScreenshotInPost(false);
+    setShowAdvancedOptions(false);
     setScreenshotBlobUrl((previous) => {
       if (previous) {
         URL.revokeObjectURL(previous);
@@ -595,17 +629,22 @@ export function TwfShareModal({
     return () => controller.abort();
   }, [open, twfStatus, selectedForumId]);
 
-  const handleGenerateScreenshot = async () => {
+  const generateScreenshot = async (): Promise<{
+    blob: Blob;
+    blobUrl: string;
+    filename: string;
+    state: ScreenshotExportState;
+  } | null> => {
     setScreenshotError(null);
     if (!buildScreenshotState) {
       setScreenshotError("Screenshot export is unavailable right now.");
-      return;
+      return null;
     }
 
     const state = buildScreenshotState();
     if (!state) {
       setScreenshotError("Map is still loading. Try again in a moment.");
-      return;
+      return null;
     }
 
     setScreenshotBusy(true);
@@ -614,9 +653,10 @@ export function TwfShareModal({
         legend: getLegend?.() ?? null,
       });
       const objectUrl = URL.createObjectURL(blob);
+      const filename = screenshotFilename(state);
       setScreenshotBlob(blob);
       setScreenshotStateSnapshot(state);
-      setScreenshotFilenameValue(screenshotFilename(state));
+      setScreenshotFilenameValue(filename);
       setScreenshotUploadError(null);
       setScreenshotUrl(null);
       setScreenshotKey(null);
@@ -628,14 +668,25 @@ export function TwfShareModal({
         }
         return objectUrl;
       });
+      return {
+        blob,
+        blobUrl: objectUrl,
+        filename,
+        state,
+      };
     } catch (error) {
       const message = error instanceof Error && error.message
         ? error.message
         : "Screenshot generation failed.";
       setScreenshotError(message);
+      return null;
     } finally {
       setScreenshotBusy(false);
     }
+  };
+
+  const handleGenerateScreenshot = async () => {
+    await generateScreenshot();
   };
 
   const handleDownloadScreenshot = () => {
@@ -651,10 +702,18 @@ export function TwfShareModal({
     link.remove();
   };
 
-  const handleUploadScreenshot = async () => {
-    if (!screenshotBlob) {
+  const uploadScreenshot = async (options?: {
+    blob?: Blob | null;
+    filename?: string | null;
+    state?: ScreenshotExportState | null;
+  }) => {
+    const blob = options?.blob ?? screenshotBlob;
+    const filename = options?.filename ?? screenshotFilenameValue;
+    const state = options?.state ?? screenshotStateSnapshot;
+
+    if (!blob) {
       setScreenshotUploadError("Generate a screenshot before uploading.");
-      return;
+      return false;
     }
 
     setScreenshotUploadBusy(true);
@@ -665,25 +724,56 @@ export function TwfShareModal({
 
     try {
       const result = await uploadShareMedia({
-        blob: screenshotBlob,
-        filename: screenshotFilenameValue,
-        model: screenshotStateSnapshot?.model ?? null,
-        run: screenshotStateSnapshot?.run ?? null,
-        fh: screenshotStateSnapshot?.fh ?? null,
-        variable: screenshotStateSnapshot?.variable.key || screenshotStateSnapshot?.variable.label || null,
-        region: screenshotStateSnapshot?.region?.id ?? null,
+        blob,
+        filename,
+        model: state?.model ?? null,
+        run: state?.run ?? null,
+        fh: state?.fh ?? null,
+        variable: state?.variable.key || state?.variable.label || null,
+        region: state?.region?.id ?? null,
       });
       setScreenshotUrl(result.url);
       setScreenshotKey(result.key);
       setIncludeScreenshotInPost(true);
+      return true;
     } catch (error) {
       const message = error instanceof Error && error.message
         ? error.message
         : "Screenshot upload failed.";
       setScreenshotUploadError(message);
+      return false;
     } finally {
       setScreenshotUploadBusy(false);
     }
+  };
+
+  const handleUploadScreenshot = async () => {
+    await uploadScreenshot();
+  };
+
+  const handlePrepareScreenshot = async () => {
+    if (screenshotBusy || screenshotUploadBusy) {
+      return;
+    }
+    if (screenshotUrl) {
+      setIncludeScreenshotInPost(true);
+      return;
+    }
+    const generated = screenshotBlob
+      ? {
+          blob: screenshotBlob,
+          filename: screenshotFilenameValue,
+          state: screenshotStateSnapshot,
+        }
+      : await generateScreenshot();
+    if (!generated) {
+      return;
+    }
+    await uploadScreenshot({
+      blob: generated.blob,
+      filename: generated.filename,
+      state: generated.state,
+    });
   };
 
   const handleCopyImageUrl = async () => {
@@ -850,139 +940,6 @@ export function TwfShareModal({
 
         <div className="min-h-0 space-y-4 overflow-y-auto px-4 py-4">
           <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/65">Share Preview</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  void handleCopy("link");
-                }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copy link
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleCopy("summary");
-                }}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
-              >
-                <Copy className="h-3.5 w-3.5" />
-                Copy summary
-              </button>
-              {clipboardStatus ? <span className="text-xs text-emerald-200/90">{clipboardStatus}</span> : null}
-            </div>
-            <div className="mt-2 text-xs text-white/65">
-              <div className="line-clamp-2">{payload.summary}</div>
-              <div className="mt-1 truncate text-white/60">{payload.permalink}</div>
-            </div>
-          </div>
-
-          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
-            <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-white/65">Include Screenshot</div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  void handleGenerateScreenshot();
-                }}
-                disabled={screenshotBusy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
-              >
-                {screenshotBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Image className="h-3.5 w-3.5" />}
-                {screenshotBusy ? "Generating..." : "Generate Screenshot"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleUploadScreenshot();
-                }}
-                disabled={!screenshotBlob || screenshotBusy || screenshotUploadBusy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
-              >
-                {screenshotUploadBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
-                {screenshotUploadBusy ? "Uploading..." : "Upload Screenshot"}
-              </button>
-              <button
-                type="button"
-                onClick={handleDownloadScreenshot}
-                disabled={!screenshotBlobUrl || screenshotBusy}
-                className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
-              >
-                <Download className="h-3.5 w-3.5" />
-                Download PNG
-              </button>
-              <span className="text-[11px] text-white/55">1600x900 PNG export</span>
-            </div>
-            {screenshotError ? (
-              <div className="mt-2 rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-xs text-red-100">
-                {screenshotError}
-              </div>
-            ) : null}
-            {screenshotUploadError ? (
-              <div className="mt-2 rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-xs text-red-100">
-                {screenshotUploadError}
-              </div>
-            ) : null}
-            {screenshotBlobUrl ? (
-              <div className="mt-3 space-y-3">
-                <div className="overflow-hidden rounded-lg border border-white/10 bg-black/30">
-                  <img
-                    src={screenshotBlobUrl}
-                    alt="Screenshot preview"
-                    className="max-h-[32dvh] w-full object-contain sm:max-h-[38dvh]"
-                  />
-                </div>
-                {screenshotUrl ? (
-                  <div className="space-y-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3">
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-emerald-50/90">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Screenshot uploaded
-                    </div>
-                    <a
-                      href={screenshotUrl}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="block truncate text-sm text-emerald-50 underline decoration-emerald-200/30 underline-offset-2 hover:text-white"
-                    >
-                      {screenshotUrl}
-                    </a>
-                    {screenshotKey ? <div className="text-[11px] text-emerald-100/80">Key: {screenshotKey}</div> : null}
-                    <div className="flex flex-wrap items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void handleCopyImageUrl();
-                        }}
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200/25 bg-black/20 px-2.5 text-xs font-medium text-emerald-50 hover:bg-black/30"
-                      >
-                        <Copy className="h-3.5 w-3.5" />
-                        Copy Image URL
-                      </button>
-                      <a
-                        href={screenshotUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200/25 bg-black/20 px-2.5 text-xs font-medium text-emerald-50 hover:bg-black/30"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Open Image
-                      </a>
-                      {screenshotCopyStatus ? <span className="text-xs text-emerald-50/90">{screenshotCopyStatus}</span> : null}
-                    </div>
-                  </div>
-                ) : null}
-              </div>
-            ) : (
-              <div className="mt-2 text-xs text-white/55">Generate a screenshot to preview and download it.</div>
-            )}
-          </div>
-
-          <div className="h-px bg-white/10" aria-hidden="true" />
-
-          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
             <div className="mb-3 text-xs font-semibold uppercase tracking-wider text-white/65">
               Post to The Weather Forums
             </div>
@@ -1038,6 +995,209 @@ export function TwfShareModal({
               </div>
             ) : (
               <div className="space-y-4">
+                <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Posting target</div>
+                      <div className="mt-1 text-sm text-white">{postingTargetSummary}</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Screenshot</div>
+                      <div className="mt-1 text-sm text-white">{screenshotStatus}</div>
+                    </div>
+                    <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Summary</div>
+                      <div className="mt-1 text-sm text-white">Ready</div>
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleSubmitPost();
+                      }}
+                      disabled={postButtonDisabled}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200/35 bg-[linear-gradient(to_top_right,#244238_0%,#5f7f6f_100%)] px-3 text-sm font-semibold text-emerald-50 shadow-[0_0_12px_rgba(94,164,135,0.16)] hover:brightness-110 disabled:opacity-60 disabled:hover:brightness-100"
+                    >
+                      {submitBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                      {submitBusy ? "Posting..." : "Share to TWF"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handlePrepareScreenshot();
+                      }}
+                      disabled={!canPrepareScreenshot || screenshotBusy || screenshotUploadBusy}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-3 text-sm font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
+                    >
+                      {screenshotBusy || screenshotUploadBusy ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Image className="h-3.5 w-3.5" />
+                      )}
+                      {screenshotUrl ? "Screenshot Ready" : "Prepare Screenshot"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedOptions((current) => !current)}
+                      className="inline-flex h-9 items-center rounded-md border border-white/15 bg-black/25 px-3 text-sm font-medium text-white/85 hover:bg-black/35"
+                    >
+                      {showAdvancedOptions ? "Hide options" : "Advanced options"}
+                    </button>
+                  </div>
+                  <div className="mt-2 text-xs text-white/55">
+                    Remembers your last forum/topic. Permalink is added automatically below the summary.
+                  </div>
+                </div>
+
+                {submitError ? (
+                  <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                    <div>{submitError.message}</div>
+                    {submitError.code ? <div className="mt-0.5 text-[11px] opacity-90">Code: {submitError.code}</div> : null}
+                    {retryAfterSeconds ? <div className="mt-0.5 text-[11px] opacity-90">Try again in {retryAfterSeconds}s.</div> : null}
+                  </div>
+                ) : null}
+                {screenshotError ? (
+                  <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                    {screenshotError}
+                  </div>
+                ) : null}
+                {screenshotUploadError ? (
+                  <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
+                    {screenshotUploadError}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Share preview</div>
+                <div className="mt-1 line-clamp-2 text-sm text-white/85">{payload.summary}</div>
+                <div className="mt-1 truncate text-xs text-white/55">{payload.permalink}</div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleCopy("link");
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy link
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void handleCopy("summary");
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+                >
+                  <Copy className="h-3.5 w-3.5" />
+                  Copy summary
+                </button>
+              </div>
+            </div>
+            {clipboardStatus ? <div className="mt-2 text-xs text-emerald-200/90">{clipboardStatus}</div> : null}
+          </div>
+
+          {screenshotBlobUrl ? (
+            <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-white/65">Screenshot Preview</div>
+                  <div className="mt-1 text-xs text-white/55">{screenshotStatus}</div>
+                </div>
+                {screenshotUrl ? (
+                  <label className="flex items-center gap-2 rounded-md border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/80">
+                    <input
+                      type="checkbox"
+                      checked={includeScreenshotInPost}
+                      onChange={(event) => setIncludeScreenshotInPost(event.target.checked)}
+                      className="h-4 w-4 rounded border-white/20 bg-black/30 text-emerald-400 focus:ring-emerald-300/40"
+                    />
+                    <span>Include in post</span>
+                  </label>
+                ) : null}
+              </div>
+              {screenshotError ? (
+                <div className="mb-2 rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-xs text-red-100">
+                  {screenshotError}
+                </div>
+              ) : null}
+              {screenshotUploadError ? (
+                <div className="mb-2 rounded-md border border-red-400/25 bg-red-500/10 px-2 py-1.5 text-xs text-red-100">
+                  {screenshotUploadError}
+                </div>
+              ) : null}
+              <div className="overflow-hidden rounded-lg border border-white/10 bg-black/30">
+                <img
+                  src={screenshotBlobUrl}
+                  alt="Screenshot preview"
+                  className="max-h-[30dvh] w-full object-contain sm:max-h-[34dvh]"
+                />
+              </div>
+              {screenshotUrl ? (
+                <div className="mt-3 space-y-2 rounded-lg border border-emerald-300/20 bg-emerald-400/10 px-3 py-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-emerald-50/90">
+                    <CheckCircle2 className="h-4 w-4" />
+                    Screenshot uploaded
+                  </div>
+                  <a
+                    href={screenshotUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block truncate text-sm text-emerald-50 underline decoration-emerald-200/30 underline-offset-2 hover:text-white"
+                  >
+                    {screenshotUrl}
+                  </a>
+                  {screenshotKey ? <div className="text-[11px] text-emerald-100/80">Key: {screenshotKey}</div> : null}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleCopyImageUrl();
+                      }}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200/25 bg-black/20 px-2.5 text-xs font-medium text-emerald-50 hover:bg-black/30"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                      Copy Image URL
+                    </button>
+                    <a
+                      href={screenshotUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-emerald-200/25 bg-black/20 px-2.5 text-xs font-medium text-emerald-50 hover:bg-black/30"
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                      Open Image
+                    </a>
+                    {screenshotCopyStatus ? <span className="text-xs text-emerald-50/90">{screenshotCopyStatus}</span> : null}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-white/10 bg-white/[0.04] p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wider text-white/65">Advanced Options</div>
+                <div className="mt-1 text-xs text-white/55">Change destination, edit summary, or manage screenshot tools.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvancedOptions((current) => !current)}
+                className="inline-flex h-8 items-center rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+              >
+                {showAdvancedOptions ? "Hide" : "Show"}
+              </button>
+            </div>
+            {showAdvancedOptions ? (
+              <div className="mt-4 space-y-4">
                 <div className="grid gap-2">
                   <div>
                     <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Share mode</div>
@@ -1157,7 +1317,7 @@ export function TwfShareModal({
                           onClick={() => setShowAdvancedTopic((current) => !current)}
                           className="mt-2 text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
                         >
-                          {showAdvancedTopic ? "Advanced ▾" : "Advanced ▸"}
+                          {showAdvancedTopic ? "Topic tools ▾" : "Topic tools ▸"}
                         </button>
                       </div>
 
@@ -1207,81 +1367,78 @@ export function TwfShareModal({
                       </div>
                     </div>
                   )}
+                </div>
 
-                  <div>
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Summary text</div>
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Screenshot tools</div>
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
-                      onClick={handleMessageToggle}
-                      className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
+                      onClick={() => {
+                        void handleGenerateScreenshot();
+                      }}
+                      disabled={screenshotBusy}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
                     >
-                      {isMessageExpanded ? "Customize summary ▾" : "Customize summary ▸"}
+                      {screenshotBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Image className="h-3.5 w-3.5" />}
+                      {screenshotBusy ? "Generating..." : "Generate Screenshot"}
                     </button>
-                    {isMessageExpanded ? (
-                      <div className="mt-1 space-y-1.5">
-                        <textarea
-                          value={content}
-                          onChange={(event) => handleMessageChange(event.target.value)}
-                          rows={6}
-                          className="w-full rounded-md border border-white/15 bg-black/35 px-2 py-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleResetMessage}
-                          className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
-                        >
-                          Reset to default summary
-                        </button>
-                      </div>
-                    ) : null}
-                    <div className="mt-1 text-[11px] text-white/55">
-                      The permalink is added automatically below the summary. Uploaded screenshots are included separately.
-                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void handleUploadScreenshot();
+                      }}
+                      disabled={!screenshotBlob || screenshotBusy || screenshotUploadBusy}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
+                    >
+                      {screenshotUploadBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <ExternalLink className="h-3.5 w-3.5" />}
+                      {screenshotUploadBusy ? "Uploading..." : "Upload Screenshot"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadScreenshot}
+                      disabled={!screenshotBlobUrl || screenshotBusy}
+                      className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      Download PNG
+                    </button>
                   </div>
+                  <div className="mt-1 text-[11px] text-white/55">1600x900 PNG export. Prepare Screenshot above runs generation and upload in sequence.</div>
                 </div>
 
-                {screenshotUrl ? (
-                  <label className="flex items-center gap-2 rounded-md border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/80">
-                    <input
-                      type="checkbox"
-                      checked={includeScreenshotInPost}
-                      onChange={(event) => setIncludeScreenshotInPost(event.target.checked)}
-                      className="h-4 w-4 rounded border-white/20 bg-black/30 text-emerald-400 focus:ring-emerald-300/40"
-                    />
-                    <span>Include screenshot in post</span>
-                  </label>
-                ) : null}
-
-                {submitError ? (
-                  <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
-                    <div>{submitError.message}</div>
-                    {submitError.code ? <div className="mt-0.5 text-[11px] opacity-90">Code: {submitError.code}</div> : null}
-                    {retryAfterSeconds ? <div className="mt-0.5 text-[11px] opacity-90">Try again in {retryAfterSeconds}s.</div> : null}
-                  </div>
-                ) : null}
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-xs text-white/60">
-                    {shareMode === "new"
-                      ? `Creating a new topic in forum ${selectedForumId}`
-                      : selectedTopicTitle
-                        ? `Posting in: ${selectedTopicTitle}`
-                        : "Select a topic to post"}
-                  </div>
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Summary text</div>
                   <button
                     type="button"
-                    onClick={() => {
-                      void handleSubmitPost();
-                    }}
-                    disabled={submitBusy}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-md border border-emerald-200/35 bg-[linear-gradient(to_top_right,#244238_0%,#5f7f6f_100%)] px-3 text-sm font-semibold text-emerald-50 shadow-[0_0_12px_rgba(94,164,135,0.16)] hover:brightness-110 disabled:opacity-60 disabled:hover:brightness-100"
+                    onClick={handleMessageToggle}
+                    className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
                   >
-                    {submitBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                    {submitBusy ? "Posting..." : shareMode === "new" ? "Create Topic on TWF" : "Post to TWF"}
+                    {isMessageExpanded ? "Customize summary ▾" : "Customize summary ▸"}
                   </button>
+                  {isMessageExpanded ? (
+                    <div className="mt-1 space-y-1.5">
+                      <textarea
+                        value={content}
+                        onChange={(event) => handleMessageChange(event.target.value)}
+                        rows={6}
+                        className="w-full rounded-md border border-white/15 bg-black/35 px-2 py-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleResetMessage}
+                        className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
+                      >
+                        Reset to default summary
+                      </button>
+                    </div>
+                  ) : null}
+                  <div className="mt-1 text-[11px] text-white/55">
+                    The permalink is added automatically below the summary. Uploaded screenshots are included separately.
+                  </div>
                 </div>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
       </div>
