@@ -7,7 +7,6 @@ import {
   MapPin,
   Send,
   SlidersHorizontal,
-  X,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -63,8 +62,9 @@ function ToolbarSelect(props: {
   placeholder: string;
   grouped?: boolean;
   triggerClassName?: string;
+  hideLabel?: boolean;
 }) {
-  const { label, icon: Icon, value, onValueChange, options, disabled, placeholder, grouped, triggerClassName } = props;
+  const { label, icon: Icon, value, onValueChange, options, disabled, placeholder, grouped, triggerClassName, hideLabel = false } = props;
   const selectedLabel = options.find((opt) => opt.value === value)?.label ?? placeholder;
 
   let content: ReactNode;
@@ -122,10 +122,12 @@ function ToolbarSelect(props: {
 
   return (
     <div className="flex flex-col gap-1">
-      <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
-        <Icon className="h-3 w-3 opacity-70" />
-        {label}
-      </span>
+      {!hideLabel ? (
+        <span className="flex items-center gap-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+          <Icon className="h-3 w-3 opacity-70" />
+          {label}
+        </span>
+      ) : null}
       <Select value={value} onValueChange={onValueChange} disabled={disabled || options.length === 0}>
         <SelectTrigger
           className={cn(
@@ -224,7 +226,6 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     onPostToTwf,
   } = props;
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
-  const [desktopPanelOpen, setDesktopPanelOpen] = useState(false);
 
   const selectedModelLabel = models.find((opt) => opt.value === model)?.label ?? "Model";
   const selectedVariableLabel = variables.find((opt) => opt.value === variable)?.label ?? "Variable";
@@ -237,87 +238,55 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
     <header role="toolbar" aria-label="Weather model controls" className="fixed top-[4.35rem] z-50 w-full px-3 sm:px-4">
       <div className="hidden sm:block">
         <div className="flex items-start">
-          <div className="relative">
-            {desktopPanelOpen ? (
-              <div className="glass-strong absolute left-0 top-full mt-3 w-[min(560px,calc(100vw-2rem))] rounded-2xl border border-white/12 px-3 py-3 shadow-[0_22px_44px_rgba(0,0,0,0.36)]">
-                <div className="mb-3 flex items-start justify-end">
-                  <button
-                    type="button"
-                    onClick={() => setDesktopPanelOpen(false)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/18 text-white/72 transition-all duration-150 hover:bg-black/28 hover:text-white"
-                    aria-label="Close controls"
-                    title="Close controls"
-                  >
-                    <X className="h-4 w-4" />
-                  </button>
-                </div>
+          <div className="glass-strong inline-flex items-center gap-2 rounded-full border border-white/12 px-3 py-2.5 shadow-[0_18px_40px_rgba(0,0,0,0.34)]">
+            <ToolbarSelect
+              label="Region"
+              icon={MapPin}
+              value={region}
+              onValueChange={onRegionChange}
+              options={regions}
+              disabled={disabled}
+              placeholder="Region"
+              hideLabel
+              triggerClassName="min-w-[132px] max-w-[132px] rounded-full border-white/10 bg-white/8 px-3"
+            />
 
-                <div className="grid grid-cols-2 gap-2.5">
-                  <ToolbarSelect
-                    label="Region"
-                    icon={MapPin}
-                    value={region}
-                    onValueChange={onRegionChange}
-                    options={regions}
-                    disabled={disabled}
-                    placeholder="Region"
-                    triggerClassName="min-w-0"
-                  />
+            <ToolbarSelect
+              label="Model"
+              icon={Boxes}
+              value={model}
+              onValueChange={onModelChange}
+              options={models}
+              disabled={disabled}
+              placeholder="Model"
+              hideLabel
+              triggerClassName="min-w-[118px] max-w-[118px] rounded-full border-white/10 bg-white/8 px-3"
+            />
 
-                  <ToolbarSelect
-                    label="Model"
-                    icon={Boxes}
-                    value={model}
-                    onValueChange={onModelChange}
-                    options={models}
-                    disabled={disabled}
-                    placeholder="Model"
-                    triggerClassName="min-w-0"
-                  />
+            <ToolbarSelect
+              label="Run"
+              icon={CalendarClock}
+              value={run}
+              onValueChange={onRunChange}
+              options={runs}
+              disabled={disabled}
+              placeholder="Run"
+              hideLabel
+              triggerClassName="min-w-[126px] max-w-[126px] rounded-full border-white/10 bg-white/8 px-3"
+            />
 
-                  <ToolbarSelect
-                    label="Run"
-                    icon={CalendarClock}
-                    value={run}
-                    onValueChange={onRunChange}
-                    options={runs}
-                    disabled={disabled}
-                    placeholder="Run"
-                    triggerClassName="min-w-0"
-                  />
-
-                  <ToolbarSelect
-                    label="Variable"
-                    icon={Layers}
-                    value={variable}
-                    onValueChange={onVariableChange}
-                    options={variables}
-                    disabled={disabled}
-                    placeholder="Variable"
-                    grouped
-                    triggerClassName="min-w-0"
-                  />
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setDesktopPanelOpen(true)}
-                className="glass-strong inline-flex items-center gap-3 rounded-full border border-white/12 px-4 py-2.5 text-left shadow-[0_18px_40px_rgba(0,0,0,0.34)] transition-all duration-150 hover:bg-white/10"
-                aria-expanded={desktopPanelOpen}
-                aria-label="Open controls"
-              >
-                <div className="flex items-center gap-2 text-[12px] text-white/72">
-                  <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5">{region.toUpperCase()}</span>
-                  <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5">{selectedModelLabel}</span>
-                  <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5">{selectedRunLabel}</span>
-                  <span className="max-w-[240px] truncate rounded-full border border-white/10 bg-white/8 px-2 py-0.5">
-                    {selectedVariableLabel}
-                  </span>
-                </div>
-                <ChevronDown className="h-4 w-4 text-white/72" />
-              </button>
-            )}
+            <ToolbarSelect
+              label="Variable"
+              icon={Layers}
+              value={variable}
+              onValueChange={onVariableChange}
+              options={variables}
+              disabled={disabled}
+              placeholder="Variable"
+              grouped
+              hideLabel
+              triggerClassName="min-w-[248px] max-w-[248px] rounded-full border-white/10 bg-white/8 px-3"
+            />
           </div>
         </div>
       </div>
