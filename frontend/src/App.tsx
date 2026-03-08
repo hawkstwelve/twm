@@ -3314,6 +3314,9 @@ export default function App() {
     }
     const center = map.getCenter();
     const zoom = map.getZoom();
+    const container = map.getContainer();
+    const viewportWidth = container.clientWidth;
+    const viewportHeight = container.clientHeight;
     if (!Number.isFinite(center.lng) || !Number.isFinite(center.lat) || !Number.isFinite(zoom)) {
       return null;
     }
@@ -3324,6 +3327,8 @@ export default function App() {
       zoom,
       bearing: map.getBearing(),
       pitch: map.getPitch(),
+      viewportWidth,
+      viewportHeight,
       model: selectedModelLabel || model || "Model",
       run: selectedRunLabel || run || "Run",
       variable: {

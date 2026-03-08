@@ -7,6 +7,8 @@ export type ScreenshotExportState = {
   zoom: number;
   bearing?: number;
   pitch?: number;
+  viewportWidth?: number;
+  viewportHeight?: number;
   model: string;
   run: string;
   variable: { key: string; label: string };
@@ -498,8 +500,16 @@ export async function exportViewerScreenshotPng(
     throw new Error("Screenshot export is only available in browser environments.");
   }
 
-  const width = Number.isFinite(opts.width) ? Math.max(1, Math.round(Number(opts.width))) : DEFAULT_WIDTH;
-  const height = Number.isFinite(opts.height) ? Math.max(1, Math.round(Number(opts.height))) : DEFAULT_HEIGHT;
+  const width = Number.isFinite(opts.width)
+    ? Math.max(1, Math.round(Number(opts.width)))
+    : Number.isFinite(state.viewportWidth)
+      ? Math.max(1, Math.round(Number(state.viewportWidth)))
+      : DEFAULT_WIDTH;
+  const height = Number.isFinite(opts.height)
+    ? Math.max(1, Math.round(Number(opts.height)))
+    : Number.isFinite(state.viewportHeight)
+      ? Math.max(1, Math.round(Number(state.viewportHeight)))
+      : DEFAULT_HEIGHT;
   const pixelRatio = Number.isFinite(opts.pixelRatio)
     ? Math.max(1, Number(opts.pixelRatio))
     : DEFAULT_PIXEL_RATIO;
