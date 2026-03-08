@@ -118,7 +118,10 @@ async def test_twf_share_post_rate_limited_returns_retry_after(
         _sess: twf_oauth.TwfSession,
         topic_id: int,
         content: str,
+        *,
+        content_format: str = "plain",
     ) -> dict[str, object]:
+        assert content_format == "plain"
         return {"id": 11, "url": "https://example.com/post/11", "topic": {"id": topic_id}}
 
     monkeypatch.setattr(main_module.twf_oauth, "get_session", lambda _sid: sess)
@@ -142,4 +145,124 @@ async def test_twf_share_post_rate_limited_returns_retry_after(
     payload = limited_response.json()
     assert payload == {
         "error": {"code": "RATE_LIMITED", "message": "Too many requests. Try again shortly."}
+    }
+
+
+async def test_twf_share_post_structured_payload_builds_html(
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sess = twf_oauth.TwfSession(
+        session_id="sid-structured-post",
+        member_id=1,
+        display_name="tester",
+        photo_url=None,
+        access_token="token",
+        refresh_token="refresh",
+        expires_at=9999999999,
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_create_post(
+        _sess: twf_oauth.TwfSession,
+        topic_id: int,
+        content: str,
+        *,
+        content_format: str = "plain",
+    ) -> dict[str, object]:
+        captured["topic_id"] = topic_id
+        captured["content"] = content
+        captured["content_format"] = content_format
+        return {"id": 22, "url": "https://example.com/post/22", "topic": {"id": topic_id}}
+
+    monkeypatch.setattr(main_module.twf_oauth, "get_session", lambda _sid: sess)
+    monkeypatch.setattr(main_module.twf_oauth, "create_post", fake_create_post)
+    client.cookies.set(twf_oauth.SESSION_COOKIE_NAME, sess.session_id)
+
+    response = await client.post(
+        "/twf/share/post",
+        json={
+            "topic_id": 10,
+            "summary": "HRRR snowfall outlook",
+            "permalink": "https://theweathermodels.com/viewer?model=hrrr",
+            "image_url": "https://cdn.theweathermodels.com/share/example.png",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "topic_id": 10,
+        "content_format": "html",
+        "content": (
+            "HRRR snowfall outlook"
+            "<br><br>"
+            '<img src="https://cdn.theweathermodels.com/share/example.png" alt="Model screenshot">'
+            "<br><br>"
+            '<a href="https://theweathermodels.com/viewer?model=hrrr" rel="nofollow noopener" target="_blank">'
+            "https://theweathermodels.com/viewer?model=hrrr"
+            "</a>"
+        ),
+    }
+
+
+async def test_twf_share_topic_structured_payload_builds_html_without_image(
+    client: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sess = twf_oauth.TwfSession(
+        session_id="sid-structured-topic",
+        member_id=1,
+        display_name="tester",
+        photo_url=None,
+        access_token="token",
+        refresh_token="refresh",
+        expires_at=9999999999,
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_create_topic(
+        _sess: twf_oauth.TwfSession,
+        forum_id: int,
+        title: str,
+        content: str,
+        *,
+        content_format: str = "plain",
+    ) -> dict[str, object]:
+        captured["forum_id"] = forum_id
+        captured["title"] = title
+        captured["content"] = content
+        captured["content_format"] = content_format
+        return {
+            "id": 33,
+            "url": "https://example.com/topic/33",
+            "forum": {"id": forum_id},
+            "title": title,
+        }
+
+    monkeypatch.setattr(main_module.twf_oauth, "get_session", lambda _sid: sess)
+    monkeypatch.setattr(main_module.twf_oauth, "create_topic", fake_create_topic)
+    client.cookies.set(twf_oauth.SESSION_COOKIE_NAME, sess.session_id)
+
+    response = await client.post(
+        "/twf/share/topic",
+        json={
+            "forum_id": 4,
+            "title": "Structured share topic",
+            "summary": "GFS summary",
+            "permalink": "https://theweathermodels.com/viewer?model=gfs",
+        },
+    )
+
+    assert response.status_code == 200
+    assert captured == {
+        "forum_id": 4,
+        "title": "Structured share topic",
+        "content_format": "html",
+        "content": (
+            "GFS summary"
+            "<br><br>"
+            '<a href="https://theweathermodels.com/viewer?model=gfs" rel="nofollow noopener" target="_blank">'
+            "https://theweathermodels.com/viewer?model=gfs"
+            "</a>"
+        ),
     }

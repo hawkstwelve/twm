@@ -12,7 +12,7 @@ import sqlite3
 import time
 from dataclasses import dataclass
 from typing import Any, NoReturn, Optional, Tuple
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import httpx
 from cryptography.fernet import Fernet
@@ -434,7 +434,22 @@ async def ensure_fresh_tokens(sess: TwfSession) -> TwfSession:
     upsert_session(sess)
     return sess
 
-async def create_topic(sess: TwfSession, forum_id: int, title: str, content: str) -> dict[str, Any]:
+def _content_to_ips_html(content: str, *, content_format: str) -> str:
+    if content_format == "html":
+        return content
+    if content_format == "plain":
+        return _plain_text_to_ips_html(content)
+    raise ValueError(f"Unsupported content format: {content_format}")
+
+
+async def create_topic(
+    sess: TwfSession,
+    forum_id: int,
+    title: str,
+    content: str,
+    *,
+    content_format: str = "plain",
+) -> dict[str, Any]:
     sess = await ensure_fresh_tokens(sess)
     headers = _auth_headers(sess.access_token)
 
@@ -442,7 +457,7 @@ async def create_topic(sess: TwfSession, forum_id: int, title: str, content: str
     data = {
         "forum": str(forum_id),
         "title": title,
-        "post": content,
+        "post": _content_to_ips_html(content, content_format=content_format),
     }
 
     base = API_CREATE_TOPIC
@@ -479,14 +494,57 @@ def _plain_text_to_ips_html(content: str) -> str:
 
     return url_pattern.sub(_replace, with_breaks)
 
-async def create_post(sess: TwfSession, topic_id: int, content: str) -> dict[str, Any]:
+
+def _validated_external_url(raw_value: str, *, field_name: str) -> str:
+    value = raw_value.strip()
+    if not value:
+        raise ValueError(f"{field_name} is required.")
+    parsed = urlsplit(value)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError(f"{field_name} must be an absolute http(s) URL.")
+    return value
+
+
+def build_twf_share_html(
+    *,
+    summary: str,
+    permalink: str,
+    image_url: str | None = None,
+) -> str:
+    summary_text = summary.strip()
+    if not summary_text:
+        raise ValueError("Summary is required.")
+
+    permalink_value = _validated_external_url(permalink, field_name="Permalink")
+    blocks = [html.escape(summary_text, quote=False)]
+
+    if isinstance(image_url, str) and image_url.strip():
+        image_value = _validated_external_url(image_url, field_name="Image URL")
+        image_src = html.escape(image_value, quote=True)
+        blocks.append(f'<img src="{image_src}" alt="Model screenshot">')
+
+    permalink_attr = html.escape(permalink_value, quote=True)
+    permalink_text = html.escape(permalink_value, quote=False)
+    blocks.append(
+        f'<a href="{permalink_attr}" rel="nofollow noopener" target="_blank">{permalink_text}</a>'
+    )
+
+    return "<br><br>".join(blocks)
+
+async def create_post(
+    sess: TwfSession,
+    topic_id: int,
+    content: str,
+    *,
+    content_format: str = "plain",
+) -> dict[str, Any]:
     sess = await ensure_fresh_tokens(sess)
     headers = _auth_headers(sess.access_token)
 
     # Match create_topic(): form-encoded, not JSON
     data = {
         "topic": str(topic_id),
-        "post": _plain_text_to_ips_html(content),
+        "post": _content_to_ips_html(content, content_format=content_format),
     }
 
     base = API_CREATE_POST

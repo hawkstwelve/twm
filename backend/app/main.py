@@ -32,7 +32,7 @@ from PIL import Image, ImageFilter
 from pyproj import Transformer
 from rasterio.enums import Resampling
 from rasterio.windows import Window
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .config.regions import REGION_PRESETS
 from .models.registry import list_model_capabilities
@@ -931,24 +931,77 @@ async def twf_topics(
 class ShareTopicIn(BaseModel):
     forum_id: int = Field(..., ge=1)
     title: str = Field(..., min_length=1, max_length=255)
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str | None = Field(None, min_length=1, max_length=5000)
+    summary: str | None = Field(None, min_length=1, max_length=5000)
+    permalink: str | None = Field(None, min_length=1, max_length=4096)
+    image_url: str | None = Field(None, min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def validate_share_payload(self) -> "ShareTopicIn":
+        has_content = isinstance(self.content, str) and bool(self.content.strip())
+        has_summary = isinstance(self.summary, str) and bool(self.summary.strip())
+        has_permalink = isinstance(self.permalink, str) and bool(self.permalink.strip())
+        has_image = isinstance(self.image_url, str) and bool(self.image_url.strip())
+        if has_content or (has_summary and has_permalink):
+            return self
+        if has_summary or has_permalink or has_image:
+            raise ValueError("Summary and permalink are required.")
+        raise ValueError("Content is required.")
+
+
+def _twf_share_body_from_request(
+    *,
+    content: str | None,
+    summary: str | None,
+    permalink: str | None,
+    image_url: str | None,
+) -> tuple[str, str]:
+    summary_value = summary.strip() if isinstance(summary, str) else ""
+    permalink_value = permalink.strip() if isinstance(permalink, str) else ""
+    image_value = image_url.strip() if isinstance(image_url, str) else ""
+
+    if summary_value or permalink_value or image_value:
+        if not summary_value:
+            raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message="Summary is required.")
+        if not permalink_value:
+            raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message="Permalink is required.")
+        try:
+            return (
+                twf_oauth.build_twf_share_html(
+                summary=summary_value,
+                permalink=permalink_value,
+                image_url=image_value or None,
+                ),
+                "html",
+            )
+        except ValueError as exc:
+            raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message=str(exc)) from exc
+
+    content_value = content.strip() if isinstance(content, str) else ""
+    if not content_value:
+        raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message="Content is required.")
+    return content_value, "plain"
 
 
 @app.post("/twf/share/topic")
 async def twf_share_topic(request: Request, body: ShareTopicIn) -> dict[str, Any]:
     sess = _require_twf_session(request)
     title = body.title.strip()
-    content = body.content.strip()
+    content, content_format = _twf_share_body_from_request(
+        content=body.content,
+        summary=body.summary,
+        permalink=body.permalink,
+        image_url=body.image_url,
+    )
     if not title:
         raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message="Title is required.")
-    if not content:
-        raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message="Content is required.")
 
     topic = await twf_oauth.create_topic(
         sess,
         forum_id=body.forum_id,
         title=title,
         content=content,
+        content_format=content_format,
     )
 
     # IPS returns a big object; return only what the frontend actually needs.
@@ -974,20 +1027,39 @@ async def twf_share_topic(request: Request, body: ShareTopicIn) -> dict[str, Any
 
 class SharePostIn(BaseModel):
     topic_id: int = Field(..., ge=1)
-    content: str = Field(..., min_length=1, max_length=5000)
+    content: str | None = Field(None, min_length=1, max_length=5000)
+    summary: str | None = Field(None, min_length=1, max_length=5000)
+    permalink: str | None = Field(None, min_length=1, max_length=4096)
+    image_url: str | None = Field(None, min_length=1, max_length=4096)
+
+    @model_validator(mode="after")
+    def validate_share_payload(self) -> "SharePostIn":
+        has_content = isinstance(self.content, str) and bool(self.content.strip())
+        has_summary = isinstance(self.summary, str) and bool(self.summary.strip())
+        has_permalink = isinstance(self.permalink, str) and bool(self.permalink.strip())
+        has_image = isinstance(self.image_url, str) and bool(self.image_url.strip())
+        if has_content or (has_summary and has_permalink):
+            return self
+        if has_summary or has_permalink or has_image:
+            raise ValueError("Summary and permalink are required.")
+        raise ValueError("Content is required.")
 
 
 @app.post("/twf/share/post")
 async def twf_share_post(request: Request, body: SharePostIn) -> dict[str, Any]:
     sess = _require_twf_session(request)
-    content = body.content.strip()
-    if not content:
-        raise TwfApiError(status_code=400, code="TWF_VALIDATION_ERROR", message="Content is required.")
+    content, content_format = _twf_share_body_from_request(
+        content=body.content,
+        summary=body.summary,
+        permalink=body.permalink,
+        image_url=body.image_url,
+    )
 
     post = await twf_oauth.create_post(
         sess,
         topic_id=body.topic_id,
         content=content,
+        content_format=content_format,
     )
 
     post_id = post.get("id")

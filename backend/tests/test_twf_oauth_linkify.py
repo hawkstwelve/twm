@@ -43,3 +43,50 @@ def test_plain_text_to_ips_html_preserves_line_breaks_as_br() -> None:
     content = "first line\nsecond line\r\nthird line"
     rendered = twf_oauth._plain_text_to_ips_html(content)
     assert rendered == "first line<br>second line<br>third line"
+
+
+def test_build_twf_share_html_renders_summary_image_and_permalink() -> None:
+    rendered = twf_oauth.build_twf_share_html(
+        summary='HRRR <b>Snow</b> outlook',
+        permalink="https://theweathermodels.com/viewer?model=hrrr&run=20260308_00z",
+        image_url="https://cdn.theweathermodels.com/share/2026/03/08/example.png",
+    )
+
+    assert rendered == (
+        "HRRR &lt;b&gt;Snow&lt;/b&gt; outlook"
+        "<br><br>"
+        '<img src="https://cdn.theweathermodels.com/share/2026/03/08/example.png" alt="Model screenshot">'
+        "<br><br>"
+        '<a href="https://theweathermodels.com/viewer?model=hrrr&amp;run=20260308_00z" '
+        'rel="nofollow noopener" target="_blank">'
+        "https://theweathermodels.com/viewer?model=hrrr&amp;run=20260308_00z"
+        "</a>"
+    )
+
+
+def test_build_twf_share_html_omits_image_block_when_not_provided() -> None:
+    rendered = twf_oauth.build_twf_share_html(
+        summary="GFS update",
+        permalink="https://theweathermodels.com/viewer?model=gfs",
+    )
+
+    assert '<img src="' not in rendered
+    assert rendered == (
+        "GFS update"
+        "<br><br>"
+        '<a href="https://theweathermodels.com/viewer?model=gfs" rel="nofollow noopener" target="_blank">'
+        "https://theweathermodels.com/viewer?model=gfs"
+        "</a>"
+    )
+
+
+def test_build_twf_share_html_rejects_non_http_urls() -> None:
+    try:
+        twf_oauth.build_twf_share_html(
+            summary="Bad link",
+            permalink="javascript:alert(1)",
+        )
+    except ValueError as exc:
+        assert str(exc) == "Permalink must be an absolute http(s) URL."
+    else:
+        raise AssertionError("Expected ValueError for invalid permalink")

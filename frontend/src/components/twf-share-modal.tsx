@@ -335,6 +335,7 @@ export function TwfShareModal({
   const [screenshotUrl, setScreenshotUrl] = useState<string | null>(null);
   const [screenshotKey, setScreenshotKey] = useState<string | null>(null);
   const [screenshotCopyStatus, setScreenshotCopyStatus] = useState<string | null>(null);
+  const [includeScreenshotInPost, setIncludeScreenshotInPost] = useState(false);
 
   const parsedTopicIdFromUrl = useMemo(() => parseTopicIdFromUrl(pastedTopicUrl), [pastedTopicUrl]);
   const pastedTopicUrlHasValue = pastedTopicUrl.trim().length > 0;
@@ -353,8 +354,8 @@ export function TwfShareModal({
   }, [topics, topicSearch]);
 
   const defaultContent = useMemo(() => {
-    return `${payload.summary}\n${payload.permalink}`;
-  }, [payload.permalink, payload.summary]);
+    return payload.summary;
+  }, [payload.summary]);
   const defaultTopicTitle = useMemo(() => payload.summary.trim().slice(0, 255), [payload.summary]);
   const selectedTopicTitle = useMemo(() => {
     const topicId = parsedTopicIdFromUrl ?? selectedTopicId;
@@ -407,6 +408,7 @@ export function TwfShareModal({
     setScreenshotUrl(null);
     setScreenshotKey(null);
     setScreenshotCopyStatus(null);
+    setIncludeScreenshotInPost(false);
     setScreenshotBlobUrl((previous) => {
       if (previous) {
         URL.revokeObjectURL(previous);
@@ -619,6 +621,7 @@ export function TwfShareModal({
       setScreenshotUrl(null);
       setScreenshotKey(null);
       setScreenshotCopyStatus(null);
+      setIncludeScreenshotInPost(false);
       setScreenshotBlobUrl((previous) => {
         if (previous) {
           URL.revokeObjectURL(previous);
@@ -672,6 +675,7 @@ export function TwfShareModal({
       });
       setScreenshotUrl(result.url);
       setScreenshotKey(result.key);
+      setIncludeScreenshotInPost(true);
     } catch (error) {
       const message = error instanceof Error && error.message
         ? error.message
@@ -707,12 +711,12 @@ export function TwfShareModal({
       setSubmitError({ message: "Connect your TWF account before posting." });
       return;
     }
-    const resolvedContent = (hasExpandedMessageEditor ? content : defaultContent).trim();
-    const trimmedContent = resolvedContent;
-    if (!trimmedContent) {
-      setSubmitError({ message: "Post content is required." });
+    const resolvedSummary = (hasExpandedMessageEditor ? content : defaultContent).trim();
+    if (!resolvedSummary) {
+      setSubmitError({ message: "Summary is required." });
       return;
     }
+    const resolvedImageUrl = includeScreenshotInPost && screenshotUrl ? screenshotUrl : null;
 
     setSubmitBusy(true);
     try {
@@ -730,7 +734,9 @@ export function TwfShareModal({
           body: JSON.stringify({
             forum_id: selectedForumId,
             title: trimmedTitle,
-            content: trimmedContent,
+            summary: resolvedSummary,
+            permalink: payload.permalink,
+            image_url: resolvedImageUrl,
           }),
         });
       } else {
@@ -744,7 +750,9 @@ export function TwfShareModal({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             topic_id: Number(effectiveTopicId),
-            content: trimmedContent,
+            summary: resolvedSummary,
+            permalink: payload.permalink,
+            image_url: resolvedImageUrl,
           }),
         });
       }
@@ -1201,13 +1209,13 @@ export function TwfShareModal({
                   )}
 
                   <div>
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Post content</div>
+                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Summary text</div>
                     <button
                       type="button"
                       onClick={handleMessageToggle}
                       className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
                     >
-                      {isMessageExpanded ? "Customize message ▾" : "Customize message ▸"}
+                      {isMessageExpanded ? "Customize summary ▾" : "Customize summary ▸"}
                     </button>
                     {isMessageExpanded ? (
                       <div className="mt-1 space-y-1.5">
@@ -1222,12 +1230,27 @@ export function TwfShareModal({
                           onClick={handleResetMessage}
                           className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
                         >
-                          Reset to default
+                          Reset to default summary
                         </button>
                       </div>
                     ) : null}
+                    <div className="mt-1 text-[11px] text-white/55">
+                      The permalink is added automatically below the summary. Uploaded screenshots are included separately.
+                    </div>
                   </div>
                 </div>
+
+                {screenshotUrl ? (
+                  <label className="flex items-center gap-2 rounded-md border border-white/10 bg-black/20 px-2.5 py-2 text-xs text-white/80">
+                    <input
+                      type="checkbox"
+                      checked={includeScreenshotInPost}
+                      onChange={(event) => setIncludeScreenshotInPost(event.target.checked)}
+                      className="h-4 w-4 rounded border-white/20 bg-black/30 text-emerald-400 focus:ring-emerald-300/40"
+                    />
+                    <span>Include screenshot in post</span>
+                  </label>
+                ) : null}
 
                 {submitError ? (
                   <div className="rounded-lg border border-red-400/25 bg-red-500/10 px-3 py-2 text-xs text-red-100">
