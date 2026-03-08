@@ -336,6 +336,8 @@ export function TwfShareModal({
   const [screenshotKey, setScreenshotKey] = useState<string | null>(null);
   const [includeScreenshotInPost, setIncludeScreenshotInPost] = useState(false);
   const [showAdvancedOptions, setShowAdvancedOptions] = useState(false);
+  const [showDestinationEditor, setShowDestinationEditor] = useState(false);
+  const [showSummaryEditor, setShowSummaryEditor] = useState(false);
 
   const parsedTopicIdFromUrl = useMemo(() => parseTopicIdFromUrl(pastedTopicUrl), [pastedTopicUrl]);
   const pastedTopicUrlHasValue = pastedTopicUrl.trim().length > 0;
@@ -464,8 +466,10 @@ export function TwfShareModal({
     setScreenshotUploadError(null);
     setScreenshotUrl(null);
     setScreenshotKey(null);
-    setIncludeScreenshotInPost(false);
+    setIncludeScreenshotInPost(true);
     setShowAdvancedOptions(false);
+    setShowDestinationEditor(false);
+    setShowSummaryEditor(false);
     setScreenshotBlobUrl((previous) => {
       if (previous) {
         URL.revokeObjectURL(previous);
@@ -683,7 +687,7 @@ export function TwfShareModal({
       setScreenshotUploadError(null);
       setScreenshotUrl(null);
       setScreenshotKey(null);
-      setIncludeScreenshotInPost(false);
+      setIncludeScreenshotInPost(true);
       setScreenshotBlobUrl((previous) => {
         if (previous) {
           URL.revokeObjectURL(previous);
@@ -728,14 +732,14 @@ export function TwfShareModal({
     blob?: Blob | null;
     filename?: string | null;
     state?: ScreenshotExportState | null;
-  }) => {
+  }): Promise<string | null> => {
     const blob = options?.blob ?? screenshotBlob;
     const filename = options?.filename ?? screenshotFilenameValue;
     const state = options?.state ?? screenshotStateSnapshot;
 
     if (!blob) {
       setScreenshotUploadError("Generate a screenshot before uploading.");
-      return false;
+      return null;
     }
 
     setScreenshotUploadBusy(true);
@@ -756,13 +760,13 @@ export function TwfShareModal({
       setScreenshotUrl(result.url);
       setScreenshotKey(result.key);
       setIncludeScreenshotInPost(true);
-      return true;
+      return result.url;
     } catch (error) {
       const message = error instanceof Error && error.message
         ? error.message
         : "Screenshot upload failed.";
       setScreenshotUploadError(message);
-      return false;
+      return null;
     } finally {
       setScreenshotUploadBusy(false);
     }
@@ -797,6 +801,34 @@ export function TwfShareModal({
     });
   };
 
+  const ensurePreparedScreenshot = async (): Promise<string | null> => {
+    if (!includeScreenshotInPost) {
+      return null;
+    }
+    if (screenshotUrl) {
+      return screenshotUrl;
+    }
+    if (screenshotBusy || screenshotUploadBusy) {
+      return null;
+    }
+    const generated = screenshotBlob
+      ? {
+          blob: screenshotBlob,
+          filename: screenshotFilenameValue,
+          state: screenshotStateSnapshot,
+        }
+      : await generateScreenshot();
+    if (!generated) {
+      return null;
+    }
+    const uploadedUrl = await uploadScreenshot({
+      blob: generated.blob,
+      filename: generated.filename,
+      state: generated.state,
+    });
+    return uploadedUrl;
+  };
+
   const handleCopy = async (kind: "link" | "summary") => {
     const text = kind === "link" ? payload.permalink : payload.summary;
     const ok = await writeClipboard(text);
@@ -819,10 +851,17 @@ export function TwfShareModal({
       setSubmitError({ message: "Summary is required." });
       return;
     }
-    const resolvedImageUrl = includeScreenshotInPost && screenshotUrl ? screenshotUrl : null;
 
     setSubmitBusy(true);
     try {
+      let resolvedImageUrl: string | null = null;
+      if (includeScreenshotInPost) {
+        resolvedImageUrl = await ensurePreparedScreenshot();
+        if (!resolvedImageUrl) {
+          setSubmitError({ message: screenshotUploadError || screenshotError || "Screenshot preparation failed." });
+          return;
+        }
+      }
       let response: Response;
       if (shareMode === "new") {
         const trimmedTitle = newTopicTitle.trim();
@@ -1011,39 +1050,254 @@ export function TwfShareModal({
                 <div className="rounded-xl border border-white/10 bg-black/20 p-3">
                   <div className="space-y-2">
                     <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/10 text-[11px] font-semibold text-emerald-100">
-                          1
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/10 text-[11px] font-semibold text-emerald-100">
+                            1
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Where to post</div>
+                            <div className="mt-1 text-sm text-white">{postingTargetSummary}</div>
+                            <div className="mt-1 text-xs text-white/55">{destinationStepLabel}</div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Where to post</div>
-                          <div className="mt-1 text-sm text-white">{postingTargetSummary}</div>
-                          <div className="mt-1 text-xs text-white/55">{destinationStepLabel}</div>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setShowDestinationEditor((current) => !current)}
+                          className="inline-flex h-8 shrink-0 items-center rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+                        >
+                          {showDestinationEditor ? "Done" : "Edit"}
+                        </button>
                       </div>
+                      {showDestinationEditor ? (
+                        <div className="mt-3 grid gap-2 border-t border-white/10 pt-3">
+                          <div>
+                            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Share mode</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => setShareMode("existing")}
+                                className={[
+                                  "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                                  shareMode === "existing"
+                                    ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                                    : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                                ].join(" ")}
+                              >
+                                Existing topic
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setShareMode("new")}
+                                className={[
+                                  "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                                  shareMode === "new"
+                                    ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                                    : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                                ].join(" ")}
+                              >
+                                New topic
+                              </button>
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Choose forum</div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              {QUICK_FORUMS.map((forum) => (
+                                <button
+                                  key={forum.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedForumId(forum.id);
+                                    setShowOtherForums(false);
+                                  }}
+                                  className={[
+                                    "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                                    selectedForumId === forum.id && !showOtherForums
+                                      ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                                      : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                                  ].join(" ")}
+                                >
+                                  {forum.label}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => setShowOtherForums((current) => !current)}
+                                className={[
+                                  "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
+                                  showOtherForums
+                                    ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
+                                    : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
+                                ].join(" ")}
+                              >
+                                Other forum...
+                              </button>
+                            </div>
+                            {showOtherForums ? (
+                              <div className="mt-2 space-y-1">
+                                {forumsLoading ? (
+                                  <div className="text-xs text-white/65">Loading forums...</div>
+                                ) : forums.length > 0 ? (
+                                  <select
+                                    value={String(selectedForumId)}
+                                    onChange={(event) => setSelectedForumId(Number(event.target.value))}
+                                    className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                                  >
+                                    {forums.map((forum) => (
+                                      <option key={forum.id} value={String(forum.id)}>
+                                        {(forum.path ?? forum.name) + ` (ID ${forum.id})`}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <div className="text-xs text-white/65">No accessible forums found.</div>
+                                )}
+                                {forumsError ? <div className="text-xs text-red-200">{forumsError}</div> : null}
+                              </div>
+                            ) : null}
+                          </div>
+
+                          {shareMode === "existing" ? (
+                            <div>
+                              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic</div>
+                              {topicsLoading ? (
+                                <div className="flex items-center gap-2 text-xs text-white/70">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Loading topics...
+                                </div>
+                              ) : topicOptions.length > 0 ? (
+                                <select
+                                  value={selectedTopicId !== null ? String(selectedTopicId) : ""}
+                                  onChange={(event) => setSelectedTopicId(Number(event.target.value))}
+                                  className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                                >
+                                  {topicOptions.map((topic) => (
+                                    <option key={topic.id} value={String(topic.id)}>
+                                      {(topic.pinned ? "[PIN] " : "") + topic.title}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <div className="text-xs text-white/65">No topics loaded for this forum.</div>
+                              )}
+                              {topicsError ? <div className="mt-1 text-xs text-red-200">{topicsError}</div> : null}
+                            </div>
+                          ) : (
+                            <div>
+                              <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic title</div>
+                              <input
+                                value={newTopicTitle}
+                                onChange={(event) => setNewTopicTitle(event.target.value)}
+                                maxLength={255}
+                                placeholder="Enter a topic title"
+                                className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                              />
+                              <div className="mt-1 text-[11px] text-white/55">New topic will be posted in the selected forum.</div>
+                            </div>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/10 text-[11px] font-semibold text-emerald-100">
-                          2
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/10 text-[11px] font-semibold text-emerald-100">
+                            2
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Screenshot</div>
+                            <div className="mt-1 text-sm text-white">{screenshotStepLabel}</div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Screenshot</div>
-                          <div className="mt-1 text-sm text-white">{screenshotStepLabel}</div>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void handlePrepareScreenshot();
+                          }}
+                          disabled={!canPrepareScreenshot || screenshotBusy || screenshotUploadBusy}
+                          className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
+                        >
+                          {screenshotBusy || screenshotUploadBusy ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Image className="h-3.5 w-3.5" />
+                          )}
+                          {screenshotUrl ? "Refresh" : "Prepare"}
+                        </button>
                       </div>
+                      {screenshotUrl ? (
+                        <div className="mt-3 flex items-center justify-between gap-2 border-t border-white/10 pt-3">
+                          <label className="flex items-center gap-2 text-xs text-white/80">
+                            <input
+                              type="checkbox"
+                              checked={includeScreenshotInPost}
+                              onChange={(event) => setIncludeScreenshotInPost(event.target.checked)}
+                              className="h-4 w-4 rounded border-white/20 bg-black/30 text-emerald-400 focus:ring-emerald-300/40"
+                            />
+                            <span>Include screenshot in post</span>
+                          </label>
+                          <button
+                            type="button"
+                            onClick={handleDownloadScreenshot}
+                            disabled={!screenshotBlobUrl || screenshotBusy}
+                            className="inline-flex h-8 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
+                          >
+                            <Download className="h-3.5 w-3.5" />
+                            Download PNG
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                     <div className="rounded-lg border border-white/10 bg-white/[0.03] px-3 py-2">
-                      <div className="flex items-start gap-3">
-                        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/10 text-[11px] font-semibold text-emerald-100">
-                          3
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-emerald-300/30 bg-emerald-400/10 text-[11px] font-semibold text-emerald-100">
+                            3
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Summary</div>
+                            <div className="mt-1 line-clamp-2 text-sm text-white">{currentSummaryPreview}</div>
+                            <div className="mt-1 text-xs text-white/55">Permalink is added automatically below the summary.</div>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <div className="text-[11px] font-semibold uppercase tracking-wider text-white/45">Summary</div>
-                          <div className="mt-1 line-clamp-2 text-sm text-white">{currentSummaryPreview}</div>
-                          <div className="mt-1 text-xs text-white/55">Permalink is added automatically below the summary.</div>
-                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowSummaryEditor((current) => {
+                              const next = !current;
+                              if (next) {
+                                setHasExpandedMessageEditor(true);
+                                setIsMessageExpanded(true);
+                              } else {
+                                setIsMessageExpanded(false);
+                              }
+                              return next;
+                            });
+                          }}
+                          className="inline-flex h-8 shrink-0 items-center rounded-md border border-white/15 bg-black/25 px-2.5 text-xs font-medium text-white hover:bg-black/35"
+                        >
+                          {showSummaryEditor ? "Done" : "Edit"}
+                        </button>
                       </div>
+                      {showSummaryEditor ? (
+                        <div className="mt-3 space-y-1.5 border-t border-white/10 pt-3">
+                          <textarea
+                            value={content}
+                            onChange={(event) => handleMessageChange(event.target.value)}
+                            rows={6}
+                            className="w-full rounded-md border border-white/15 bg-black/35 px-2 py-2 text-xs text-white outline-none focus:border-emerald-300/40"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleResetMessage}
+                            className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
+                          >
+                            Reset to default summary
+                          </button>
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1060,21 +1314,6 @@ export function TwfShareModal({
                     </button>
                     <button
                       type="button"
-                      onClick={() => {
-                        void handlePrepareScreenshot();
-                      }}
-                      disabled={!canPrepareScreenshot || screenshotBusy || screenshotUploadBusy}
-                      className="inline-flex h-9 items-center gap-1.5 rounded-md border border-white/15 bg-black/25 px-3 text-sm font-medium text-white hover:bg-black/35 disabled:opacity-60 disabled:hover:bg-black/25"
-                    >
-                      {screenshotBusy || screenshotUploadBusy ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Image className="h-3.5 w-3.5" />
-                      )}
-                      {screenshotUrl ? "Update Screenshot" : "Prepare Screenshot"}
-                    </button>
-                    <button
-                      type="button"
                       onClick={() => setShowAdvancedOptions((current) => !current)}
                       className="inline-flex h-9 items-center rounded-md border border-white/15 bg-black/25 px-3 text-sm font-medium text-white/85 hover:bg-black/35"
                     >
@@ -1082,7 +1321,7 @@ export function TwfShareModal({
                     </button>
                   </div>
                   <div className="mt-2 text-xs text-white/55">
-                    Common path: prepare a screenshot if you want one, then share to TWF. Your last forum/topic choice is remembered.
+                    Common path: confirm the destination, prepare a screenshot if needed, then share to TWF. Screenshot inclusion is on by default.
                   </div>
                 </div>
 
@@ -1160,7 +1399,7 @@ export function TwfShareModal({
             <div className="flex items-center justify-between gap-2">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wider text-white/65">Advanced Options</div>
-                <div className="mt-1 text-xs text-white/55">Change destination, edit summary, or manage screenshot tools.</div>
+                <div className="mt-1 text-xs text-white/55">Power-user tools for topic search, pasted URLs, and manual screenshot controls.</div>
               </div>
               <button
                 type="button"
@@ -1172,179 +1411,53 @@ export function TwfShareModal({
             </div>
             {showAdvancedOptions ? (
               <div className="mt-4 space-y-4">
-                <div className="grid gap-2">
-                  <div>
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Share mode</div>
-                    <div className="flex flex-wrap items-center gap-2">
+                {shareMode === "existing" ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold uppercase tracking-wider text-white/80">Topic tools</div>
                       <button
                         type="button"
-                        onClick={() => setShareMode("existing")}
-                        className={[
-                          "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                          shareMode === "existing"
-                            ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
-                            : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
-                        ].join(" ")}
+                        onClick={() => setShowAdvancedTopic((current) => !current)}
+                        className="text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
                       >
-                        Existing topic
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setShareMode("new")}
-                        className={[
-                          "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                          shareMode === "new"
-                            ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
-                            : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
-                        ].join(" ")}
-                      >
-                        New topic
+                        {showAdvancedTopic ? "Hide tools ▾" : "Show tools ▸"}
                       </button>
                     </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Choose forum</div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      {QUICK_FORUMS.map((forum) => (
-                        <button
-                          key={forum.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedForumId(forum.id);
-                            setShowOtherForums(false);
-                          }}
-                          className={[
-                            "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                            selectedForumId === forum.id && !showOtherForums
-                              ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
-                              : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
-                          ].join(" ")}
-                        >
-                          {forum.label}
-                        </button>
-                      ))}
-                      <button
-                        type="button"
-                        onClick={() => setShowOtherForums((current) => !current)}
-                        className={[
-                          "inline-flex h-8 items-center rounded-md border px-2.5 text-xs font-medium",
-                          showOtherForums
-                            ? "border-emerald-300/35 bg-emerald-400/20 text-emerald-50"
-                            : "border-white/15 bg-black/25 text-white/80 hover:bg-black/35",
-                        ].join(" ")}
-                      >
-                        Other forum...
-                      </button>
-                    </div>
-                    {showOtherForums ? (
-                      <div className="mt-2 space-y-1">
-                        {forumsLoading ? (
-                          <div className="text-xs text-white/65">Loading forums...</div>
-                        ) : forums.length > 0 ? (
-                          <select
-                            value={String(selectedForumId)}
-                            onChange={(event) => setSelectedForumId(Number(event.target.value))}
-                            className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                          >
-                            {forums.map((forum) => (
-                              <option key={forum.id} value={String(forum.id)}>
-                                {(forum.path ?? forum.name) + ` (ID ${forum.id})`}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <div className="text-xs text-white/65">No accessible forums found.</div>
-                        )}
-                        {forumsError ? <div className="text-xs text-red-200">{forumsError}</div> : null}
+                    {showAdvancedTopic ? (
+                      <div className="space-y-2">
+                        <div>
+                          <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">
+                            Search loaded topics
+                          </div>
+                          <input
+                            value={topicSearch}
+                            onChange={(event) => setTopicSearch(event.target.value)}
+                            placeholder="Search loaded topics"
+                            className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                          />
+                        </div>
+                        <div>
+                          <div className="mb-1 text-xs uppercase tracking-wider text-white/60">
+                            Paste topic URL (optional)
+                          </div>
+                          <input
+                            value={pastedTopicUrl}
+                            onChange={(event) => setPastedTopicUrl(event.target.value)}
+                            placeholder="https://www.theweatherforums.com/topic/123..."
+                            className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
+                          />
+                          {pastedTopicUrlError ? <div className="mt-1 text-xs text-red-200">{pastedTopicUrlError}</div> : null}
+                          {parsedTopicIdFromUrl ? (
+                            <div className="mt-1 text-xs text-emerald-200/90">Using selected topic from pasted URL.</div>
+                          ) : null}
+                        </div>
                       </div>
                     ) : null}
                   </div>
-
-                  {shareMode === "existing" ? (
-                    <>
-                      <div>
-                        <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic</div>
-                        {topicsLoading ? (
-                          <div className="flex items-center gap-2 text-xs text-white/70">
-                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                            Loading topics...
-                          </div>
-                        ) : topicOptions.length > 0 ? (
-                          <select
-                            value={selectedTopicId !== null ? String(selectedTopicId) : ""}
-                            onChange={(event) => setSelectedTopicId(Number(event.target.value))}
-                            className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none focus:border-emerald-300/40"
-                          >
-                            {topicOptions.map((topic) => (
-                              <option key={topic.id} value={String(topic.id)}>
-                                {(topic.pinned ? "[PIN] " : "") + topic.title}
-                              </option>
-                            ))}
-                          </select>
-                        ) : (
-                          <div className="text-xs text-white/65">No topics loaded for this forum.</div>
-                        )}
-                        {topicsError ? <div className="mt-1 text-xs text-red-200">{topicsError}</div> : null}
-                        <button
-                          type="button"
-                          onClick={() => setShowAdvancedTopic((current) => !current)}
-                          className="mt-2 text-[11px] font-medium text-emerald-200/90 hover:text-emerald-100"
-                        >
-                          {showAdvancedTopic ? "Topic tools ▾" : "Topic tools ▸"}
-                        </button>
-                      </div>
-
-                      {showAdvancedTopic ? (
-                        <div className="space-y-2">
-                          <div>
-                            <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">
-                              Search loaded topics
-                            </div>
-                            <input
-                              value={topicSearch}
-                              onChange={(event) => setTopicSearch(event.target.value)}
-                              placeholder="Search loaded topics"
-                              className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
-                            />
-                          </div>
-                          <div>
-                            <div className="mb-1 text-xs uppercase tracking-wider text-white/60">
-                              Paste topic URL (optional)
-                            </div>
-                            <input
-                              value={pastedTopicUrl}
-                              onChange={(event) => setPastedTopicUrl(event.target.value)}
-                              placeholder="https://www.theweatherforums.com/topic/123..."
-                              className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
-                            />
-                            {pastedTopicUrlError ? <div className="mt-1 text-xs text-red-200">{pastedTopicUrlError}</div> : null}
-                            {parsedTopicIdFromUrl ? (
-                              <div className="mt-1 text-xs text-emerald-200/90">Using selected topic from pasted URL.</div>
-                            ) : null}
-                          </div>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div>
-                      <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Topic title</div>
-                      <input
-                        value={newTopicTitle}
-                        onChange={(event) => setNewTopicTitle(event.target.value)}
-                        maxLength={255}
-                        placeholder="Enter a topic title"
-                        className="h-8 w-full rounded-md border border-white/15 bg-black/35 px-2 text-xs text-white outline-none placeholder:text-white/40 focus:border-emerald-300/40"
-                      />
-                      <div className="mt-1 text-[11px] text-white/55">
-                        New topic will be posted in the selected forum.
-                      </div>
-                    </div>
-                  )}
-                </div>
+                ) : null}
 
                 <div>
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Screenshot tools</div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wider text-white/80">Manual screenshot tools</div>
                   <div className="flex flex-wrap items-center gap-2">
                     <button
                       type="button"
