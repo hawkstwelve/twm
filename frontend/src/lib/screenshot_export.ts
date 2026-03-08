@@ -556,8 +556,8 @@ export async function exportViewerScreenshotPng(
     rawCtx.drawImage(capturedMapCanvas, 0, 0, rawCanvas.width, rawCanvas.height);
 
     const outputCanvas = document.createElement("canvas");
-    outputCanvas.width = width;
-    outputCanvas.height = height;
+    outputCanvas.width = rawCanvas.width;
+    outputCanvas.height = rawCanvas.height;
     const outputCtx = outputCanvas.getContext("2d");
     if (!outputCtx) {
       throw new Error("Failed to create screenshot canvas context.");
@@ -565,6 +565,8 @@ export async function exportViewerScreenshotPng(
 
     outputCtx.imageSmoothingEnabled = true;
     outputCtx.imageSmoothingQuality = "high";
+    outputCtx.save();
+    outputCtx.scale(pixelRatio, pixelRatio);
     outputCtx.drawImage(rawCanvas, 0, 0, width, height);
     drawOverlay(outputCtx, overlayLines, width);
 
@@ -578,6 +580,7 @@ export async function exportViewerScreenshotPng(
     if (opts.legend) {
       drawBottomLegend(outputCtx, opts.legend, width, height, bottomPadding);
     }
+    outputCtx.restore();
 
     return canvasToPngBlob(outputCanvas);
   } finally {
