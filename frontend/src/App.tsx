@@ -3640,6 +3640,28 @@ export default function App() {
                     aria-label="Overlay opacity"
                   />
                 </div>
+
+                <div className="border-t border-white/8 pt-2 text-[10px] leading-relaxed text-white/42">
+                  Maps:{" "}
+                  <a href="https://www.maplibre.org/" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-white/70">
+                    MapLibre
+                  </a>
+                  {" "}|
+                  {" "}
+                  <a
+                    href="https://www.openstreetmap.org/copyright"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline underline-offset-2 hover:text-white/70"
+                  >
+                    OSM
+                  </a>
+                  {" "}|
+                  {" "}
+                  <a href="https://carto.com/attributions" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-white/70">
+                    CARTO
+                  </a>
+                </div>
               </div>
               </div>
             ) : null}

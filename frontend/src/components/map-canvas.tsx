@@ -645,7 +645,6 @@ export function MapCanvas({
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
-  const [showAttribution, setShowAttribution] = useState(false);
   const [anchorTooltip, setAnchorTooltip] = useState<AnchorTooltipState | null>(null);
   const activeBufferRef = useRef<OverlayBuffer>("a");
   const activeTileUrlRef = useRef(tileUrl);
@@ -2157,58 +2156,6 @@ export function MapCanvas({
         </div>
       </div>
 
-      <div className="pointer-events-none absolute bottom-[7.25rem] left-4 z-50 hidden sm:block sm:bottom-24">
-        <div className="pointer-events-auto">
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 bg-black/40 text-sm font-semibold text-white/95 shadow-[0_8px_32px_rgba(0,0,0,0.35)] backdrop-blur-md transition-colors hover:bg-white/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            onClick={() => setShowAttribution((prev) => !prev)}
-            aria-label={showAttribution ? "Hide map attribution" : "Show map attribution"}
-            title={showAttribution ? "Hide map attribution" : "Show map attribution"}
-          >
-            i
-          </button>
-
-          {showAttribution ? (
-            <div className="mt-2 max-w-[320px] rounded-xl border border-white/10 bg-black/55 px-3 py-2 text-[11px] leading-relaxed text-white/90 shadow-[0_8px_32px_rgba(0,0,0,0.35)] backdrop-blur-md">
-              Maps:
-              {" "}
-              <a
-                href="https://www.maplibre.org/"
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2 hover:text-white"
-              >
-                MapLibre
-              </a>
-              {" "}
-              |
-              {" "}
-              <a
-                href="https://www.openstreetmap.org/copyright"
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2 hover:text-white"
-              >
-                OpenStreetMap contributors
-              </a>
-              {" "}
-              |
-              {" "}
-              <a
-                href="https://carto.com/attributions"
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2 hover:text-white"
-              >
-                CARTO
-              </a>
-              <br />
-              Boundaries: Natural Earth and U.S. Census Bureau TIGER/Cartographic Boundary.
-            </div>
-          ) : null}
-        </div>
-      </div>
     </>
   );
 }

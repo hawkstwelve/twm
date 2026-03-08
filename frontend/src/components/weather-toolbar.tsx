@@ -3,11 +3,11 @@ import {
   Boxes,
   CalendarClock,
   ChevronDown,
-  ChevronUp,
   Layers,
   MapPin,
   Send,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -239,62 +239,69 @@ export function WeatherToolbar(props: WeatherToolbarProps) {
         <div className="flex items-start">
           <div className="relative">
             {desktopPanelOpen ? (
-              <div className="glass-strong inline-flex max-w-[calc(100vw-9rem)] items-end gap-2 rounded-2xl border border-white/12 px-3 py-2.5 shadow-[0_18px_40px_rgba(0,0,0,0.34)]">
-                <ToolbarSelect
-                  label="Region"
-                  icon={MapPin}
-                  value={region}
-                  onValueChange={onRegionChange}
-                  options={regions}
-                  disabled={disabled}
-                  placeholder="Region"
-                  triggerClassName="min-w-[142px] max-w-[142px]"
-                />
+              <div className="glass-strong absolute left-0 top-full mt-3 w-[min(560px,calc(100vw-2rem))] rounded-2xl border border-white/12 px-3 py-3 shadow-[0_22px_44px_rgba(0,0,0,0.36)]">
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-white/48">Controls</div>
+                    <div className="pt-1 text-xs text-white/62">Model selection and forecast context.</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDesktopPanelOpen(false)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-black/18 text-white/72 transition-all duration-150 hover:bg-black/28 hover:text-white"
+                    aria-label="Close controls"
+                    title="Close controls"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
 
-                <ToolbarSelect
-                  label="Model"
-                  icon={Boxes}
-                  value={model}
-                  onValueChange={onModelChange}
-                  options={models}
-                  disabled={disabled}
-                  placeholder="Model"
-                  triggerClassName="min-w-[142px] max-w-[142px]"
-                />
+                <div className="grid grid-cols-2 gap-2.5">
+                  <ToolbarSelect
+                    label="Region"
+                    icon={MapPin}
+                    value={region}
+                    onValueChange={onRegionChange}
+                    options={regions}
+                    disabled={disabled}
+                    placeholder="Region"
+                    triggerClassName="min-w-0"
+                  />
 
-                <ToolbarSelect
-                  label="Run"
-                  icon={CalendarClock}
-                  value={run}
-                  onValueChange={onRunChange}
-                  options={runs}
-                  disabled={disabled}
-                  placeholder="Run"
-                  triggerClassName="min-w-[160px] max-w-[160px]"
-                />
+                  <ToolbarSelect
+                    label="Model"
+                    icon={Boxes}
+                    value={model}
+                    onValueChange={onModelChange}
+                    options={models}
+                    disabled={disabled}
+                    placeholder="Model"
+                    triggerClassName="min-w-0"
+                  />
 
-                <ToolbarSelect
-                  label="Variable"
-                  icon={Layers}
-                  value={variable}
-                  onValueChange={onVariableChange}
-                  options={variables}
-                  disabled={disabled}
-                  placeholder="Variable"
-                  grouped
-                  triggerClassName="min-w-[210px] max-w-[228px]"
-                />
+                  <ToolbarSelect
+                    label="Run"
+                    icon={CalendarClock}
+                    value={run}
+                    onValueChange={onRunChange}
+                    options={runs}
+                    disabled={disabled}
+                    placeholder="Run"
+                    triggerClassName="min-w-0"
+                  />
 
-                <button
-                  type="button"
-                  onClick={() => setDesktopPanelOpen(false)}
-                  className="inline-flex h-[30px] items-center gap-1.5 rounded-md border border-white/10 bg-black/18 px-2.5 text-[12px] font-semibold text-white/80 transition-all duration-150 hover:bg-black/28"
-                  aria-label="Collapse controls"
-                  title="Collapse controls"
-                >
-                  <ChevronUp className="h-4 w-4" />
-                  Close
-                </button>
+                  <ToolbarSelect
+                    label="Variable"
+                    icon={Layers}
+                    value={variable}
+                    onValueChange={onVariableChange}
+                    options={variables}
+                    disabled={disabled}
+                    placeholder="Variable"
+                    grouped
+                    triggerClassName="min-w-0"
+                  />
+                </div>
               </div>
             ) : (
               <button
