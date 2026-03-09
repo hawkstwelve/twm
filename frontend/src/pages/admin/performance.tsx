@@ -202,6 +202,7 @@ export default function AdminPerformancePage() {
   const [loopTrend, setLoopTrend] = useState<PerfTimeseriesPoint[]>([]);
   const [modelBreakdown, setModelBreakdown] = useState<PerfBreakdownItem[]>([]);
   const [deviceBreakdown, setDeviceBreakdown] = useState<PerfBreakdownItem[]>([]);
+  const [loopModelBreakdown, setLoopModelBreakdown] = useState<PerfBreakdownItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -218,12 +219,13 @@ export default function AdminPerformancePage() {
           return;
         }
 
-        const [summaryData, frameSeries, loopSeries, modelData, deviceData] = await Promise.all([
+        const [summaryData, frameSeries, loopSeries, modelData, deviceData, loopModelData] = await Promise.all([
           fetchAdminPerfSummary({ window: windowValue, device: deviceValue }),
           fetchAdminPerfTimeseries({ metric: "frame_change", window: windowValue, device: deviceValue }),
           fetchAdminPerfTimeseries({ metric: "loop_start", window: windowValue, device: deviceValue }),
           fetchAdminPerfBreakdown({ metric: "frame_change", by: "model", window: windowValue, device: deviceValue }),
           fetchAdminPerfBreakdown({ metric: "loop_start", by: "device", window: windowValue, device: deviceValue }),
+          fetchAdminPerfBreakdown({ metric: "loop_start", by: "model", window: windowValue, device: deviceValue }),
         ]);
         if (cancelled) return;
 
@@ -232,6 +234,7 @@ export default function AdminPerformancePage() {
         setLoopTrend(loopSeries.points);
         setModelBreakdown(modelData.items);
         setDeviceBreakdown(deviceData.items);
+        setLoopModelBreakdown(loopModelData.items);
       } catch (nextError) {
         if (cancelled) return;
         setError(nextError instanceof Error ? nextError.message : "Failed to load admin dashboard");
@@ -363,11 +366,16 @@ export default function AdminPerformancePage() {
         />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-3">
         <BreakdownList
           title="Frame Change by Model"
           subtitle="Most active models ordered by sample count."
           items={modelBreakdown}
+        />
+        <BreakdownList
+          title="Loop Start by Model"
+          subtitle="Playback startup latency split by model."
+          items={loopModelBreakdown}
         />
         <BreakdownList
           title="Loop Start by Device"
