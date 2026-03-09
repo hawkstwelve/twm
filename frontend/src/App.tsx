@@ -63,9 +63,7 @@ const FRAME_HARD_DEADLINE_MS = 30_000;
 const FRAME_RETRY_BASE_MS = 1200;
 const LOOP_PRELOAD_MIN_READY = 2;
 const LOOP_AHEAD_READY_TARGET = 8;
-const LOOP_MIN_PLAYABLE_AHEAD = 2;
 const MAX_CONCURRENT_DECODES = 4;
-const AUTOPLAY_RESUME_POLL_MS = 200;
 const WEBP_DECODE_CACHE_BUDGET_DESKTOP_BYTES = 256 * 1024 * 1024;
 const WEBP_DECODE_CACHE_BUDGET_MOBILE_BYTES = 128 * 1024 * 1024;
 const EMPTY_TILE_DATA_URL = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
@@ -2390,13 +2388,18 @@ export default function App() {
     hasDecodedLoopFrame,
   ]);
 
+  // Playback ticker. Reads forecastHourRef so the interval stays stable across
+  // frame advances — no teardown/rebuild every 250ms. If the next frame isn't
+  // decoded yet, the tick is silently skipped (the current frame holds) instead
+  // of entering a pause/resume cycle that causes visible button jitter.
   useEffect(() => {
     if (!isPlaying || renderMode === "tiles" || loopFrameHours.length === 0) {
       return;
     }
 
     const interval = window.setInterval(() => {
-      const currentIndex = loopFrameHours.indexOf(forecastHour);
+      const currentHour = forecastHourRef.current;
+      const currentIndex = loopFrameHours.indexOf(currentHour);
       if (currentIndex < 0) {
         return;
       }
@@ -2408,19 +2411,12 @@ export default function App() {
         return;
       }
 
-      // Only advance to the immediate next frame — never skip ahead. This
-      // prevents the "jumping forward" artefact when non-consecutive frames
-      // happen to be decoded while the next sequential frame is still loading.
       const nextHour = loopFrameHours[nextIndex];
       if (hasDecodedLoopFrame(nextHour, visibleRenderMode)) {
         setTargetForecastHour(nextHour);
-        return;
       }
-
-      // Next sequential frame not decoded yet — pause and buffer.
-      setIsPlaying(false);
-      setIsLoopAutoplayBuffering(true);
-      showTransientFrameStatus("Buffering");
+      // else: frame not yet decoded — hold current frame, try again next tick.
+      // Background prefetch will decode it; no pause/resume cycle needed.
     }, AUTOPLAY_TICK_MS);
 
     return () => window.clearInterval(interval);
@@ -2428,54 +2424,6 @@ export default function App() {
     isPlaying,
     renderMode,
     loopFrameHours,
-    forecastHour,
-    visibleRenderMode,
-    hasDecodedLoopFrame,
-    showTransientFrameStatus,
-  ]);
-
-  // Auto-resume after buffering. Uses a polling interval because decoded frame
-  // changes happen through refs (not state), so a pure dependency-driven effect
-  // would never re-evaluate once it enters the early-return path.
-  useEffect(() => {
-    if (!isLoopAutoplayBuffering || isPlaying || renderMode === "tiles" || loopFrameHours.length === 0) {
-      return;
-    }
-
-    const tryResume = () => {
-      const currentIndex = loopFrameHours.indexOf(forecastHour);
-      if (currentIndex < 0) {
-        return;
-      }
-      const remaining = loopFrameHours.length - 1 - currentIndex;
-      if (remaining <= 0) {
-        setIsLoopAutoplayBuffering(false);
-        return;
-      }
-      // Require a small runway of consecutive decoded frames before resuming,
-      // so playback doesn't immediately re-pause on the next missing frame
-      // (which caused the visible play/pause jitter).
-      const needed = Math.min(LOOP_MIN_PLAYABLE_AHEAD, remaining);
-      for (let i = 1; i <= needed; i++) {
-        if (!hasDecodedLoopFrame(loopFrameHours[currentIndex + i], visibleRenderMode)) {
-          return;
-        }
-      }
-      setIsLoopAutoplayBuffering(false);
-      setIsPlaying(true);
-    };
-
-    // Check immediately (covers the case where deps changed and buffer is ready).
-    tryResume();
-
-    const interval = window.setInterval(tryResume, AUTOPLAY_RESUME_POLL_MS);
-    return () => window.clearInterval(interval);
-  }, [
-    isLoopAutoplayBuffering,
-    isPlaying,
-    renderMode,
-    loopFrameHours,
-    forecastHour,
     visibleRenderMode,
     hasDecodedLoopFrame,
   ]);
