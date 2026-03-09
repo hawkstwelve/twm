@@ -1894,6 +1894,10 @@ def _derive_precip_total_cumulative(
 ) -> tuple[np.ndarray, rasterio.crs.CRS, rasterio.transform.Affine]:
     hints = getattr(getattr(var_spec_model, "selectors", None), "hints", {})
     apcp_component = hints.get("apcp_component", "apcp_step")
+    use_inventory_resolution = (
+        str(var_key).strip().lower() == "precip_total"
+        and str(apcp_component).strip() == "apcp_step"
+    )
     step_fhs = _resolve_cumulative_step_fhs(hints=hints, fh=fh, default_step_hours=6)
     cadence_hint = _cadence_hint_suffix(hints)
     logger.info("derive %s fh%03d apcp_steps=%d%s", var_key, fh, len(step_fhs), cadence_hint)
@@ -1925,10 +1929,14 @@ def _derive_precip_total_cumulative(
         step_crs: rasterio.crs.CRS,
         step_transform: rasterio.transform.Affine,
     ) -> tuple[np.ndarray, np.ndarray]:
+        del step_fh, step_crs, step_transform
         step_clean = np.where(
             np.isfinite(step_data), np.maximum(step_data, 0.0), 0.0,
         ).astype(np.float32)
-        step_valid = np.isfinite(step_data)
+        if apcp_valid_hint is None:
+            step_valid = np.isfinite(step_data)
+        else:
+            step_valid = np.asarray(apcp_valid_hint, dtype=bool)
         return step_clean, step_valid
 
     cumulative_kgm2, src_crs, src_transform, _ = _cumulative_apcp_loop(
@@ -1946,7 +1954,7 @@ def _derive_precip_total_cumulative(
         target_region=target_region,
         target_grid_id=target_grid_id,
         resampling=resampling,
-        use_inventory_resolution=False,
+        use_inventory_resolution=use_inventory_resolution,
         process_step=_process_step,
         error_label=f"No cumulative APCP source steps resolved for {model_id}/{var_key} fh{fh:03d}",
     )

@@ -204,7 +204,7 @@ NBM_VARS: dict[str, VarSpec] = {
                 "apcp_component": "apcp_step",
                 "step_hours": "1",
                 "step_transition_fh": "36",
-                "step_hours_after_fh": "3",
+                "step_hours_after_fh": "6",
             },
         ),
         derived=True,

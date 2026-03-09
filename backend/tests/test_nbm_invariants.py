@@ -135,7 +135,7 @@ def test_nbm_capabilities_schema_snapshot_invariants() -> None:
     assert precip_spec.selectors.hints["apcp_component"] == "apcp_step"
     assert precip_spec.selectors.hints["step_hours"] == "1"
     assert precip_spec.selectors.hints["step_transition_fh"] == "36"
-    assert precip_spec.selectors.hints["step_hours_after_fh"] == "3"
+    assert precip_spec.selectors.hints["step_hours_after_fh"] == "6"
 
     asnow_component_spec = NBM_MODEL.get_var("asnow_step")
     assert asnow_component_spec is not None
