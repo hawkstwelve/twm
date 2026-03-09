@@ -3690,6 +3690,7 @@ export default function App() {
           prefetchTileUrls={prefetchTileUrls}
           crossfade={false}
           loopImageUrl={activeLoopUrl}
+          loopImageBbox={loopManifest?.bbox ?? null}
           loopActive={isLoopDisplayActive}
           onFrameSettled={handleFrameSettled}
           onTileReady={handleTileReady}

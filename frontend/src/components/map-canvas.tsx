@@ -98,12 +98,7 @@ const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
 const TRANSPARENT_PIXEL_DATA_URL =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMB/ax7n7kAAAAASUVORK5CYII=";
 
-const LOOP_CONUS_COORDINATES: [[number, number], [number, number], [number, number], [number, number]] = [
-  [-125.0, 50.0],
-  [-66.5, 50.0],
-  [-66.5, 24.0],
-  [-125.0, 24.0],
-];
+const DEFAULT_LOOP_BBOX: [number, number, number, number] = [-130.5, 24.0, -62.0, 54.5];
 
 type OverlayBuffer = "a" | "b";
 type PlaybackMode = "autoplay" | "scrub";
@@ -135,6 +130,18 @@ function getResamplingMode(variableKind?: string | null): "nearest" | "linear" {
     return "nearest";
   }
   return "linear";
+}
+
+function loopCoordinatesFromBbox(
+  bbox: [number, number, number, number] | null | undefined
+): [[number, number], [number, number], [number, number], [number, number]] {
+  const [west, south, east, north] = bbox ?? DEFAULT_LOOP_BBOX;
+  return [
+    [west, north],
+    [east, north],
+    [east, south],
+    [west, south],
+  ];
 }
 
 function getOverlayPaintSettingsForDark(variable?: string): {
@@ -326,6 +333,7 @@ function styleFor(
   variableKind?: string | null,
   overlayFadeOutZoom?: { start: number; end: number } | null,
   contourGeoJsonUrl?: string | null,
+  loopImageCoordinates: [[number, number], [number, number], [number, number], [number, number]] = loopCoordinatesFromBbox(null),
   basemapMode: BasemapMode = "light"
 ): StyleSpecification {
   const resamplingMode = getResamplingMode(variableKind);
@@ -410,7 +418,7 @@ function styleFor(
       [LOOP_SOURCE_ID]: {
         type: "image",
         url: TRANSPARENT_PIXEL_DATA_URL,
-        coordinates: LOOP_CONUS_COORDINATES,
+        coordinates: loopImageCoordinates,
       },
     },
     layers: [
@@ -597,6 +605,7 @@ type MapCanvasProps = {
   prefetchTileUrls?: string[];
   crossfade?: boolean;
   loopImageUrl?: string | null;
+  loopImageBbox?: [number, number, number, number] | null;
   loopActive?: boolean;
   onFrameSettled?: (tileUrl: string) => void;
   onTileReady?: (tileUrl: string) => void;
@@ -629,6 +638,7 @@ export function MapCanvas({
   prefetchTileUrls = [],
   crossfade = false,
   loopImageUrl,
+  loopImageBbox = null,
   loopActive = false,
   onFrameSettled,
   onTileReady,
@@ -679,6 +689,10 @@ export function MapCanvas({
       zoom: MAP_VIEW_DEFAULTS.zoom,
     };
   }, [region, regionViews]);
+  const loopImageCoordinates = useMemo(
+    () => loopCoordinatesFromBbox(loopImageBbox),
+    [loopImageBbox]
+  );
 
   const initializeSourceTracking = useCallback((currentTileUrl: string) => {
     const sourceA = sourceId("a");
@@ -1202,6 +1216,7 @@ export function MapCanvas({
         variableKind,
         overlayFadeOutZoom,
         contourGeoJsonUrl,
+        loopImageCoordinates,
         basemapMode
       ),
       center: view.center,
@@ -1312,6 +1327,7 @@ export function MapCanvas({
       variableKind,
       overlayFadeOutZoom,
       contourGeoJsonUrl,
+      loopImageCoordinates,
       basemapMode
     );
 
@@ -1341,7 +1357,7 @@ export function MapCanvas({
         if (loopSource && typeof loopSource.updateImage === "function") {
           loopSource.updateImage({
             url: loopImageUrl,
-            coordinates: LOOP_CONUS_COORDINATES,
+            coordinates: loopImageCoordinates,
           });
         }
       }
@@ -1385,6 +1401,7 @@ export function MapCanvas({
     contourGeoJsonUrl,
     enforceLayerOrder,
     initializeSourceTracking,
+    loopImageCoordinates,
     loopActive,
     loopImageUrl,
     overlayFadeOutZoom,
@@ -1863,7 +1880,7 @@ export function MapCanvas({
       try {
         loopSource.updateImage({
           url: loopImageUrl,
-          coordinates: LOOP_CONUS_COORDINATES,
+          coordinates: loopImageCoordinates,
         });
       } catch (error) {
         console.warn("[map] failed to update loop image source", { loopImageUrl, error });
@@ -1881,7 +1898,7 @@ export function MapCanvas({
       variable === "tmp2m" && !loopActive && !isLoopToTileTransitioningRef.current
     );
     enforceLayerOrder(map);
-  }, [isLoaded, loopImageUrl, loopActive, variable, enforceLayerOrder]);
+  }, [isLoaded, loopImageCoordinates, loopImageUrl, loopActive, variable, enforceLayerOrder]);
 
   useEffect(() => {
     const map = mapRef.current;
