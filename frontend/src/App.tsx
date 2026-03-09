@@ -2104,6 +2104,24 @@ export default function App() {
     loopFailedHoursRef.current = failedSet;
     setLoopProgress({ total: loopFrameHours.length, ready: 0, failed: 0 });
 
+    // Reorder frames so decoding starts at the nearest frame to the current
+    // forecast hour, proceeds forward to the end, then wraps to the beginning.
+    // This prioritises frames the user will see first, enabling early start and
+    // smooth playback well before all frames are decoded.
+    let nearestIdx = 0;
+    let nearestDist = Infinity;
+    for (let i = 0; i < loopFrameHours.length; i++) {
+      const dist = Math.abs(loopFrameHours[i] - forecastHour);
+      if (dist < nearestDist) {
+        nearestDist = dist;
+        nearestIdx = i;
+      }
+    }
+    const orderedFrames: number[] = [
+      ...loopFrameHours.slice(nearestIdx),
+      ...loopFrameHours.slice(0, nearestIdx),
+    ];
+
     // RAF-coalesced progress updates: with PRELOAD_CONCURRENCY=4, multiple decodes
     // can complete within the same 16ms frame. Batching them into a single setState
     // call eliminates N intermediate re-renders while frames are loading.
@@ -2120,6 +2138,44 @@ export default function App() {
       });
     };
 
+    // Attempt to start playback early once LOOP_AHEAD_READY_TARGET consecutive
+    // decoded frames exist ahead of the current position. The remaining in-flight
+    // decodes continue to completion via processNext() and warm the LRU cache so
+    // the playback ticker never stalls waiting for frames.
+    let earlyStarted = false;
+    const tryEarlyStart = (): boolean => {
+      if (earlyStarted) return false;
+      const currentIdx = loopFrameHours.indexOf(forecastHour);
+      if (currentIdx < 0) return false;
+      const remainingAhead = loopFrameHours.length - 1 - currentIdx;
+      const neededAhead = Math.min(LOOP_AHEAD_READY_TARGET, remainingAhead);
+      if (neededAhead <= 0) return false;
+      // All neededAhead frames must be consecutively ready to guarantee
+      // the playback ticker won't stall before background decodes catch up.
+      let consecutiveAhead = 0;
+      for (let i = currentIdx + 1; i < loopFrameHours.length && consecutiveAhead < neededAhead; i++) {
+        if (readySet.has(loopFrameHours[i])) {
+          consecutiveAhead++;
+        } else {
+          break;
+        }
+      }
+      if (consecutiveAhead < neededAhead) return false;
+      earlyStarted = true;
+      if (progressRafId !== null) {
+        window.cancelAnimationFrame(progressRafId);
+        progressRafId = null;
+      }
+      flushProgress();
+      setIsLoopPreloading(false);
+      if (renderMode !== "tiles") {
+        setVisibleRenderMode(renderMode);
+      }
+      setLoopDisplayHour(forecastHour);
+      setIsPlaying(true);
+      return true;
+    };
+
     const mark = (fh: number, ok: boolean) => {
       if (token !== loopPreloadTokenRef.current) {
         return;
@@ -2131,7 +2187,10 @@ export default function App() {
       }
 
       if (readySet.size + failedSet.size < loopFrameHours.length) {
-        // Not done yet — schedule a batched progress update.
+        // Not all frames accounted for yet. Attempt an early start if enough
+        // consecutive frames are ready ahead of the current position — remaining
+        // decodes continue in background via processNext() to warm the LRU cache.
+        if (ok && tryEarlyStart()) return;
         scheduleProgress();
         return;
       }
@@ -2142,6 +2201,7 @@ export default function App() {
         progressRafId = null;
       }
       flushProgress();
+      if (earlyStarted) return;
       setIsLoopPreloading(false);
       const minReady = Math.min(LOOP_PRELOAD_MIN_READY, loopFrameHours.length);
       if (readySet.size >= minReady) {
@@ -2157,16 +2217,15 @@ export default function App() {
       showTransientFrameStatus("Loop preload failed");
     };
 
-    // Process frames in playback order with bounded concurrency to stay within
-    // the browser's HTTP/2 stream budget (~6 per host) and keep early frames
-    // ready before later ones.
+    // Process frames in priority order (starting at current forecast hour) with
+    // bounded concurrency to stay within the browser's HTTP/2 stream budget.
     const PRELOAD_CONCURRENCY = 4;
     let inFlight = 0;
     let nextIndex = 0;
 
     const processNext = () => {
-      while (inFlight < PRELOAD_CONCURRENCY && nextIndex < loopFrameHours.length) {
-        const fh = loopFrameHours[nextIndex];
+      while (inFlight < PRELOAD_CONCURRENCY && nextIndex < orderedFrames.length) {
+        const fh = orderedFrames[nextIndex];
         nextIndex += 1;
         if (!resolveLoopUrlForHour(fh, renderMode)) {
           mark(fh, false);
