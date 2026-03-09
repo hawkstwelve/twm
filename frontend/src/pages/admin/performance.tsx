@@ -200,9 +200,12 @@ export default function AdminPerformancePage() {
   const [summary, setSummary] = useState<Record<string, PerfMetricSummary>>({});
   const [frameTrend, setFrameTrend] = useState<PerfTimeseriesPoint[]>([]);
   const [loopTrend, setLoopTrend] = useState<PerfTimeseriesPoint[]>([]);
+  const [firstFrameTrend, setFirstFrameTrend] = useState<PerfTimeseriesPoint[]>([]);
   const [modelBreakdown, setModelBreakdown] = useState<PerfBreakdownItem[]>([]);
   const [deviceBreakdown, setDeviceBreakdown] = useState<PerfBreakdownItem[]>([]);
   const [loopModelBreakdown, setLoopModelBreakdown] = useState<PerfBreakdownItem[]>([]);
+  const [firstFrameModelBreakdown, setFirstFrameModelBreakdown] = useState<PerfBreakdownItem[]>([]);
+  const [firstFrameDeviceBreakdown, setFirstFrameDeviceBreakdown] = useState<PerfBreakdownItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,22 +222,28 @@ export default function AdminPerformancePage() {
           return;
         }
 
-        const [summaryData, frameSeries, loopSeries, modelData, deviceData, loopModelData] = await Promise.all([
+        const [summaryData, frameSeries, loopSeries, firstFrameSeries, modelData, deviceData, loopModelData, firstFrameModelData, firstFrameDeviceData] = await Promise.all([
           fetchAdminPerfSummary({ window: windowValue, device: deviceValue }),
           fetchAdminPerfTimeseries({ metric: "frame_change", window: windowValue, device: deviceValue }),
           fetchAdminPerfTimeseries({ metric: "loop_start", window: windowValue, device: deviceValue }),
+          fetchAdminPerfTimeseries({ metric: "viewer_first_frame", window: windowValue, device: deviceValue }),
           fetchAdminPerfBreakdown({ metric: "frame_change", by: "model", window: windowValue, device: deviceValue }),
           fetchAdminPerfBreakdown({ metric: "loop_start", by: "device", window: windowValue, device: deviceValue }),
           fetchAdminPerfBreakdown({ metric: "loop_start", by: "model", window: windowValue, device: deviceValue }),
+          fetchAdminPerfBreakdown({ metric: "viewer_first_frame", by: "model", window: windowValue, device: deviceValue }),
+          fetchAdminPerfBreakdown({ metric: "viewer_first_frame", by: "device", window: windowValue, device: deviceValue }),
         ]);
         if (cancelled) return;
 
         setSummary(summaryData.metrics);
         setFrameTrend(frameSeries.points);
         setLoopTrend(loopSeries.points);
+        setFirstFrameTrend(firstFrameSeries.points);
         setModelBreakdown(modelData.items);
         setDeviceBreakdown(deviceData.items);
         setLoopModelBreakdown(loopModelData.items);
+        setFirstFrameModelBreakdown(firstFrameModelData.items);
+        setFirstFrameDeviceBreakdown(firstFrameDeviceData.items);
       } catch (nextError) {
         if (cancelled) return;
         setError(nextError instanceof Error ? nextError.message : "Failed to load admin dashboard");
@@ -351,7 +360,7 @@ export default function AdminPerformancePage() {
         <MetricCard title="First Viewer Frame" icon={Zap} metric={summary.viewer_first_frame} />
       </div>
 
-      <div className="grid gap-6 xl:grid-cols-2">
+      <div className="grid gap-6 xl:grid-cols-3">
         <TrendChart
           title="Frame Change Trend"
           subtitle="How quickly the map responds to manual frame changes."
@@ -363,6 +372,12 @@ export default function AdminPerformancePage() {
           subtitle="Time from play action to actual loop playback start."
           points={loopTrend}
           lineColor="#b7e38f"
+        />
+        <TrendChart
+          title="First Viewer Frame Trend"
+          subtitle="Time from viewer open to first frame being rendered."
+          points={firstFrameTrend}
+          lineColor="#f0a575"
         />
       </div>
 
@@ -381,6 +396,19 @@ export default function AdminPerformancePage() {
           title="Loop Start by Device"
           subtitle="Quick split of playback startup behavior."
           items={deviceBreakdown}
+        />
+      </div>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <BreakdownList
+          title="First Viewer Frame by Model"
+          subtitle="Cold-start render latency per model — identifies slow-loading datasets."
+          items={firstFrameModelBreakdown}
+        />
+        <BreakdownList
+          title="First Viewer Frame by Device"
+          subtitle="Cold-start render latency split by device type."
+          items={firstFrameDeviceBreakdown}
         />
       </div>
     </div>
