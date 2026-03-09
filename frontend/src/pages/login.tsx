@@ -13,7 +13,7 @@ type ApiErrorInfo = {
 
 function getApiBase(): string {
   const fromEnv = (import.meta as ImportMeta & { env?: { VITE_API_BASE?: string } }).env?.VITE_API_BASE;
-  const base = (fromEnv ?? "https://api.theweathermodels.com").trim();
+  const base = (fromEnv ?? "https://api.cartosky.com").trim();
   return base.replace(/\/$/, "");
 }
 

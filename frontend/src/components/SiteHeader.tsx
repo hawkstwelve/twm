@@ -14,7 +14,7 @@ type TwfStatus =
 
 function getApiBase(): string {
   const fromEnv = (import.meta as any)?.env?.VITE_API_BASE as string | undefined;
-  const base = (fromEnv ?? "https://api.theweathermodels.com").trim();
+  const base = (fromEnv ?? "https://api.cartosky.com").trim();
   return base.replace(/\/$/, "");
 }
 

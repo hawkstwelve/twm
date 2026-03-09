@@ -1,5 +1,5 @@
 const API_ORIGIN_ENV = String(import.meta.env.VITE_API_BASE ?? "").trim();
-export const API_ORIGIN = (API_ORIGIN_ENV || "https://api.theweathermodels.com").replace(/\/$/, "");
+export const API_ORIGIN = (API_ORIGIN_ENV || "https://api.cartosky.com").replace(/\/$/, "");
 export const API_V4_BASE = `${API_ORIGIN}/api/v4`;
 
 const TILES_BASE_ENV = String(import.meta.env.VITE_TILES_BASE ?? "").trim();
