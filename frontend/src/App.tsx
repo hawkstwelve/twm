@@ -3716,7 +3716,7 @@ export default function App() {
         />
 
         {showBufferStatus && (
-          <div className="glass absolute left-1/2 top-4 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-xl px-3 py-2 text-xs">
+          <div className="glass fixed bottom-28 left-1/2 z-40 flex w-[min(92vw,420px)] -translate-x-1/2 flex-col gap-1.5 rounded-xl px-3 py-2 text-xs">
             <div className="flex items-center justify-between">
               <span className="flex items-center gap-1.5 font-medium">
                 <AlertCircle className="h-3.5 w-3.5" />
