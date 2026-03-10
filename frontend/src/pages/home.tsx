@@ -115,15 +115,15 @@ export default function Home() {
       <section className="pt-6 md:pt-10">
         <div className="max-w-2xl">
           <h1 className="text-5xl md:text-6xl font-semibold tracking-tight leading-[1.02]">
-            Advanced 
+            CartoSky.
             <br />
-            Weather Models,
+            Weather maps,
             <br />
             <span className="text-[#577361]">Simplified.</span>
           </h1>
 
           <p className="mt-4 text-base md:text-lg text-white/70">
-            Access the latest weather models in an easy-to-use interactive map viewer.
+            Access the latest weather guidance in an easy-to-use interactive map viewer.
             Professional-grade performance in a streamlined experience.
           </p>
 

@@ -122,7 +122,7 @@ export default function SiteHeader({ variant }: { variant: "marketing" | "app" }
         }
       >
         <NavLink to="/" className="flex shrink-0 items-center font-semibold tracking-tight text-white">
-          <img src="/assets/logo.png" alt="The Weather Models" className={logoClassName} />
+          <img src="/assets/logo.png" alt="CartoSky" className={logoClassName} />
         </NavLink>
 
         {isMarketingVariant ? (

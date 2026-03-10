@@ -130,7 +130,7 @@ export default function Login() {
               Connect your account
             </h1>
             <p className="mx-auto max-w-sm text-sm leading-6 text-white/68">
-              Sign in with The Weather Forums to connect your account with The Weather Models.
+              Sign in with The Weather Forums to connect your account with CartoSky.
             </p>
           </div>
 
@@ -203,7 +203,7 @@ export default function Login() {
             ) : (
               <div className="space-y-5">
                 <div className="rounded-2xl border border-white/10 bg-black/25 p-4 text-sm leading-6 text-white/72">
-                  You’ll be redirected to The Weather Forums to authorize The Weather Models, then returned here.
+                  You’ll be redirected to The Weather Forums to authorize CartoSky, then returned here.
                 </div>
 
                 <button
