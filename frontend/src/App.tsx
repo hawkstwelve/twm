@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { AlertCircle, Eye, MapPin, Moon, Send, SlidersHorizontal, Sun } from "lucide-react";
 
 import { BottomForecastControls } from "@/components/bottom-forecast-controls";
 import { MapCanvas, type BasemapMode } from "@/components/map-canvas";
 import { type LegendPayload, MapLegend } from "@/components/map-legend";
-import { TwfShareModal, type SharePayload } from "@/components/twf-share-modal";
+import type { SharePayload } from "@/components/twf-share-modal";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
   buildContourUrl,
@@ -48,6 +48,10 @@ import { buildTileUrlFromFrame } from "@/lib/tiles";
 import { buildPermalinkSearch, readPermalink, replaceUrlQuery } from "@/lib/permalink";
 import { trackPerfEvent, trackUsageEvent } from "@/lib/telemetry";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
+
+const TwfShareModal = lazy(() =>
+  import("@/components/twf-share-modal").then((module) => ({ default: module.TwfShareModal }))
+);
 
 const AUTOPLAY_TICK_MS = 250;
 const AUTOPLAY_READY_AHEAD = 2;
@@ -4133,13 +4137,17 @@ export default function App() {
         />
       </div>
 
-      <TwfShareModal
-        open={isShareModalOpen}
-        onClose={() => setIsShareModalOpen(false)}
-        payload={sharePayload}
-        buildScreenshotState={buildScreenshotExportState}
-        getLegend={() => legend}
-      />
+      {isShareModalOpen ? (
+        <Suspense fallback={null}>
+          <TwfShareModal
+            open={isShareModalOpen}
+            onClose={() => setIsShareModalOpen(false)}
+            payload={sharePayload}
+            buildScreenshotState={buildScreenshotExportState}
+            getLegend={() => legend}
+          />
+        </Suspense>
+      ) : null}
     </div>
   );
 }

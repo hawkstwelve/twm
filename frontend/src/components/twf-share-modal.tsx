@@ -3,7 +3,7 @@ import { CheckCircle2, Copy, Download, ExternalLink, Image, Loader2, Send, X } f
 
 import type { LegendPayload } from "@/components/map-legend";
 import { API_ORIGIN } from "@/lib/config";
-import { exportViewerScreenshotPng, type ScreenshotExportState } from "@/lib/screenshot_export";
+import type { ScreenshotExportState } from "@/lib/screenshot_export";
 import { uploadShareMedia } from "@/lib/share_media";
 import { getSharePrefs, setSharePrefs, type SharePrefs } from "@/lib/share_prefs";
 
@@ -627,6 +627,7 @@ export function TwfShareModal({
 
     setScreenshotBusy(true);
     try {
+      const { exportViewerScreenshotPng } = await import("@/lib/screenshot_export");
       const blob = await exportViewerScreenshotPng(state, {
         legend: getLegend?.() ?? null,
       });
