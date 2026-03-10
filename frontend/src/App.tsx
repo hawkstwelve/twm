@@ -4,7 +4,7 @@ import { AlertCircle, Eye, MapPin, Moon, Send, SlidersHorizontal, Sun } from "lu
 
 import { BottomForecastControls } from "@/components/bottom-forecast-controls";
 import { MapCanvas, type BasemapMode } from "@/components/map-canvas";
-import { type LegendPayload, MapLegend } from "@/components/map-legend";
+import type { LegendPayload } from "@/components/map-legend";
 import type { SharePayload } from "@/components/twf-share-modal";
 import { WeatherToolbar } from "@/components/weather-toolbar";
 import {
@@ -43,14 +43,16 @@ import {
 } from "@/lib/config";
 import { buildRunOptions } from "@/lib/run-options";
 import { type ScreenshotExportState } from "@/lib/screenshot_export";
-import { buildShareSummary } from "@/lib/share-summary";
 import { buildTileUrlFromFrame } from "@/lib/tiles";
-import { buildPermalinkSearch, readPermalink, replaceUrlQuery } from "@/lib/permalink";
+import { readPermalink } from "@/lib/permalink-read";
 import { trackPerfEvent, trackUsageEvent } from "@/lib/telemetry";
 import { useSampleTooltip } from "@/lib/use-sample-tooltip";
 
 const TwfShareModal = lazy(() =>
   import("@/components/twf-share-modal").then((module) => ({ default: module.TwfShareModal }))
+);
+const MapLegend = lazy(() =>
+  import("@/components/map-legend").then((module) => ({ default: module.MapLegend }))
 );
 
 const AUTOPLAY_TICK_MS = 250;
@@ -202,6 +204,27 @@ function makeVariableLabel(id: string, preferredLabel?: string | null): string {
     return preferredLabel.trim();
   }
   return id;
+}
+
+function buildFallbackSharePayload(params: {
+  modelLabel: string;
+  runLabel: string;
+  variableLabel: string;
+  forecastHour: number;
+  permalink: string;
+}): SharePayload {
+  const forecastLabel = Number.isFinite(params.forecastHour)
+    ? `FH ${Math.max(0, Math.round(params.forecastHour))}`
+    : "FH n/a";
+  const summary = [params.modelLabel, params.runLabel, forecastLabel, params.variableLabel]
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(" • ");
+  return {
+    permalink: params.permalink,
+    summary: summary || "CartoSky viewer share",
+    detailsSummary: "",
+  };
 }
 
 function toNumberOrNull(value: unknown): number | null {
@@ -730,6 +753,11 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [sharePayload, setSharePayload] = useState<SharePayload>({
+    permalink: "",
+    summary: "CartoSky viewer share",
+    detailsSummary: "",
+  });
   const [settledTileUrl, setSettledTileUrl] = useState<string | null>(null);
   const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
   const [frameStatusMessage, setFrameStatusMessage] = useState<string | null>(null);
@@ -3690,42 +3718,6 @@ export default function App() {
     const fromOptions = regions.find((entry) => entry.value === region)?.label;
     return fromOptions ?? regionPresets[region]?.label ?? region;
   }, [regions, regionPresets, region]);
-  const sharePayload = useMemo<SharePayload>(() => {
-    const runForSummary = run === "latest" ? (latestRunId ?? "latest") : run;
-    const mapView = mapViewRef.current;
-    const capabilityVariableLabel = selectedCapabilityVarMap.get(variable)?.displayName ?? null;
-    const manifestVariable = runManifest?.variables?.[variable];
-    const manifestVariableLabel = manifestVariable?.display_name ?? manifestVariable?.name ?? manifestVariable?.label ?? null;
-    const preferredVariableLabel = capabilityVariableLabel ?? manifestVariableLabel;
-    const summaries = buildShareSummary({
-      modelId: model || "model",
-      runId: runForSummary || "latest",
-      variableId: variable || "var",
-      variableDisplayName: preferredVariableLabel,
-      regionId: region || "region",
-      regionLabel: regionPresets[region]?.label ?? null,
-      forecastHour: Number.isFinite(forecastHour) ? forecastHour : null,
-      centerLat: Number.isFinite(mapView.lat) ? mapView.lat : null,
-      centerLon: Number.isFinite(mapView.lon) ? mapView.lon : null,
-      zoom: Number.isFinite(mapView.z) ? mapView.z : null,
-      loopEnabled: resolvedLoopPermalink,
-    });
-    const permalink = typeof window !== "undefined" ? window.location.href : "";
-    return { permalink, summary: summaries.shortSummary, detailsSummary: summaries.detailsSummary };
-  }, [
-    model,
-    run,
-    latestRunId,
-    variable,
-    selectedCapabilityVarMap,
-    runManifest,
-    forecastHour,
-    region,
-    regionPresets,
-    resolvedLoopPermalink,
-    mapViewTick,
-  ]);
-
   const buildScreenshotExportState = useCallback((): ScreenshotExportState | null => {
     const map = mapInstanceRef.current;
     if (!map) {
@@ -3779,8 +3771,63 @@ export default function App() {
   ]);
 
   const handleOpenShareModal = useCallback(() => {
+    const permalink = typeof window !== "undefined" ? window.location.href : "";
+    const runForSummary = run === "latest" ? (latestRunId ?? "latest") : run;
+    const mapView = mapViewRef.current;
+    const capabilityVariableLabel = selectedCapabilityVarMap.get(variable)?.displayName ?? null;
+    const manifestVariable = runManifest?.variables?.[variable];
+    const manifestVariableLabel = manifestVariable?.display_name ?? manifestVariable?.name ?? manifestVariable?.label ?? null;
+    const preferredVariableLabel = capabilityVariableLabel ?? manifestVariableLabel;
+    const fallbackPayload = buildFallbackSharePayload({
+      modelLabel: selectedModelLabel || model || "Model",
+      runLabel: selectedRunLabel || runForSummary || "Run",
+      variableLabel: selectedVariableLabel || variable || "Variable",
+      forecastHour,
+      permalink,
+    });
+
+    setSharePayload(fallbackPayload);
     setIsShareModalOpen(true);
-  }, []);
+
+    void import("@/lib/share-summary")
+      .then(({ buildShareSummary }) => {
+        const summaries = buildShareSummary({
+          modelId: model || "model",
+          runId: runForSummary || "latest",
+          variableId: variable || "var",
+          variableDisplayName: preferredVariableLabel,
+          regionId: region || "region",
+          regionLabel: regionPresets[region]?.label ?? null,
+          forecastHour: Number.isFinite(forecastHour) ? forecastHour : null,
+          centerLat: Number.isFinite(mapView.lat) ? mapView.lat : null,
+          centerLon: Number.isFinite(mapView.lon) ? mapView.lon : null,
+          zoom: Number.isFinite(mapView.z) ? mapView.z : null,
+          loopEnabled: resolvedLoopPermalink,
+        });
+        setSharePayload({
+          permalink,
+          summary: summaries.shortSummary,
+          detailsSummary: summaries.detailsSummary,
+        });
+      })
+      .catch(() => {
+        // Leave the fallback payload in place on import/build errors.
+      });
+  }, [
+    forecastHour,
+    latestRunId,
+    model,
+    region,
+    regionPresets,
+    resolvedLoopPermalink,
+    run,
+    runManifest,
+    selectedCapabilityVarMap,
+    selectedModelLabel,
+    selectedRunLabel,
+    selectedVariableLabel,
+    variable,
+  ]);
 
   useEffect(() => {
     if (!permalinkHydrated || typeof window === "undefined") {
@@ -3792,30 +3839,37 @@ export default function App() {
       return;
     }
 
+    let cancelled = false;
     const timeoutId = window.setTimeout(() => {
-      const mapView = mapViewRef.current;
-      const search = buildPermalinkSearch({
-        model: model || undefined,
-        run: run || undefined,
-        var: variable || undefined,
-        fh: Number.isFinite(resolvedForecastHourPermalink)
-          ? Number(resolvedForecastHourPermalink)
-          : undefined,
-        region: region || undefined,
-        lat: mapView.lat,
-        lon: mapView.lon,
-        z: mapView.z,
-        loop: resolvedLoopPermalink,
-      });
-      if (search === lastSyncedPermalinkSearchRef.current || search === window.location.search) {
+      void import("@/lib/permalink").then(({ buildPermalinkSearch, replaceUrlQuery }) => {
+        if (cancelled) {
+          return;
+        }
+        const mapView = mapViewRef.current;
+        const search = buildPermalinkSearch({
+          model: model || undefined,
+          run: run || undefined,
+          var: variable || undefined,
+          fh: Number.isFinite(resolvedForecastHourPermalink)
+            ? Number(resolvedForecastHourPermalink)
+            : undefined,
+          region: region || undefined,
+          lat: mapView.lat,
+          lon: mapView.lon,
+          z: mapView.z,
+          loop: resolvedLoopPermalink,
+        });
+        if (search === lastSyncedPermalinkSearchRef.current || search === window.location.search) {
+          lastSyncedPermalinkSearchRef.current = search;
+          return;
+        }
+        replaceUrlQuery(search);
         lastSyncedPermalinkSearchRef.current = search;
-        return;
-      }
-      replaceUrlQuery(search);
-      lastSyncedPermalinkSearchRef.current = search;
+      });
     }, PERMALINK_SYNC_DEBOUNCE_MS);
 
     return () => {
+      cancelled = true;
       window.clearTimeout(timeoutId);
     };
   }, [
@@ -4121,7 +4175,11 @@ export default function App() {
           {basemapMode === "dark" ? <Moon className="h-5 w-5" /> : <Sun className="h-5 w-5" />}
         </button>
 
-        {legendVisible ? <MapLegend legend={legend} onOpacityChange={setOpacity} showOpacityControl={false} /> : null}
+        {legendVisible ? (
+          <Suspense fallback={null}>
+            <MapLegend legend={legend} onOpacityChange={setOpacity} showOpacityControl={false} />
+          </Suspense>
+        ) : null}
 
         <BottomForecastControls
           forecastHour={forecastHour}
