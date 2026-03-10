@@ -6,8 +6,12 @@ WORK_DIR="${ROOT_DIR}/data/v3/boundaries/work"
 SOURCE_DIR="${WORK_DIR}/source"
 BUILD_DIR="${WORK_DIR}/build"
 TMP_DIR="${WORK_DIR}/tmp"
-OUT_DIR="${ROOT_DIR}/data/v3/boundaries/v1"
-OUT_MBTILES="${OUT_DIR}/twf_boundaries.mbtiles"
+OUT_DIR="${ROOT_DIR}/data/boundaries/v1"
+LEGACY_OUT_DIR="${ROOT_DIR}/data/v3/boundaries/v1"
+OUT_MBTILES="${OUT_DIR}/cartosky_boundaries.mbtiles"
+LEGACY_OUT_MBTILES="${OUT_DIR}/twf_boundaries.mbtiles"
+LEGACY_V3_OUT_MBTILES="${LEGACY_OUT_DIR}/cartosky_boundaries.mbtiles"
+LEGACY_V3_TWF_OUT_MBTILES="${LEGACY_OUT_DIR}/twf_boundaries.mbtiles"
 
 for cmd in curl unzip ogr2ogr mapshaper tippecanoe tile-join sqlite3 python3; do
   if ! command -v "$cmd" >/dev/null 2>&1; then
@@ -16,8 +20,9 @@ for cmd in curl unzip ogr2ogr mapshaper tippecanoe tile-join sqlite3 python3; do
   fi
 done
 
-mkdir -p "$SOURCE_DIR" "$BUILD_DIR" "$TMP_DIR" "$OUT_DIR"
+mkdir -p "$SOURCE_DIR" "$BUILD_DIR" "$TMP_DIR" "$OUT_DIR" "$LEGACY_OUT_DIR"
 rm -f "$TMP_DIR"/*.mbtiles
+rm -f "$OUT_MBTILES" "$LEGACY_OUT_MBTILES" "$LEGACY_V3_OUT_MBTILES" "$LEGACY_V3_TWF_OUT_MBTILES"
 
 COUNTRY_URL="https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_admin_0_boundary_lines_land.geojson"
 COAST_URL="https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_10m_coastline.geojson"
@@ -75,28 +80,36 @@ mapshaper "$BUILD_DIR/county_lines_raw_nonnull.geojson" -snap interval=0.00003 -
 mapshaper "$SOURCE_DIR/lakes.geojson" -snap interval=0.00005 -clean -filter 'name=="Lake Superior" || name=="Lake Michigan" || name=="Lake Huron" || name=="Lake Erie" || name=="Lake Ontario" || name_en=="Lake Superior" || name_en=="Lake Michigan" || name_en=="Lake Huron" || name_en=="Lake Erie" || name_en=="Lake Ontario"' -each 'kind="great_lake_polygon"' -filter-fields kind,name,name_en -o format=geojson "$BUILD_DIR/great_lake_polygons.geojson"
 mapshaper "$BUILD_DIR/great_lake_polygons.geojson" -snap interval=0.00005 -clean -lines -each 'kind="great_lake_shoreline"' -filter-fields kind -o format=geojson "$BUILD_DIR/great_lake_shoreline.geojson"
 
-# Keep buffers small to avoid MapLibre extent rejection.
-tippecanoe -f -o "$TMP_DIR/boundary_country.mbtiles" -l boundaries -Z0 -z10 --buffer=2 --simplification=2 --detect-shared-borders "$BUILD_DIR/country_lines.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_state.mbtiles" -l boundaries -Z3 -z10 --buffer=2 --simplification=2 --detect-shared-borders --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/state_lines.geojson"
-tippecanoe -f -o "$TMP_DIR/boundary_county.mbtiles" -l counties -Z5 -z10 --buffer=2 --simplification=2 "$BUILD_DIR/county_lines_low.geojson"
+# Use split zoom tiers so the zoom 5/6 county transition does not force the same
+# simplification and clipping regime onto every boundary class.
+tippecanoe -f -o "$TMP_DIR/boundary_country_low.mbtiles" -l boundaries -Z0 -z6 --buffer=6 --detect-shared-borders --no-feature-limit --no-tile-size-limit "$BUILD_DIR/country_lines.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_country_high.mbtiles" -l boundaries -Z7 -z10 --buffer=6 --simplification=2 --detect-shared-borders --no-feature-limit --no-tile-size-limit "$BUILD_DIR/country_lines.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_state.mbtiles" -l boundaries -Z3 -z8 --buffer=4 --simplification=2 --detect-shared-borders "$BUILD_DIR/state_lines.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_county_low.mbtiles" -l counties -Z5 -z7 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=8 "$BUILD_DIR/county_lines_low.geojson"
+tippecanoe -f -o "$TMP_DIR/boundary_county_high.mbtiles" -l counties -Z8 -z10 --buffer=4 --drop-smallest-as-needed --coalesce-smallest-as-needed --coalesce-densest-as-needed --simplification=6 "$BUILD_DIR/county_lines_high.geojson"
 
-# Keep hydro layers on the same zoom range to avoid tile-join mismatched maxzoom warnings and missing features by zoom.
-tippecanoe -f -o "$TMP_DIR/hydro_polygon.mbtiles" -l hydro -Z3 -z10 --buffer=3 --simplification=2 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_polygons.geojson"
-tippecanoe -f -o "$TMP_DIR/hydro_shoreline.mbtiles" -l hydro -Z3 -z10 --buffer=2 --simplification=2 --drop-smallest-as-needed --coalesce-densest-as-needed "$BUILD_DIR/great_lake_shoreline.geojson"
-tippecanoe -f -o "$TMP_DIR/hydro_coastline.mbtiles" -l hydro -Z0 -z10 --buffer=2 "$BUILD_DIR/coastline_lines.geojson"
+# Keep Great Lakes masks and shorelines lossless enough that water masking does
+# not disappear at intermediate zooms.
+tippecanoe -f -o "$TMP_DIR/hydro_polygon.mbtiles" -l hydro -Z3 -z8 --buffer=4 --simplification=2 "$BUILD_DIR/great_lake_polygons.geojson"
+tippecanoe -f -o "$TMP_DIR/hydro_shoreline.mbtiles" -l hydro -Z3 -z10 --buffer=4 --simplification=2 "$BUILD_DIR/great_lake_shoreline.geojson"
+tippecanoe -f -o "$TMP_DIR/hydro_coastline_low.mbtiles" -l hydro -Z0 -z6 --buffer=6 --no-feature-limit --no-tile-size-limit "$BUILD_DIR/coastline_lines.geojson"
+tippecanoe -f -o "$TMP_DIR/hydro_coastline_high.mbtiles" -l hydro -Z7 -z10 --buffer=6 --simplification=2 --no-feature-limit --no-tile-size-limit "$BUILD_DIR/coastline_lines.geojson"
 
 tile-join -f -o "$OUT_MBTILES" \
-  "$TMP_DIR/boundary_country.mbtiles" \
+  "$TMP_DIR/boundary_country_low.mbtiles" \
+  "$TMP_DIR/boundary_country_high.mbtiles" \
   "$TMP_DIR/boundary_state.mbtiles" \
-  "$TMP_DIR/boundary_county.mbtiles" \
+  "$TMP_DIR/boundary_county_low.mbtiles" \
+  "$TMP_DIR/boundary_county_high.mbtiles" \
   "$TMP_DIR/hydro_polygon.mbtiles" \
   "$TMP_DIR/hydro_shoreline.mbtiles" \
-  "$TMP_DIR/hydro_coastline.mbtiles"
+  "$TMP_DIR/hydro_coastline_low.mbtiles" \
+  "$TMP_DIR/hydro_coastline_high.mbtiles"
 
 VECTOR_LAYERS='[{"id":"boundaries","description":"country/state linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":0,"maxzoom":10},{"id":"counties","description":"county linework","fields":{"kind":"String","admin_level":"Number"},"minzoom":5,"maxzoom":10},{"id":"hydro","description":"coastline and Great Lakes polygon/shoreline","fields":{"kind":"String"},"minzoom":0,"maxzoom":10}]'
-sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('name','TWF Boundaries v1');"
-sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('id','twf-boundaries-v1');"
-sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('description','Canonical boundary + hydro tileset for TWF V3');"
+sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('name','CartoSky Boundaries v1');"
+sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('id','cartosky-boundaries-v1');"
+sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('description','Canonical boundary + hydro tileset for CartoSky');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('attribution','Natural Earth; U.S. Census Bureau TIGER/Cartographic Boundary');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('minzoom','0');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('maxzoom','10');"
@@ -104,5 +117,9 @@ sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('boun
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('center','-98.58,39.83,4');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('format','pbf');"
 sqlite3 "$OUT_MBTILES" "INSERT OR REPLACE INTO metadata(name,value) VALUES('vector_layers','$VECTOR_LAYERS');"
+
+ln -sf "$(basename "$OUT_MBTILES")" "$LEGACY_OUT_MBTILES"
+ln -sf "../../boundaries/v1/$(basename "$OUT_MBTILES")" "$LEGACY_V3_OUT_MBTILES"
+ln -sf "../../boundaries/v1/$(basename "$LEGACY_OUT_MBTILES")" "$LEGACY_V3_TWF_OUT_MBTILES"
 
 echo "Built boundaries tileset: $OUT_MBTILES"

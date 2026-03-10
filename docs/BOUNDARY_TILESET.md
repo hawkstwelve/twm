@@ -13,7 +13,7 @@ Served by `backend/app/services/tile_server.py`:
 
 `frontend/src/components/map-canvas.tsx` now uses one vector source:
 
-- `https://api.theweathermodels.com/tiles/v3/boundaries/v1/tilejson.json`
+- `https://api.cartosky.com/tiles/v3/boundaries/v1/tilejson.json`
 
 Expected source layers:
 
@@ -31,14 +31,16 @@ Build with:
 
 Output MBTiles path:
 
-- `data/v3/boundaries/v1/twf_boundaries.mbtiles`
+- `data/boundaries/v1/cartosky_boundaries.mbtiles`
+- Legacy compatibility symlink: `data/boundaries/v1/twf_boundaries.mbtiles`
+- Legacy `v3` path symlinks are also emitted under `data/v3/boundaries/v1/`
 
 ## Zoom strategy (hard minzoom/maxzoom)
 
 Implemented in the build script via separate tippecanoe passes and `tile-join`:
 
-- Country boundaries: `z0-z10` (single pass)
-- Coastline: `z0-z10` (single pass)
+- Country boundaries: `z0-z6` + `z7-z10`
+- Coastline: `z0-z6` + `z7-z10`
 - State boundaries: `z3-z8`
 - County boundaries low detail: `z5-z7`
 - County boundaries high detail: `z8-z10`
@@ -77,4 +79,5 @@ sudo systemctl restart csky-tile-server
 
 - CARTO vector boundaries and runtime Plotly counties GeoJSON are no longer used by the frontend boundary stack.
 - CARTO raster basemap/labels remain in use.
+- The build emits the CartoSky-named MBTiles file and a legacy `twf_boundaries.mbtiles` symlink so older runtime defaults still resolve.
 - If a source schema changes, keep the `kind` taxonomy stable so frontend filters continue to work.
