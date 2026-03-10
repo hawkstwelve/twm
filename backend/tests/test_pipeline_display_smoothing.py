@@ -1,5 +1,6 @@
 import numpy as np
 
+from app.services.builder.colorize import float_to_rgba
 from app.services.builder.pipeline import _prepare_display_data_for_colorize, _warp_resampling_for_variable
 
 
@@ -59,3 +60,13 @@ def test_precip_and_snow_use_nearest_warp_resampling_across_models() -> None:
             var_key="precip_total",
             kind="continuous",
         ) == "nearest"
+
+
+def test_continuous_transparent_pixels_zero_rgb() -> None:
+    data = np.array([[0.0, 0.05, 0.2]], dtype=np.float32)
+
+    rgba, _ = float_to_rgba(data, "snowfall_total")
+
+    assert tuple(int(v) for v in rgba[:, 0, 0]) == (0, 0, 0, 0)
+    assert tuple(int(v) for v in rgba[:, 0, 1]) == (0, 0, 0, 0)
+    assert int(rgba[3, 0, 2]) == 255

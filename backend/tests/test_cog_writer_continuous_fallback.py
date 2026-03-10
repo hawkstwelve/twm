@@ -66,3 +66,51 @@ def test_continuous_rgba_uses_two_pass_same_source_policy(
     second_bands = [second[i + 1] for i, token in enumerate(second[:-1]) if token == "-b"]
     assert first_bands == ["4"]
     assert second_bands == ["1", "2", "3"]
+
+
+def test_snowfall_total_continuous_rgba_uses_nearest_overviews(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    bbox, grid_m = cog_writer.get_grid_params("gfs", "pnw")
+    _, height, width = cog_writer.compute_transform_and_shape(bbox, grid_m)
+    rgba = np.zeros((4, height, width), dtype=np.uint8)
+    out_path = tmp_path / "fh000.rgba.cog.tif"
+
+    called = {"write_base": 0, "translate": 0}
+    gdal_commands: list[list[str]] = []
+
+    def fake_write_base(*args, **kwargs) -> None:
+        del args, kwargs
+        called["write_base"] += 1
+
+    def fake_run_gdal(cmd: list[str]) -> None:
+        gdal_commands.append(list(cmd))
+
+    def fake_translate(src: Path, dst: Path) -> None:
+        del src
+        called["translate"] += 1
+        dst.touch()
+
+    monkeypatch.setattr(cog_writer, "_write_base_gtiff", fake_write_base)
+    monkeypatch.setattr(cog_writer, "_run_gdal", fake_run_gdal)
+    monkeypatch.setattr(cog_writer, "_gtiff_to_cog", fake_translate)
+    monkeypatch.setattr(cog_writer, "_gdal", lambda name: name)
+
+    cog_writer.write_rgba_cog(
+        rgba,
+        out_path,
+        model="gfs",
+        region="pnw",
+        kind="continuous",
+        color_map_id="snowfall_total",
+    )
+
+    assert called["write_base"] == 1
+    assert called["translate"] == 1
+
+    gdaladdo_cmds = [cmd for cmd in gdal_commands if len(cmd) > 0 and cmd[0] == "gdaladdo"]
+    assert len(gdaladdo_cmds) == 1
+    only = gdaladdo_cmds[0]
+    assert only[only.index("-r") + 1] == "nearest"
+    assert "-b" not in only

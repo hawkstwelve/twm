@@ -38,6 +38,8 @@ from rasterio.enums import Resampling
 from rasterio.transform import from_origin
 from rasterio.warp import reproject
 
+from app.services.colormaps import get_color_map_spec
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -249,6 +251,7 @@ def write_rgba_cog(
     model: str,
     region: str,
     kind: str = "continuous",
+    color_map_id: str | None = None,
 ) -> Path:
     """Write a 4-band RGBA uint8 array as a Cloud Optimized GeoTIFF.
 
@@ -262,11 +265,14 @@ def write_rgba_cog(
         Model id (e.g. "hrrr") — used to look up grid parameters.
     region : str
         Region id (e.g. "pnw") — used to look up grid parameters.
-        kind : str
+    kind : str
         "continuous" or "discrete" / "indexed" — controls overview resampling.
         Current overview strategy:
           continuous → average RGB + nearest alpha
           discrete/indexed → nearest (all bands)
+    color_map_id : str, optional
+        Palette identifier used to resolve per-variable overview overrides for
+        continuous fields.
 
     Returns
     -------
@@ -295,7 +301,19 @@ def write_rgba_cog(
     with tempfile.TemporaryDirectory(dir=output_path.parent) as tmp_dir:
         tmp_dir_path = Path(tmp_dir)
 
-        if kind == "continuous" and levels:
+        if kind == "continuous" and levels and _continuous_rgba_overviews_use_nearest(color_map_id):
+            tmp_gtiff = tmp_dir_path / "base.tif"
+            _write_base_gtiff(
+                data=rgba, path=tmp_gtiff, transform=transform,
+                count=4, dtype="uint8", nodata=None,
+            )
+            _run_gdal([
+                _gdal("gdaladdo"), "-r", "nearest",
+                "--config", "GDAL_TIFF_OVR_BLOCKSIZE", str(COG_BLOCKSIZE),
+                str(tmp_gtiff), *[str(l) for l in levels],
+            ])
+            _gtiff_to_cog(tmp_gtiff, output_path)
+        elif kind == "continuous" and levels:
             _build_continuous_rgba_cog(
                 rgba, tmp_dir_path, output_path, transform, levels,
             )
@@ -319,6 +337,17 @@ def write_rgba_cog(
         output_path, data_w, data_h, len(levels), kind,
     )
     return output_path
+
+
+def _continuous_rgba_overviews_use_nearest(color_map_id: str | None) -> bool:
+    resolved = str(color_map_id or "").strip()
+    if not resolved:
+        return False
+    try:
+        spec = get_color_map_spec(resolved)
+    except KeyError:
+        return False
+    return str(spec.get("display_resampling_override") or "").strip().lower() == "nearest"
 
 
 # ---------------------------------------------------------------------------

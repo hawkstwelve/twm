@@ -1020,7 +1020,7 @@ def build_frame(
         logger.info("Step 5/6: Writing COGs")
         write_rgba_cog(
             rgba, rgba_path,
-            model=model, region=region, kind=kind_normalized,
+            model=model, region=region, kind=kind_normalized, color_map_id=color_map_id,
         )
         write_value_cog(
             warped_data, val_path,

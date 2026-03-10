@@ -125,6 +125,7 @@ def _colorize_continuous(
             rgba_hwc[finite_mask & (data < min_visible), 3] = 0
         except (TypeError, ValueError):
             pass
+    rgba_hwc[rgba_hwc[..., 3] == 0, :3] = 0
 
     # Transpose to band-first (4, H, W) for rasterio
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
@@ -176,6 +177,7 @@ def _colorize_discrete(
     else:
         valid_mask = finite_mask
     rgba_hwc[~valid_mask, 3] = 0
+    rgba_hwc[rgba_hwc[..., 3] == 0, :3] = 0
 
     # Band-first
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
@@ -224,6 +226,7 @@ def _colorize_indexed(
     else:
         valid_mask = finite_mask
     rgba_hwc[~valid_mask, 3] = 0
+    rgba_hwc[rgba_hwc[..., 3] == 0, :3] = 0
 
     # Band-first
     rgba = np.transpose(rgba_hwc, (2, 0, 1)).copy()
