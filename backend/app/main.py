@@ -2238,17 +2238,21 @@ def _ensure_loop_webp(
             )
             if out_h <= 0 or out_w <= 0:
                 return False
-            if fixed_applied:
-                log_fixed_loop_size_once(
-                    model_id=model_id,
-                    run_id=run_id,
-                    var_key=var_key,
+                if fixed_applied:
+                    log_fixed_loop_size_once(
+                        model_id=model_id,
+                        run_id=run_id,
+                        var_key=var_key,
                     tier=tier,
                     src_h=src_h,
                     src_w=src_w,
-                    out_h=out_h,
-                    out_w=out_w,
-                )
+                        out_h=out_h,
+                        out_w=out_w,
+                    )
+            value_render_active = use_value_render_for_variable(model_id=model_id, var_key=var_key)
+            prefer_high_quality_resize = fixed_applied or (
+                value_render_active and (out_h < src_h or out_w < src_w)
+            )
 
         rgba = _render_loop_rgba_hwc(
             cog_path=cog_path,
@@ -2258,7 +2262,7 @@ def _ensure_loop_webp(
             out_h=out_h,
             out_w=out_w,
             blur_sigma=None,
-            prefer_high_quality_resize=fixed_applied,
+            prefer_high_quality_resize=prefer_high_quality_resize,
         )
         if rgba is None:
             return False
@@ -2308,17 +2312,21 @@ def _render_loop_webp_bytes(
             )
             if out_h <= 0 or out_w <= 0:
                 return None
-            if fixed_applied:
-                log_fixed_loop_size_once(
-                    model_id=model_id,
-                    run_id=run_id,
-                    var_key=var_key,
+                if fixed_applied:
+                    log_fixed_loop_size_once(
+                        model_id=model_id,
+                        run_id=run_id,
+                        var_key=var_key,
                     tier=tier,
                     src_h=src_h,
                     src_w=src_w,
-                    out_h=out_h,
-                    out_w=out_w,
-                )
+                        out_h=out_h,
+                        out_w=out_w,
+                    )
+            value_render_active = use_value_render_for_variable(model_id=model_id, var_key=var_key)
+            prefer_high_quality_resize = fixed_applied or (
+                value_render_active and (out_h < src_h or out_w < src_w)
+            )
 
         rgba = _render_loop_rgba_hwc(
             cog_path=cog_path,
@@ -2328,7 +2336,7 @@ def _render_loop_webp_bytes(
             out_h=out_h,
             out_w=out_w,
             blur_sigma=None,
-            prefer_high_quality_resize=fixed_applied,
+            prefer_high_quality_resize=prefer_high_quality_resize,
         )
         if rgba is None:
             return None

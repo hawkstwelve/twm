@@ -1115,26 +1115,29 @@ def _convert_rgba_cog_to_loop_webp(
             )
             if out_h <= 0 or out_w <= 0:
                 return False, mode_used
-            if fixed_applied:
-                log_fixed_loop_size_once(
-                    model_id=model_id,
-                    run_id=run_id,
-                    var_key=var_key,
+                if fixed_applied:
+                    log_fixed_loop_size_once(
+                        model_id=model_id,
+                        run_id=run_id,
+                        var_key=var_key,
                     tier=tier,
                     src_h=src_h,
                     src_w=src_w,
-                    out_h=out_h,
-                    out_w=out_w,
-                )
+                        out_h=out_h,
+                        out_w=out_w,
+                    )
 
             base_resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=var_key)
-            if fixed_applied and base_resampling != Resampling.nearest:
+            value_render_active = use_value_render_for_variable(model_id=model_id, var_key=var_key)
+            prefer_high_quality_resize = fixed_applied or (
+                value_render_active and (out_h < src_h or out_w < src_w)
+            )
+            if prefer_high_quality_resize and base_resampling != Resampling.nearest:
                 render_resampling = high_quality_loop_resampling()
             else:
                 render_resampling = base_resampling
 
-            use_value_render = use_value_render_for_variable(model_id=model_id, var_key=var_key)
-            if use_value_render and value_cog_path is not None and value_cog_path.is_file():
+            if value_render_active and value_cog_path is not None and value_cog_path.is_file():
                 color_map_id = variable_color_map_id(model_id, var_key)
                 if color_map_id:
                     try:

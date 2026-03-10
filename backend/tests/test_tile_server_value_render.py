@@ -126,3 +126,58 @@ def test_non_gfs_continuous_stays_on_rgba_path(monkeypatch):
     assert response.body == rgba_png
     assert calls["reader_input"] == str(rgba_path)
     assert calls["indexes"] == (1, 2, 3, 4)
+
+
+def test_targeted_hrrr_snowfall_uses_value_cog_and_bilinear_sampling(monkeypatch):
+    calls: dict[str, object] = {}
+    value_path = Path("/tmp/fake/hrrr/fh000.val.cog.tif")
+
+    monkeypatch.setattr(tile_server, "use_value_render_for_variable", lambda **kwargs: True)
+    monkeypatch.setattr(tile_server, "variable_color_map_id", lambda model, var: "snowfall_total")
+    monkeypatch.setattr(tile_server, "_resolve_value_cog_path", lambda *args, **kwargs: value_path)
+    monkeypatch.setattr(
+        tile_server,
+        "_resolve_cog_path",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("RGBA path should not be used")),
+    )
+    monkeypatch.setattr(tile_server, "Reader", _FakeReader)
+    monkeypatch.setattr(tile_server, "_tile_is_fully_masked", lambda tile: False)
+
+    fake_data = np.array([[[1.5, 2.5], [3.5, 4.5]]], dtype=np.float32)
+    fake_mask = np.array([[255, 255], [255, 255]], dtype=np.uint8)
+
+    class _FakeValueTile:
+        data = fake_data
+        mask = fake_mask
+
+    def _fake_read_tile_compat(cog, *, x, y, z, indexes, resampling_method, reproject_method):
+        calls["reader_input"] = str(getattr(cog, "input", ""))
+        calls["indexes"] = indexes
+        calls["resampling_method"] = resampling_method
+        calls["reproject_method"] = reproject_method
+        return _FakeValueTile()
+
+    monkeypatch.setattr(tile_server, "_read_tile_compat", _fake_read_tile_compat)
+
+    def _fake_colorize(data, color_map_id, *, meta_var_key=None, spec_override=None):
+        calls["colorize_called"] = True
+        calls["color_map_id"] = color_map_id
+        calls["meta_var_key"] = meta_var_key
+        rgba = np.zeros((4, 2, 2), dtype=np.uint8)
+        rgba[2, :, :] = 255
+        rgba[3, :, :] = 255
+        return rgba, {}
+
+    monkeypatch.setattr(tile_server, "float_to_rgba", _fake_colorize)
+
+    response = tile_server.get_tile("hrrr", "20260224_12z", "snowfall_total", 0, 0, 0, 0)
+
+    assert response.status_code == 200
+    assert response.media_type == "image/png"
+    assert calls["reader_input"] == str(value_path)
+    assert calls["indexes"] == (1,)
+    assert calls["resampling_method"] == "bilinear"
+    assert calls["reproject_method"] == "bilinear"
+    assert calls["colorize_called"] is True
+    assert calls["color_map_id"] == "snowfall_total"
+    assert calls["meta_var_key"] == "snowfall_total"

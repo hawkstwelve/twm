@@ -24,8 +24,16 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from PIL import Image
+from rasterio.enums import Resampling
 
-from app.services.render_resampling import rasterio_resampling_for_loop
+from app.services.builder.colorize import float_to_rgba
+from app.services.render_resampling import (
+    compute_loop_output_shape,
+    high_quality_loop_resampling,
+    rasterio_resampling_for_loop,
+    use_value_render_for_variable,
+    variable_color_map_id,
+)
 
 
 RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
@@ -56,6 +64,7 @@ class Job:
     variable: str
     fh: str
     cog_path: Path
+    value_cog_path: Path | None
     webp_path: Path
 
 
@@ -105,10 +114,19 @@ def discover_jobs(
 
         for cog_path in sorted(var_dir.glob("fh*.rgba.cog.tif")):
             fh = cog_path.name.split(".")[0]
+            value_cog_path = var_dir / f"{fh}.val.cog.tif"
             webp_path = output_root / model / run_id / variable / f"{fh}.loop.webp"
             if webp_path.is_file() and not overwrite:
                 continue
-            jobs.append(Job(variable=variable, fh=fh, cog_path=cog_path, webp_path=webp_path))
+            jobs.append(
+                Job(
+                    variable=variable,
+                    fh=fh,
+                    cog_path=cog_path,
+                    value_cog_path=value_cog_path if value_cog_path.is_file() else None,
+                    webp_path=webp_path,
+                )
+            )
 
     return jobs
 
@@ -116,26 +134,58 @@ def discover_jobs(
 def convert_job(job: Job, model_id: str, quality: int, max_dim: int) -> tuple[Job, bool, str | None]:
     try:
         job.webp_path.parent.mkdir(parents=True, exist_ok=True)
-        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=job.variable)
-
         with rasterio.open(job.cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
-            max_side = max(src_h, src_w)
-            if max_side <= 0:
-                return (job, False, "invalid source dimensions")
-
-            scale = min(1.0, float(max_dim) / float(max_side))
-            out_h = max(1, int(round(src_h * scale)))
-            out_w = max(1, int(round(src_w * scale)))
-
-            data = ds.read(
-                indexes=(1, 2, 3, 4),
-                out_shape=(4, out_h, out_w),
-                resampling=resampling,
+            out_h, out_w, _fixed = compute_loop_output_shape(
+                model_id=model_id,
+                var_key=job.variable,
+                src_h=src_h,
+                src_w=src_w,
+                max_dim=max_dim,
+                fixed_width=max_dim,
             )
+            if out_h <= 0 or out_w <= 0:
+                return (job, False, "invalid source dimensions")
+        use_value_render = use_value_render_for_variable(model_id=model_id, var_key=job.variable)
+        resampling = rasterio_resampling_for_loop(model_id=model_id, var_key=job.variable)
+        prefer_high_quality_resize = use_value_render and (out_h < src_h or out_w < src_w)
+        if prefer_high_quality_resize and resampling != Resampling.nearest:
+            resampling = high_quality_loop_resampling()
 
-        rgba = np.moveaxis(data, 0, -1)
+        if use_value_render and job.value_cog_path is not None:
+            color_map_id = variable_color_map_id(model_id, job.variable)
+            if not color_map_id:
+                return (job, False, "missing color_map_id for value render")
+            with rasterio.open(job.value_cog_path) as value_ds:
+                sampled_values = value_ds.read(
+                    1,
+                    out_shape=(out_h, out_w),
+                    resampling=resampling,
+                ).astype(np.float32, copy=False)
+            rgba, _ = float_to_rgba(sampled_values, color_map_id, meta_var_key=job.variable)
+            rgba = np.moveaxis(rgba, 0, -1)
+        else:
+            with rasterio.open(job.cog_path) as ds:
+                if resampling == Resampling.nearest:
+                    data = ds.read(
+                        indexes=(1, 2, 3, 4),
+                        out_shape=(4, out_h, out_w),
+                        resampling=resampling,
+                    )
+                else:
+                    rgb = ds.read(
+                        indexes=(1, 2, 3),
+                        out_shape=(3, out_h, out_w),
+                        resampling=resampling,
+                    )
+                    alpha = ds.read(
+                        indexes=4,
+                        out_shape=(out_h, out_w),
+                        resampling=Resampling.nearest,
+                    )
+                    data = np.concatenate((rgb, alpha[np.newaxis, :, :]), axis=0)
+            rgba = np.moveaxis(data, 0, -1)
         image = Image.fromarray(rgba, mode="RGBA")
         image.save(job.webp_path, format="WEBP", quality=quality, method=6)
         return (job, True, None)

@@ -15,6 +15,16 @@ def _set_capabilities(monkeypatch, variable_catalog):
             grid_meters_by_region={"conus": 3000.0},
             canonical_region="conus",
         ),
+        "nam": SimpleNamespace(
+            variable_catalog=variable_catalog,
+            grid_meters_by_region={"conus": 5000.0},
+            canonical_region="conus",
+        ),
+        "nbm": SimpleNamespace(
+            variable_catalog=variable_catalog,
+            grid_meters_by_region={"conus": 13000.0},
+            canonical_region="conus",
+        ),
     }
     monkeypatch.setattr(render_resampling, "list_model_capabilities", lambda: capabilities)
     render_resampling._lookup_kind_from_capabilities.cache_clear()
@@ -83,6 +93,22 @@ def test_value_render_gate_false_for_hrrr_continuous(monkeypatch):
     assert render_resampling.use_value_render_for_variable(model_id="hrrr", var_key="tmp2m") is False
 
 
+def test_targeted_accumulations_use_value_render_for_hrrr_nam_and_nbm(monkeypatch):
+    _set_capabilities(
+        monkeypatch,
+        {
+            "snowfall_total": SimpleNamespace(kind="continuous", color_map_id="snowfall_total"),
+            "snowfall_kuchera_total": SimpleNamespace(kind="continuous", color_map_id="snowfall_total"),
+            "precip_total": SimpleNamespace(kind="continuous", color_map_id="precip_total"),
+        },
+    )
+
+    for model_id in ("hrrr", "nam", "nbm"):
+        for var_key in ("snowfall_total", "snowfall_kuchera_total", "precip_total"):
+            assert render_resampling.use_value_render_for_variable(model_id=model_id, var_key=var_key) is True
+            assert render_resampling.render_resampling_name(model_id=model_id, var_key=var_key) == "bilinear"
+
+
 def test_loop_fixed_size_for_gfs_continuous(monkeypatch):
     _set_capabilities(
         monkeypatch,
@@ -149,6 +175,6 @@ def test_display_resampling_override_for_precip_and_snow(monkeypatch):
     assert render_resampling.display_resampling_override("gfs", "precip_total") == "nearest"
     assert render_resampling.resampling_name_for_kind(model_id="hrrr", var_key="snowfall_total") == "nearest"
     assert render_resampling.rio_tiler_resampling_kwargs(model_id="gfs", var_key="precip_total") == {
-        "resampling_method": "nearest",
-        "reproject_method": "nearest",
+        "resampling_method": "bilinear",
+        "reproject_method": "bilinear",
     }

@@ -20,8 +20,9 @@ logger = logging.getLogger(__name__)
 
 _DISCRETE_KINDS = {"discrete", "indexed", "categorical"}
 _VALUE_RENDER_MIN_MODEL_KM = 10.0
-# First-pass rollout guard. Keep generic km/kind checks, but only allow GFS now.
 _VALUE_RENDER_MODEL_ALLOWLIST = {"gfs"}
+_TARGETED_VALUE_RENDER_MODELS = {"hrrr", "nam", "nbm"}
+_TARGETED_VALUE_RENDER_VARS = {"snowfall_total", "snowfall_kuchera_total", "precip_total"}
 _FIXED_LOOP_SIZE_MODEL_ALLOWLIST = {"gfs"}
 _MODEL_GRID_KM_FALLBACK: dict[str, float] = {
     "gfs": 25.0,
@@ -199,6 +200,9 @@ def use_value_render_for_variable(
     if resolved_kind != "continuous":
         return False
 
+    if model_norm in _TARGETED_VALUE_RENDER_MODELS:
+        return var_norm in _TARGETED_VALUE_RENDER_VARS
+
     model_km = model_grid_km(model_norm)
     if model_km is None or model_km < _VALUE_RENDER_MIN_MODEL_KM:
         return False
@@ -206,6 +210,18 @@ def use_value_render_for_variable(
     if model_norm not in _VALUE_RENDER_MODEL_ALLOWLIST:
         return False
     return True
+
+
+def render_resampling_name(
+    *,
+    model_id: str,
+    var_key: str,
+    kind: str | None = None,
+) -> str:
+    name = resampling_name_for_kind(model_id=model_id, var_key=var_key, kind=kind)
+    if name == "nearest" and use_value_render_for_variable(model_id=model_id, var_key=var_key, kind=kind):
+        return "bilinear"
+    return name
 
 
 def use_fixed_loop_size_for_variable(
@@ -307,7 +323,7 @@ def rio_tiler_resampling_kwargs(
     var_key: str,
     kind: str | None = None,
 ) -> dict[str, str]:
-    name = resampling_name_for_kind(model_id=model_id, var_key=var_key, kind=kind)
+    name = render_resampling_name(model_id=model_id, var_key=var_key, kind=kind)
     return {
         "resampling_method": name,
         "reproject_method": name,
@@ -320,5 +336,5 @@ def rasterio_resampling_for_loop(
     var_key: str,
     kind: str | None = None,
 ) -> Resampling:
-    name = resampling_name_for_kind(model_id=model_id, var_key=var_key, kind=kind)
+    name = render_resampling_name(model_id=model_id, var_key=var_key, kind=kind)
     return Resampling.nearest if name == "nearest" else Resampling.bilinear

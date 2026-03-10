@@ -171,3 +171,72 @@ def test_render_loop_webp_bytes_uses_rgba_when_gate_false(tmp_path, monkeypatch)
     assert content is not None
     assert content.startswith(b"RIFF")
     assert calls["rgba_read"] is True
+
+
+def test_render_loop_webp_bytes_uses_value_render_for_hrrr_snowfall_with_high_quality_resize(
+    tmp_path,
+    monkeypatch,
+):
+    cog_path = tmp_path / "fh000.rgba.cog.tif"
+    val_path = tmp_path / "fh000.val.cog.tif"
+    cog_path.write_bytes(b"rgba")
+    val_path.write_bytes(b"val")
+
+    calls: dict[str, object] = {"rgba_read": False}
+
+    monkeypatch.setattr(main_module, "use_value_render_for_variable", lambda **kwargs: True)
+    monkeypatch.setattr(main_module, "variable_color_map_id", lambda model_id, var_key: "snowfall_total")
+    monkeypatch.setattr(main_module, "rasterio_resampling_for_loop", lambda **kwargs: "bilinear")
+    monkeypatch.setattr(main_module, "high_quality_loop_resampling", lambda: "cubic")
+
+    def _fake_open(path, *args, **kwargs):
+        path = Path(path)
+        if path == cog_path:
+            return _FakeDataset(
+                width=3200,
+                height=1600,
+                read_fn=lambda indexes, out_shape, resampling: (
+                    calls.__setitem__("rgba_read", True)
+                    or np.zeros(out_shape or (4, 1600, 3200), dtype=np.uint8)
+                ),
+            )
+        if path == val_path:
+            return _FakeDataset(
+                width=3200,
+                height=1600,
+                read_fn=lambda indexes, out_shape, resampling: (
+                    calls.__setitem__("value_resampling", resampling)
+                    or np.full(out_shape, 4.25, dtype=np.float32)
+                ),
+            )
+        raise AssertionError(f"Unexpected open path: {path}")
+
+    monkeypatch.setattr(main_module.rasterio, "open", _fake_open)
+
+    def _fake_float_to_rgba(data, color_map_id, *, meta_var_key=None, spec_override=None):
+        calls["colorize_called"] = True
+        calls["color_map_id"] = color_map_id
+        calls["meta_var_key"] = meta_var_key
+        h, w = data.shape
+        rgba = np.zeros((4, h, w), dtype=np.uint8)
+        rgba[0, :, :] = 120
+        rgba[3, :, :] = 255
+        return rgba, {}
+
+    monkeypatch.setattr(main_module, "float_to_rgba", _fake_float_to_rgba)
+
+    content = main_module._render_loop_webp_bytes(
+        cog_path,
+        model_id="hrrr",
+        var_key="snowfall_total",
+        tier=0,
+        value_cog_path=val_path,
+    )
+
+    assert content is not None
+    assert content.startswith(b"RIFF")
+    assert calls["colorize_called"] is True
+    assert calls["color_map_id"] == "snowfall_total"
+    assert calls["meta_var_key"] == "snowfall_total"
+    assert calls["value_resampling"] == "cubic"
+    assert calls["rgba_read"] is False
