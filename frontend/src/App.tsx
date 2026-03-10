@@ -919,8 +919,6 @@ export default function App() {
   );
   const selectedVariableDefaultFh = selectedCapabilityVarMap.get(variable)?.defaultFh ?? null;
   const selectedVariableKind = selectedCapabilityVarMap.get(variable)?.kind ?? null;
-  const selectedVariableResamplingOverride =
-    selectedCapabilityVarMap.get(variable)?.displayResamplingOverride ?? null;
   const selectedModelConstraints = (selectedModelCapability?.constraints ?? {}) as Record<string, unknown>;
   const zoomHintMinZoom = toNumberOrNull(selectedModelConstraints.zoom_hint_min);
   const overlayFadeOutZoom = useMemo(() => {
@@ -3926,7 +3924,6 @@ export default function App() {
           mode={isLoopDisplayActive ? "scrub" : (isPlaying ? "autoplay" : "scrub")}
           variable={variable}
           variableKind={selectedVariableKind}
-          variableResamplingOverride={selectedVariableResamplingOverride}
           overlayFadeOutZoom={overlayFadeOutZoom}
           zoomHintMinZoom={zoomHintMinZoom}
           basemapMode={basemapMode}
