@@ -1,5 +1,6 @@
 import maplibregl from "maplibre-gl";
 import type { LegendPayload } from "@/components/map-legend";
+import { BRAND_LOGO_SRC } from "@/lib/branding";
 
 export type ScreenshotExportState = {
   style: any;
@@ -30,7 +31,7 @@ const DEFAULT_HEIGHT = 900;
 const DEFAULT_PIXEL_RATIO = 2;
 const MAP_SETTLE_DELAY_MS = 150;
 const MAP_IDLE_TIMEOUT_MS = 15_000;
-const SCREENSHOT_LOGO_SRC = "/assets/logo.png";
+const SCREENSHOT_LOGO_SRC = BRAND_LOGO_SRC;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => {
