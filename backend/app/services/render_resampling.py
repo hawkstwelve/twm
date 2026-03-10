@@ -23,7 +23,6 @@ _VALUE_RENDER_MIN_MODEL_KM = 10.0
 _VALUE_RENDER_MODEL_ALLOWLIST = {"gfs"}
 _TARGETED_VALUE_RENDER_MODELS = {"hrrr", "nam", "nbm"}
 _TARGETED_VALUE_RENDER_VARS = {"snowfall_total", "snowfall_kuchera_total", "precip_total"}
-_FIXED_LOOP_SIZE_MODEL_ALLOWLIST = {"gfs"}
 _MODEL_GRID_KM_FALLBACK: dict[str, float] = {
     "gfs": 25.0,
 }
@@ -239,13 +238,7 @@ def use_fixed_loop_size_for_variable(
     if resolved_kind != "continuous":
         return False
 
-    if model_norm not in _FIXED_LOOP_SIZE_MODEL_ALLOWLIST:
-        return False
-
-    model_km = model_grid_km(model_norm)
-    if model_km is None:
-        return True
-    return model_km >= _VALUE_RENDER_MIN_MODEL_KM
+    return True
 
 
 def compute_loop_output_shape(

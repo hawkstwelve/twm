@@ -125,8 +125,10 @@ Set `VITE_CARTOSKY_WEBP_DEFAULT_ENABLED=1` to enable adaptive WebP rendering (on
 | `CARTOSKY_LOOP_URL_PREFIX` | `/loop/` | URL prefix emitted for pre-generated loop assets |
 | `CARTOSKY_LOOP_WEBP_QUALITY` | `82` | Tier 0 WebP quality (0–100) |
 | `CARTOSKY_LOOP_WEBP_MAX_DIM` | `1600` | Tier 0 max dimension (px) |
+| `CARTOSKY_LOOP_WEBP_TIER0_FIXED_W` | `1600` | Tier 0 fixed output width (px) for continuous loop frames |
 | `CARTOSKY_LOOP_WEBP_TIER1_QUALITY` | `86` | Tier 1 (high-res) WebP quality |
 | `CARTOSKY_LOOP_WEBP_TIER1_MAX_DIM` | `2400` | Tier 1 max dimension (px) |
+| `CARTOSKY_LOOP_WEBP_TIER1_FIXED_W` | `2400` | Tier 1 fixed output width (px) for continuous loop frames |
 | `CARTOSKY_JSON_CACHE_RECHECK_SECONDS` | `1.0` | Filesystem recheck interval for cached JSON |
 | `CARTOSKY_SAMPLE_CACHE_TTL_SECONDS` | `2.0` | Point-sample result cache TTL |
 | `CARTOSKY_SAMPLE_RATE_LIMIT_WINDOW_SECONDS` | `1.0` | Sampling rate-limit window (seconds) |

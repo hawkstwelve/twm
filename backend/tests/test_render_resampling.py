@@ -109,57 +109,26 @@ def test_targeted_accumulations_use_value_render_for_hrrr_nam_and_nbm(monkeypatc
             assert render_resampling.render_resampling_name(model_id=model_id, var_key=var_key) == "bilinear"
 
 
-def test_loop_fixed_size_for_gfs_continuous(monkeypatch):
+def test_loop_fixed_size_applied_for_all_continuous_models(monkeypatch):
     _set_capabilities(
         monkeypatch,
         {"tmp2m": SimpleNamespace(kind="continuous", color_map_id="tmp2m")},
     )
 
     src_h, src_w = 148, 261
-    out_h0, out_w0, fixed0 = render_resampling.compute_loop_output_shape(
-        model_id="gfs",
-        var_key="tmp2m",
-        src_h=src_h,
-        src_w=src_w,
-        max_dim=1600,
-        fixed_width=1600,
-    )
-    out_h1, out_w1, fixed1 = render_resampling.compute_loop_output_shape(
-        model_id="gfs",
-        var_key="tmp2m",
-        src_h=src_h,
-        src_w=src_w,
-        max_dim=2400,
-        fixed_width=2400,
-    )
+    for model_id, fixed_width in (("gfs", 1600), ("hrrr", 1600), ("nam", 1600), ("nbm", 1600)):
+        out_h, out_w, fixed = render_resampling.compute_loop_output_shape(
+            model_id=model_id,
+            var_key="tmp2m",
+            src_h=src_h,
+            src_w=src_w,
+            max_dim=1600,
+            fixed_width=fixed_width,
+        )
 
-    assert fixed0 is True
-    assert out_w0 == 1600
-    assert out_h0 == int(round(src_h * (1600 / src_w)))
-    assert fixed1 is True
-    assert out_w1 == 2400
-    assert out_h1 == int(round(src_h * (2400 / src_w)))
-
-
-def test_loop_fixed_size_not_applied_for_hrrr(monkeypatch):
-    _set_capabilities(
-        monkeypatch,
-        {"tmp2m": SimpleNamespace(kind="continuous", color_map_id="tmp2m")},
-    )
-
-    src_h, src_w = 148, 261
-    out_h, out_w, fixed = render_resampling.compute_loop_output_shape(
-        model_id="hrrr",
-        var_key="tmp2m",
-        src_h=src_h,
-        src_w=src_w,
-        max_dim=1600,
-        fixed_width=1600,
-    )
-
-    assert fixed is False
-    assert out_w == src_w
-    assert out_h == src_h
+        assert fixed is True
+        assert out_w == fixed_width
+        assert out_h == int(round(src_h * (fixed_width / src_w)))
 
 
 def test_display_resampling_override_for_precip_and_snow(monkeypatch):
