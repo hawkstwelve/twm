@@ -305,6 +305,35 @@ async def test_verification_ready_syncs_new_latest_runs(client: httpx.AsyncClien
     assert ("gfs", "20260311_12z") in run_ids
 
 
+async def test_verification_ready_prunes_runs_older_than_retention(client: httpx.AsyncClient) -> None:
+    _create_session(session_id="admin-session", member_id=42, name="Admin")
+
+    old_runs = [
+        "20260310_00z",
+        "20260310_01z",
+        "20260310_02z",
+        "20260310_03z",
+        "20260310_04z",
+    ]
+    for run_id in old_runs:
+        _seed_latest_run(main_module.DATA_ROOT, model_id="hrrr", run_id=run_id, variable_id="tmp2m")
+
+    admin_telemetry.sync_recent_verification_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=5)
+
+    # Simulate retention by removing the oldest manifest so only the newest four remain reviewable.
+    (main_module.DATA_ROOT / "manifests" / "hrrr" / "20260310_00z.json").unlink()
+
+    results = await client.get(
+        "/api/v4/admin/verification/results?window=30d",
+        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
+    )
+
+    assert results.status_code == 200
+    run_ids = {(row["model_id"], row["run_id"]) for row in results.json()["results"]}
+    assert ("hrrr", "20260310_00z") not in run_ids
+    assert ("hrrr", "20260310_04z") in run_ids
+
+
 async def test_verification_review_update(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")
     _seed_verification_files(main_module.DATA_ROOT)

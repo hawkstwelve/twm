@@ -52,6 +52,8 @@ VERIFICATION_VARIABLE_IDS = {
     "snowfall_kuchera_total",
 }
 
+VERIFICATION_KEEP_RUNS_PER_MODEL = 4
+
 VERIFICATION_CUMULATIVE_VARIABLE_IDS = {
     "precip_total",
     "snowfall_total",
@@ -598,6 +600,37 @@ def sync_recent_verification_runs(*, data_root: Path, limit_runs_per_model: int 
     return synced
 
 
+def prune_verification_rows(*, data_root: Path, keep_runs_per_model: int = VERIFICATION_KEEP_RUNS_PER_MODEL) -> int:
+    manifests_root = data_root / "manifests"
+    if not manifests_root.is_dir():
+        return 0
+
+    allowed_by_model: dict[str, set[str]] = {}
+    for model_dir in sorted(path for path in manifests_root.iterdir() if path.is_dir()):
+        run_ids = sorted(
+            [path.stem for path in model_dir.glob("*.json") if path.is_file()],
+            reverse=True,
+        )[: max(1, int(keep_runs_per_model))]
+        allowed_by_model[model_dir.name] = set(run_ids)
+
+    deleted = 0
+    with _connect() as conn:
+        rows = conn.execute("SELECT DISTINCT model_id, run_id FROM qa_reviews").fetchall()
+        for row in rows:
+            model_id = str(row["model_id"])
+            run_id = str(row["run_id"])
+            allowed_runs = allowed_by_model.get(model_id, set())
+            if run_id in allowed_runs:
+                continue
+            before = conn.total_changes
+            conn.execute(
+                "DELETE FROM qa_reviews WHERE model_id = ? AND run_id = ?",
+                (model_id, run_id),
+            )
+            deleted += conn.total_changes - before
+    return deleted
+
+
 def sync_latest_missing_verification_runs(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
     manifests_root = data_root / "manifests"
     if not manifests_root.is_dir():
@@ -667,10 +700,14 @@ def refresh_missing_verification_diagnostics(*, data_root: Path, limit_runs: int
 
 
 def ensure_verification_ready(*, data_root: Path, seed_limit_runs_per_model: int = 2, refresh_limit_runs: int = 50) -> int:
+    pruned = prune_verification_rows(data_root=data_root, keep_runs_per_model=VERIFICATION_KEEP_RUNS_PER_MODEL)
     seeded = ensure_verification_seeded(data_root=data_root, limit_runs_per_model=seed_limit_runs_per_model)
-    latest = sync_latest_missing_verification_runs(data_root=data_root, limit_runs_per_model=seed_limit_runs_per_model)
+    latest = sync_latest_missing_verification_runs(
+        data_root=data_root,
+        limit_runs_per_model=max(VERIFICATION_KEEP_RUNS_PER_MODEL, seed_limit_runs_per_model),
+    )
     refreshed = refresh_missing_verification_diagnostics(data_root=data_root, limit_runs=refresh_limit_runs)
-    return seeded + latest + refreshed
+    return pruned + seeded + latest + refreshed
 
 
 def get_verification_summary(
