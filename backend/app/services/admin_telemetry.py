@@ -531,6 +531,7 @@ def get_verification_results(
     model_id: str | None = None,
     variable_id: str | None = None,
     manual_status: str | None = None,
+    flagged_only: bool = False,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     clauses = ["updated_at >= ?"]
@@ -545,6 +546,8 @@ def get_verification_results(
     if normalized_manual_status:
         clauses.append("manual_status = ?")
         params.append(normalized_manual_status)
+    if flagged_only:
+        clauses.append("(auto_status = 'warning' OR manual_status = 'fail')")
 
     params.append(max(1, min(500, int(limit))))
     where_sql = " WHERE " + " AND ".join(clauses)

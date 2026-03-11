@@ -12,7 +12,7 @@ import {
 } from "@/lib/admin-api";
 
 type WindowValue = "24h" | "7d" | "30d";
-type ManualStatusFilter = "all" | "review" | "pass" | "fail";
+type QueueFilter = "review" | "flagged" | "all" | "pass" | "fail";
 
 function formatTimestamp(value: number | null | undefined): string {
   if (!value) return "—";
@@ -43,6 +43,9 @@ function SummaryCard(props: {
   value: number;
   accent: string;
   icon: typeof ClipboardCheck;
+  hint?: string;
+  onClick?: () => void;
+  active?: boolean;
 }) {
   const { title, value, accent, icon: Icon } = props;
   const muted = value === 0;
@@ -50,13 +53,17 @@ function SummaryCard(props: {
     <section
       className={[
         "rounded-[24px] border p-5 shadow-[0_16px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl",
+        props.onClick ? "cursor-pointer transition-colors hover:bg-white/[0.03]" : "",
         muted ? "border-white/8 bg-black/18" : "border-white/12 bg-black/28",
+        props.active ? "ring-1 ring-emerald-300/30" : "",
       ].join(" ")}
+      onClick={props.onClick}
     >
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className={`text-sm font-semibold ${muted ? "text-white/72" : "text-white"}`}>{title}</div>
           <div className={`mt-3 text-[2.1rem] font-semibold tracking-tight ${muted ? "text-white/68" : accent}`}>{value}</div>
+          {props.hint ? <div className="mt-2 text-xs uppercase tracking-[0.18em] text-white/38">{props.hint}</div> : null}
         </div>
         <div className={`rounded-2xl border p-3 ${muted ? "border-white/8 bg-white/[0.025]" : "border-white/10 bg-white/[0.05]"}`}>
           <Icon className={`h-5 w-5 ${muted ? "text-white/52" : accent}`} />
@@ -83,7 +90,7 @@ export default function AdminVerificationPage() {
   const [windowValue, setWindowValue] = useState<WindowValue>("30d");
   const [modelFilter, setModelFilter] = useState<string>("all");
   const [variableFilter, setVariableFilter] = useState<string>("all");
-  const [manualFilter, setManualFilter] = useState<ManualStatusFilter>("review");
+  const [queueFilter, setQueueFilter] = useState<QueueFilter>("review");
   const [summary, setSummary] = useState<VerificationSummaryResponse | null>(null);
   const [results, setResults] = useState<VerificationResult[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -115,7 +122,8 @@ export default function AdminVerificationPage() {
             window: windowValue,
             model: modelFilter,
             variable: variableFilter,
-            manualStatus: manualFilter,
+            manualStatus: queueFilter === "review" || queueFilter === "pass" || queueFilter === "fail" ? queueFilter : "all",
+            flaggedOnly: queueFilter === "flagged",
             limit: 250,
           }),
         ]);
@@ -134,7 +142,7 @@ export default function AdminVerificationPage() {
     return () => {
       cancelled = true;
     };
-  }, [manualFilter, modelFilter, variableFilter, windowValue]);
+  }, [modelFilter, queueFilter, variableFilter, windowValue]);
 
   useEffect(() => {
     if (results.length === 0) {
@@ -163,8 +171,20 @@ export default function AdminVerificationPage() {
   const modelOptions = Array.from(new Set(results.map((item) => item.model_id))).sort();
   const variableOptions = Array.from(new Set(results.map((item) => item.variable_id))).sort();
   const hasAnyRows = (summary?.total_rows ?? 0) > 0;
+  const queueLabel =
+    queueFilter === "review"
+      ? "Needs Review"
+      : queueFilter === "flagged"
+        ? "Flagged"
+        : queueFilter === "pass"
+          ? "Manual PASS"
+          : queueFilter === "fail"
+            ? "Manual FAIL"
+            : "All Recent";
   const emptyStateMessage = hasAnyRows
-    ? "No rows match this filter yet. Try widening the filters or switching out of the review queue."
+    ? queueFilter === "flagged"
+      ? "No flagged rows in this window. Click All Recent or Needs Review to work through the queue."
+      : "No rows match this view yet. Try widening the filters or switching to All Recent."
     : "No published verification candidates found yet. This page tracks tmp2m, precip_total, snowfall_total, and snowfall_kuchera_total.";
 
   async function saveReview() {
@@ -215,10 +235,40 @@ export default function AdminVerificationPage() {
         ) : null}
 
         <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard title="Rows in window" value={summary?.total_rows ?? 0} accent="text-white" icon={SearchCheck} />
-          <SummaryCard title="Auto checks passing" value={summary?.auto_pass_rows ?? 0} accent="text-emerald-300" icon={ClipboardCheck} />
-          <SummaryCard title="Needs manual review" value={summary?.manual_review_rows ?? 0} accent="text-amber-300" icon={ShieldAlert} />
-          <SummaryCard title="Flagged" value={summary?.flagged_rows ?? 0} accent="text-rose-300" icon={Flag} />
+          <SummaryCard
+            title="Rows in window"
+            value={summary?.total_rows ?? 0}
+            accent="text-white"
+            icon={SearchCheck}
+            hint="click for all recent"
+            onClick={() => setQueueFilter("all")}
+            active={queueFilter === "all"}
+          />
+          <SummaryCard
+            title="Auto checks passing"
+            value={summary?.auto_pass_rows ?? 0}
+            accent="text-emerald-300"
+            icon={ClipboardCheck}
+            hint="window total"
+          />
+          <SummaryCard
+            title="Needs manual review"
+            value={summary?.manual_review_rows ?? 0}
+            accent="text-amber-300"
+            icon={ShieldAlert}
+            hint="click to open queue"
+            onClick={() => setQueueFilter("review")}
+            active={queueFilter === "review"}
+          />
+          <SummaryCard
+            title="Flagged"
+            value={summary?.flagged_rows ?? 0}
+            accent="text-rose-300"
+            icon={Flag}
+            hint="click to inspect"
+            onClick={() => setQueueFilter("flagged")}
+            active={queueFilter === "flagged"}
+          />
         </div>
 
         <div className="mt-6 grid gap-3 md:grid-cols-4">
@@ -265,29 +315,42 @@ export default function AdminVerificationPage() {
             </select>
           </label>
           <label className="space-y-2 text-sm">
-            <span className="text-white/62">Manual status</span>
+            <span className="text-white/62">Table view</span>
             <select
-              value={manualFilter}
-              onChange={(event) => setManualFilter(event.target.value as ManualStatusFilter)}
+              value={queueFilter}
+              onChange={(event) => setQueueFilter(event.target.value as QueueFilter)}
               className="w-full rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-3 text-white outline-none"
             >
-              <option value="all">All statuses</option>
-              <option value="review">Review</option>
-              <option value="pass">Pass</option>
-              <option value="fail">Fail</option>
+              <option value="review">Needs review</option>
+              <option value="flagged">Flagged</option>
+              <option value="all">All recent</option>
+              <option value="pass">Manual PASS</option>
+              <option value="fail">Manual FAIL</option>
             </select>
           </label>
         </div>
 
         <div className="mt-4 text-sm text-white/48">
-          Tracking <span className="text-white/72">tmp2m</span>, <span className="text-white/72">precip_total</span>, <span className="text-white/72">snowfall_total</span>, and <span className="text-white/72">snowfall_kuchera_total</span>. The table defaults to items still needing manual review.
+          Tracking <span className="text-white/72">tmp2m</span>, <span className="text-white/72">precip_total</span>, <span className="text-white/72">snowfall_total</span>, and <span className="text-white/72">snowfall_kuchera_total</span>. Use <span className="text-white/72">Needs review</span> to work the queue, click a row, then mark it <span className="text-white/72">PASS</span> or <span className="text-white/72">FAIL</span> in the panel on the right.
         </div>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
         <section className="rounded-[32px] border border-white/12 bg-black/28 p-4 text-white shadow-[0_16px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl">
-          <div className="overflow-x-auto">
-            <table className="min-w-full border-separate border-spacing-y-2 text-left text-sm">
+          <div className="mb-3 flex items-center justify-between gap-3 px-2">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-[#95b1a2]">Queue</div>
+              <div className="mt-1 text-sm text-white/58">
+                Showing <span className="text-white">{queueLabel}</span> for the selected window and filters.
+              </div>
+            </div>
+            <div className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-medium text-white/60">
+              {results.length} rows loaded
+            </div>
+          </div>
+
+          <div className="overflow-x-auto pb-2">
+            <table className="w-max min-w-[980px] border-separate border-spacing-y-2 text-left text-sm">
               <thead className="text-white/48">
                 <tr>
                   <th className="px-3 py-2 font-medium">Model</th>
@@ -344,7 +407,7 @@ export default function AdminVerificationPage() {
         <section className="rounded-[32px] border border-white/12 bg-black/28 p-5 text-white shadow-[0_16px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl">
           {!selected ? (
             <div className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-10 text-sm text-white/48">
-              Select a row to review its checks and update manual status.
+              Choose a row from the left to review it. The fastest workflow is: keep <span className="text-white/72">Needs review</span> selected, open the top row, compare it to your benchmark site, then save <span className="text-white/72">PASS</span> or <span className="text-white/72">FAIL</span>.
             </div>
           ) : (
             <div className="space-y-5">

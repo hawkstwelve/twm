@@ -209,6 +209,16 @@ async def test_verification_summary_and_results(client: httpx.AsyncClient) -> No
     assert warning_row["auto_status"] == "warning"
     assert warning_row["auto_checks"]["monotonic"] is False
 
+    flagged = await client.get(
+        "/api/v4/admin/verification/results?window=30d&flagged_only=true",
+        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
+    )
+
+    assert flagged.status_code == 200
+    flagged_rows = flagged.json()["results"]
+    assert len(flagged_rows) == 1
+    assert flagged_rows[0]["auto_status"] == "warning"
+
 
 async def test_verification_review_update(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")

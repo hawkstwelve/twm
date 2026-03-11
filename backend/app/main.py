@@ -1110,6 +1110,7 @@ async def admin_verification_results(
     model: str | None = Query(None),
     variable: str | None = Query(None),
     manual_status: str | None = Query(None),
+    flagged_only: bool = Query(False),
     limit: int = Query(200, ge=1, le=500),
 ) -> dict[str, Any]:
     _require_admin_session(request)
@@ -1123,12 +1124,14 @@ async def admin_verification_results(
             "model": _normalize_filter_value(model),
             "variable": _normalize_filter_value(variable),
             "manual_status": normalized_manual_status,
+            "flagged_only": bool(flagged_only),
         },
         "results": admin_telemetry.get_verification_results(
             since_ts=since_ts,
             model_id=_normalize_filter_value(model),
             variable_id=_normalize_filter_value(variable),
             manual_status=normalized_manual_status,
+            flagged_only=bool(flagged_only),
             limit=limit,
         ),
     }
