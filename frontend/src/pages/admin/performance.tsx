@@ -295,7 +295,7 @@ function MetricDetailDialog(props: {
       <button
         type="button"
         aria-label="Close metric details"
-        className="absolute inset-0 bg-[#04110d]/80 backdrop-blur-md"
+        className="absolute inset-0 bg-black/82 backdrop-blur-md"
         onClick={onClose}
       />
       <div className="relative z-10 flex h-full items-center justify-center p-4 md:p-6">
@@ -303,7 +303,7 @@ function MetricDetailDialog(props: {
           role="dialog"
           aria-modal="true"
           aria-label={`${title} details`}
-          className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/12 bg-[#061511]/96 shadow-[0_24px_80px_rgba(0,0,0,0.55)]"
+          className="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-[32px] border border-white/12 bg-black/72 shadow-[0_24px_80px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
         >
           <div className="flex items-start justify-between gap-4 border-b border-white/10 px-5 py-4 md:px-6">
             <div>
