@@ -57,6 +57,18 @@ function monotonicSummary(diagnostics: VerificationDiagnostics): string {
   return `${fraction} of valid pixels decreased; max drop ${drop}`;
 }
 
+function artifactSummary(diagnostics: VerificationDiagnostics): string | null {
+  const artifact = diagnostics.artifact;
+  if (!artifact) return null;
+  if (artifact.issue_type === "missing_value_grid") {
+    return "Published value grid file is missing. This is a build/publish issue, not a geographic map-diff issue.";
+  }
+  if (artifact.issue_type === "unreadable_value_grid") {
+    return "Published value grid file exists but could not be read. This is an artifact/storage issue.";
+  }
+  return null;
+}
+
 function SummaryCard(props: {
   title: string;
   value: number;
@@ -455,7 +467,9 @@ export default function AdminVerificationPage() {
                       </td>
                       <td className="max-w-[340px] border-y border-white/10 px-3 py-3 text-white/68">
                         <div className="line-clamp-2">
-                          {item.warning_summary ?? (item.auto_status === "pass" ? "No automatic issues detected." : monotonicSummary(item.diagnostics))}
+                          {item.warning_summary
+                            ?? artifactSummary(item.diagnostics)
+                            ?? (item.auto_status === "pass" ? "No automatic issues detected." : monotonicSummary(item.diagnostics))}
                         </div>
                       </td>
                       <td className="border-y border-white/10 px-3 py-3">{formatCoverage(item.coverage_fraction)}</td>
@@ -519,9 +533,36 @@ export default function AdminVerificationPage() {
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <div className="text-xs uppercase tracking-[0.22em] text-white/42">Diagnostic summary</div>
                 <div className="mt-3 text-sm leading-6 text-white/78">
-                  {selected.warning_summary ?? "No automatic issues detected for this frame."}
+                  {selected.warning_summary ?? artifactSummary(selected.diagnostics) ?? "No automatic issues detected for this frame."}
                 </div>
               </div>
+
+              {selected.diagnostics.artifact ? (
+                <div className="rounded-2xl border border-rose-400/18 bg-rose-500/8 p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-rose-100/70">Artifact diagnostics</div>
+                  <div className="mt-3 space-y-2 text-sm text-rose-50/86">
+                    <div>
+                      Value grid:{" "}
+                      <span className="font-medium">
+                        {selected.diagnostics.artifact.value_grid_exists ? "Present" : "Missing"}
+                      </span>
+                    </div>
+                    <div className="break-all text-rose-100/70">{selected.diagnostics.artifact.value_grid_path}</div>
+                    <div>
+                      Sidecar:{" "}
+                      <span className="font-medium">
+                        {selected.diagnostics.artifact.sidecar_exists ? "Present" : "Missing"}
+                      </span>
+                    </div>
+                    <div className="break-all text-rose-100/70">{selected.diagnostics.artifact.sidecar_path}</div>
+                    {selected.diagnostics.artifact.read_error ? (
+                      <div className="rounded-xl border border-rose-400/20 bg-black/20 px-3 py-2 text-rose-100/74">
+                        Read error: {selected.diagnostics.artifact.read_error}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
 
               {selected.diagnostics.monotonic && selected.auto_checks.monotonic === false ? (
                 <div className="grid gap-3 sm:grid-cols-2">

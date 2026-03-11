@@ -86,6 +86,14 @@ export type VerificationDiagnostics = {
     max_decrease_lon?: number | null;
     max_decrease_lat?: number | null;
   } | null;
+  artifact?: {
+    issue_type?: string;
+    value_grid_exists?: boolean;
+    value_grid_path?: string;
+    sidecar_exists?: boolean;
+    sidecar_path?: string;
+    read_error?: string;
+  } | null;
 };
 
 export type VerificationSummaryResponse = {

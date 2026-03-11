@@ -388,25 +388,44 @@ def _build_auto_checks(
     status = "warning"
 
     if not value_path.exists():
+        diagnostics = {
+            "artifact": {
+                "issue_type": "missing_value_grid",
+                "value_grid_exists": False,
+                "value_grid_path": str(value_path),
+                "sidecar_exists": _sidecar_path(data_root, model_id, run_id, variable_id, forecast_hour).exists(),
+                "sidecar_path": str(_sidecar_path(data_root, model_id, run_id, variable_id, forecast_hour)),
+            }
+        }
         return {
             "status": status,
             "checks": checks,
             "metrics": metrics,
             "diagnostics": diagnostics,
             "severity": "high",
-            "warning_summary": "Published value grid is missing or unreadable.",
+            "warning_summary": f"Published value grid is missing for {model_id}/{run_id}/{variable_id}/fh{forecast_hour:03d}.",
         }
 
     try:
         valid_count, total_count, range_min, range_max = _finite_grid_stats(value_path)
-    except Exception:
+    except Exception as exc:
+        diagnostics = {
+            "artifact": {
+                "issue_type": "unreadable_value_grid",
+                "value_grid_exists": True,
+                "value_grid_path": str(value_path),
+                "sidecar_exists": _sidecar_path(data_root, model_id, run_id, variable_id, forecast_hour).exists(),
+                "sidecar_path": str(_sidecar_path(data_root, model_id, run_id, variable_id, forecast_hour)),
+                "read_error": str(exc),
+            }
+        }
         return {
             "status": status,
             "checks": checks,
             "metrics": metrics,
             "diagnostics": diagnostics,
             "severity": "high",
-            "warning_summary": "Published value grid could not be analyzed.",
+            "warning_summary": f"Published value grid could not be read for {model_id}/{run_id}/{variable_id}/fh{forecast_hour:03d}.",
         }
 
     coverage_fraction = (valid_count / total_count) if total_count > 0 else 0.0
