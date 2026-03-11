@@ -68,10 +68,62 @@ export type UsageSummaryResponse = {
   }>;
 };
 
-async function fetchJson<T>(url: string): Promise<T> {
+export type VerificationAutoChecks = {
+  has_valid_pixels?: boolean;
+  range_present?: boolean;
+  coverage_present?: boolean;
+  monotonic?: boolean | null;
+};
+
+export type VerificationSummaryResponse = {
+  window: string;
+  filters: {
+    model: string | null;
+    variable: string | null;
+  };
+  total_rows: number;
+  auto_pass_rows: number;
+  manual_review_rows: number;
+  flagged_rows: number;
+};
+
+export type VerificationResult = {
+  id: number;
+  created_at: number;
+  updated_at: number;
+  model_id: string;
+  variable_id: string;
+  run_id: string;
+  forecast_hour: number;
+  auto_status: "pass" | "warning";
+  manual_status: "review" | "pass" | "fail";
+  benchmark_site?: string | null;
+  reviewer_name?: string | null;
+  reviewer_member_id?: number | null;
+  notes?: string | null;
+  auto_checks: VerificationAutoChecks;
+  coverage_fraction?: number | null;
+  valid_pixel_count: number;
+  total_pixel_count: number;
+  range_min?: number | null;
+  range_max?: number | null;
+  last_checked_at: number;
+};
+
+export type VerificationResultsResponse = {
+  window: string;
+  filters: {
+    model: string | null;
+    variable: string | null;
+    manual_status: string | null;
+  };
+  results: VerificationResult[];
+};
+
+async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
-    method: "GET",
     credentials: "include",
+    ...init,
   });
   if (!response.ok) {
     let message = `Request failed (${response.status})`;
@@ -148,4 +200,49 @@ export async function fetchAdminUsageSummary(window: string): Promise<UsageSumma
   const search = new URLSearchParams();
   search.set("window", window);
   return fetchJson<UsageSummaryResponse>(`${API_ORIGIN}/api/v4/admin/usage/summary?${search.toString()}`);
+}
+
+export async function fetchAdminVerificationSummary(params: {
+  window: string;
+  model?: string;
+  variable?: string;
+}): Promise<VerificationSummaryResponse> {
+  const search = new URLSearchParams();
+  search.set("window", params.window);
+  if (params.model && params.model !== "all") search.set("model", params.model);
+  if (params.variable && params.variable !== "all") search.set("variable", params.variable);
+  return fetchJson<VerificationSummaryResponse>(`${API_ORIGIN}/api/v4/admin/verification/summary?${search.toString()}`);
+}
+
+export async function fetchAdminVerificationResults(params: {
+  window: string;
+  model?: string;
+  variable?: string;
+  manualStatus?: string;
+  limit?: number;
+}): Promise<VerificationResultsResponse> {
+  const search = new URLSearchParams();
+  search.set("window", params.window);
+  if (params.limit) search.set("limit", String(params.limit));
+  if (params.model && params.model !== "all") search.set("model", params.model);
+  if (params.variable && params.variable !== "all") search.set("variable", params.variable);
+  if (params.manualStatus && params.manualStatus !== "all") search.set("manual_status", params.manualStatus);
+  return fetchJson<VerificationResultsResponse>(`${API_ORIGIN}/api/v4/admin/verification/results?${search.toString()}`);
+}
+
+export async function updateAdminVerificationReview(
+  reviewId: number,
+  payload: {
+    manual_status: "review" | "pass" | "fail";
+    benchmark_site?: string;
+    notes?: string;
+  },
+): Promise<VerificationResult> {
+  return fetchJson<VerificationResult>(`${API_ORIGIN}/api/v4/admin/verification/results/${reviewId}/review`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
 }

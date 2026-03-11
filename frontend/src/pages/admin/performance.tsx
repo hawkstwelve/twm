@@ -115,7 +115,7 @@ function MetricCard(props: {
 
       <div className={`mt-5 text-[2.2rem] font-semibold tracking-tight ${status.accentClassName}`}>{formatMs(p95)}</div>
       <div className="mt-2 flex items-center gap-2 text-sm text-white/62">
-        <span>p50 {formatMs(metric?.p50_ms)}</span>
+        <span className={status.accentClassName}>p50 {formatMs(metric?.p50_ms)}</span>
         <span className="text-white/24">•</span>
         <span>{formatCount(metric?.count)} samples</span>
       </div>
@@ -210,7 +210,8 @@ function TrendChart(props: {
   );
 }
 
-function BreakdownList(props: { title: string; subtitle: string; items: PerfBreakdownItem[] }) {  const { title, subtitle, items } = props;
+function BreakdownList(props: { title: string; subtitle: string; items: PerfBreakdownItem[] }) {
+  const { title, subtitle, items } = props;
 
   return (
     <section className="rounded-[28px] border border-white/12 bg-black/28 p-5 shadow-[0_16px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl">
@@ -223,20 +224,23 @@ function BreakdownList(props: { title: string; subtitle: string; items: PerfBrea
             No data yet for this breakdown.
           </div>
         ) : (
-          items.map((item) => (
-            <div key={item.key} className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold text-white">{item.key}</div>
-                  <div className="mt-1 text-xs text-white/48">{formatCount(item.count)} samples</div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-semibold text-[#9dd5bf]">{formatMs(item.p95_ms)}</div>
-                  <div className="mt-1 text-xs text-white/48">p50 {formatMs(item.p50_ms)}</div>
+          items.map((item) => {
+            const status = getMetricStatus(item);
+            return (
+              <div key={item.key} className="rounded-2xl border border-white/10 bg-white/[0.035] px-4 py-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="truncate text-sm font-semibold text-white">{item.key}</div>
+                    <div className="mt-1 text-xs text-white/48">{formatCount(item.count)} samples</div>
+                  </div>
+                  <div className="text-right">
+                    <div className={`text-sm font-semibold ${status.accentClassName}`}>{formatMs(item.p95_ms)}</div>
+                    <div className={`mt-1 text-xs ${status.accentClassName}`}>p50 {formatMs(item.p50_ms)}</div>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </section>

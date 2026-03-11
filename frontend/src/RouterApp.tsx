@@ -11,6 +11,7 @@ const Status = lazy(() => import("./pages/status"));
 const Login = lazy(() => import("./pages/login"));
 const AdminPerformance = lazy(() => import("./pages/admin/performance"));
 const AdminUsage = lazy(() => import("./pages/admin/usage"));
+const AdminVerification = lazy(() => import("./pages/admin/verification"));
 const Viewer = lazy(() => import("./pages/viewer"));
 
 function withSuspense(node: React.ReactNode) {
@@ -33,6 +34,7 @@ export default function RouterApp() {
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<Navigate to="/admin/performance" replace />} />
           <Route path="performance" element={withSuspense(<AdminPerformance />)} />
+          <Route path="verification" element={withSuspense(<AdminVerification />)} />
           <Route path="usage" element={withSuspense(<AdminUsage />)} />
         </Route>
       </Route>

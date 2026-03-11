@@ -936,6 +936,12 @@ class UsageTelemetryIn(TelemetryEventBase):
     event_name: str = Field(min_length=1, max_length=64)
 
 
+class VerificationReviewUpdateIn(BaseModel):
+    manual_status: str = Field(min_length=1, max_length=16)
+    benchmark_site: str | None = Field(default=None, max_length=120)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
 @app.post("/api/v4/telemetry/perf", status_code=204)
 async def post_perf_telemetry(request: Request, payload: PerfTelemetryIn) -> Response:
     sess = _maybe_twf_session(request)
@@ -1070,6 +1076,82 @@ async def admin_usage_summary(request: Request, window: str = Query("30d")) -> d
         "window": normalized_window,
         **admin_telemetry.get_usage_summary(since_ts=since_ts),
     }
+
+
+@app.get("/api/v4/admin/verification/summary")
+async def admin_verification_summary(
+    request: Request,
+    window: str = Query("30d"),
+    model: str | None = Query(None),
+    variable: str | None = Query(None),
+) -> dict[str, Any]:
+    _require_admin_session(request)
+    admin_telemetry.sync_recent_verification_runs(data_root=DATA_ROOT, limit_runs_per_model=2)
+    normalized_window = window.strip().lower()
+    since_ts = int(time.time()) - _resolve_window_seconds(normalized_window)
+    return {
+        "window": normalized_window,
+        "filters": {
+            "model": _normalize_filter_value(model),
+            "variable": _normalize_filter_value(variable),
+        },
+        **admin_telemetry.get_verification_summary(
+            since_ts=since_ts,
+            model_id=_normalize_filter_value(model),
+            variable_id=_normalize_filter_value(variable),
+        ),
+    }
+
+
+@app.get("/api/v4/admin/verification/results")
+async def admin_verification_results(
+    request: Request,
+    window: str = Query("30d"),
+    model: str | None = Query(None),
+    variable: str | None = Query(None),
+    manual_status: str | None = Query(None),
+    limit: int = Query(200, ge=1, le=500),
+) -> dict[str, Any]:
+    _require_admin_session(request)
+    admin_telemetry.sync_recent_verification_runs(data_root=DATA_ROOT, limit_runs_per_model=2)
+    normalized_window = window.strip().lower()
+    since_ts = int(time.time()) - _resolve_window_seconds(normalized_window)
+    normalized_manual_status = _normalize_filter_value(manual_status)
+    return {
+        "window": normalized_window,
+        "filters": {
+            "model": _normalize_filter_value(model),
+            "variable": _normalize_filter_value(variable),
+            "manual_status": normalized_manual_status,
+        },
+        "results": admin_telemetry.get_verification_results(
+            since_ts=since_ts,
+            model_id=_normalize_filter_value(model),
+            variable_id=_normalize_filter_value(variable),
+            manual_status=normalized_manual_status,
+            limit=limit,
+        ),
+    }
+
+
+@app.post("/api/v4/admin/verification/results/{review_id}/review")
+async def admin_verification_update_review(
+    request: Request,
+    review_id: int,
+    payload: VerificationReviewUpdateIn,
+) -> dict[str, Any]:
+    sess = _require_admin_session(request)
+    updated = admin_telemetry.update_verification_review(
+        review_id=review_id,
+        manual_status=payload.manual_status,
+        benchmark_site=payload.benchmark_site,
+        notes=payload.notes,
+        reviewer_name=sess.display_name,
+        reviewer_member_id=sess.member_id,
+    )
+    if updated is None:
+        raise TwfApiError(status_code=404, code="VERIFICATION_REVIEW_NOT_FOUND", message="Verification review not found")
+    return updated
 
 
 @app.post("/auth/twf/disconnect")

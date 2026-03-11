@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Activity, BarChart3, ChevronRight } from "lucide-react";
+import { Activity, BarChart3, ChevronRight, ClipboardCheck } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 function AdminNavItem(props: { to: string; label: string; icon: ComponentType<{ className?: string }> }) {
@@ -58,6 +58,7 @@ export default function AdminLayout() {
 
           <nav className="space-y-2">
             <AdminNavItem to="/admin/performance" label="Performance" icon={Activity} />
+            <AdminNavItem to="/admin/verification" label="Verification" icon={ClipboardCheck} />
             <AdminNavItem to="/admin/usage" label="Usage" icon={BarChart3} />
           </nav>
         </aside>

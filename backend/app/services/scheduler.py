@@ -19,6 +19,7 @@ from PIL import Image, ImageFilter
 from rasterio.enums import Resampling
 
 from app.models.registry import MODEL_REGISTRY
+from app.services import admin_telemetry
 from app.services.builder.colorize import float_to_rgba
 from app.services.builder.fetch import HerbieTransientUnavailableError, fetch_variable
 from app.services.builder.pipeline import build_frame, build_frame_bundle
@@ -1385,6 +1386,10 @@ def _process_run(
             plugin=plugin,
         )
         _write_latest_pointer(data_root, model_id, run_id)
+        try:
+            admin_telemetry.sync_verification_run(data_root=data_root, model_id=model_id, run_id=run_id)
+        except Exception as exc:
+            logger.warning("Verification sync failed for %s/%s: %s", model_id, run_id, exc)
         if loop_pregenerate_enabled:
             _pregenerate_loop_webp_for_run(
                 data_root=data_root,
