@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import rasterio
+from pyproj import Transformer
 
 TELEMETRY_DB_PATH = Path(
     os.environ.get("CARTOSKY_TELEMETRY_DB_PATH")
@@ -185,6 +186,13 @@ def _init_db(conn: sqlite3.Connection) -> None:
                 ON qa_reviews(manual_status, updated_at DESC);
             """
         )
+        qa_cols = {str(row["name"]) for row in conn.execute("PRAGMA table_info(qa_reviews)").fetchall()}
+        if "warning_summary" not in qa_cols:
+            conn.execute("ALTER TABLE qa_reviews ADD COLUMN warning_summary TEXT")
+        if "severity" not in qa_cols:
+            conn.execute("ALTER TABLE qa_reviews ADD COLUMN severity TEXT")
+        if "diagnostics_json" not in qa_cols:
+            conn.execute("ALTER TABLE qa_reviews ADD COLUMN diagnostics_json TEXT")
         _db_initialized = True
 
 
@@ -256,7 +264,18 @@ def _finite_grid_stats(path: Path) -> tuple[int, int, float | None, float | None
     return valid_count, total_count, float(np.min(finite_values)), float(np.max(finite_values))
 
 
-def _monotonic_ok(current_path: Path, previous_path: Path, *, tolerance: float = 0.01) -> bool | None:
+def _pixel_to_lon_lat(path: Path, row: int, col: int) -> tuple[float | None, float | None]:
+    with rasterio.open(path) as dataset:
+        x, y = dataset.xy(row, col)
+        src_crs = dataset.crs
+    if src_crs is None:
+        return None, None
+    transformer = Transformer.from_crs(src_crs, "EPSG:4326", always_xy=True)
+    lon, lat = transformer.transform(x, y)
+    return float(lon), float(lat)
+
+
+def _monotonic_diagnostics(current_path: Path, previous_path: Path, *, tolerance: float = 0.01) -> dict[str, Any] | None:
     if not current_path.exists() or not previous_path.exists():
         return None
     with rasterio.open(current_path) as current_ds:
@@ -264,12 +283,80 @@ def _monotonic_ok(current_path: Path, previous_path: Path, *, tolerance: float =
     with rasterio.open(previous_path) as previous_ds:
         previous = previous_ds.read(1, masked=False)
     if current.shape != previous.shape:
-        return False
+        return {
+            "ok": False,
+            "reason": "shape_mismatch",
+        }
     valid_mask = np.isfinite(current) & np.isfinite(previous)
     if not valid_mask.any():
         return None
     deltas = current[valid_mask] - previous[valid_mask]
-    return bool(float(np.min(deltas)) >= -abs(float(tolerance)))
+    threshold = -abs(float(tolerance))
+    decreased_mask = valid_mask & ((current - previous) < threshold)
+    decreased_count = int(decreased_mask.sum())
+    valid_count = int(valid_mask.sum())
+    min_delta = float(np.min(deltas))
+    max_increase = float(np.max(deltas))
+    if decreased_count <= 0:
+        return {
+            "ok": True,
+            "decreased_pixel_count": 0,
+            "decreased_fraction": 0.0,
+            "max_decrease": 0.0,
+            "max_increase": round(max_increase, 3),
+        }
+
+    delta_grid = current - previous
+    decrease_values = np.where(decreased_mask, delta_grid, np.inf)
+    row, col = np.unravel_index(int(np.argmin(decrease_values)), decrease_values.shape)
+    lon, lat = _pixel_to_lon_lat(current_path, int(row), int(col))
+    return {
+        "ok": False,
+        "decreased_pixel_count": decreased_count,
+        "decreased_fraction": round(decreased_count / max(1, valid_count), 6),
+        "max_decrease": round(abs(min_delta), 3),
+        "max_increase": round(max_increase, 3),
+        "max_decrease_lon": round(lon, 3) if lon is not None else None,
+        "max_decrease_lat": round(lat, 3) if lat is not None else None,
+    }
+
+
+def _severity_from_diagnostics(*, checks: dict[str, Any], diagnostics: dict[str, Any]) -> str:
+    if checks.get("has_valid_pixels") is not True or checks.get("coverage_present") is not True:
+        return "high"
+    monotonic = diagnostics.get("monotonic")
+    if isinstance(monotonic, dict) and monotonic.get("ok") is False:
+        fraction = float(monotonic.get("decreased_fraction") or 0.0)
+        max_decrease = float(monotonic.get("max_decrease") or 0.0)
+        if fraction >= 0.05 or max_decrease >= 2.0:
+            return "high"
+        if fraction >= 0.01 or max_decrease >= 1.0:
+            return "medium"
+        return "low"
+    return "none"
+
+
+def _warning_summary(*, variable_id: str, checks: dict[str, Any], diagnostics: dict[str, Any]) -> str | None:
+    if checks.get("has_valid_pixels") is not True:
+        return "No valid pixels found in published value grid."
+    if checks.get("coverage_present") is not True:
+        return "Coverage fell below the minimum expected threshold."
+    if checks.get("range_present") is not True:
+        return "Value range metadata is missing or invalid."
+    monotonic = diagnostics.get("monotonic")
+    if isinstance(monotonic, dict) and monotonic.get("ok") is False:
+        if monotonic.get("reason") == "shape_mismatch":
+            return "Current and previous forecast hours are on different grid shapes."
+        decreased_fraction = float(monotonic.get("decreased_fraction") or 0.0) * 100.0
+        max_decrease = float(monotonic.get("max_decrease") or 0.0)
+        lat = monotonic.get("max_decrease_lat")
+        lon = monotonic.get("max_decrease_lon")
+        location = f" near {lat}, {lon}" if lat is not None and lon is not None else ""
+        return (
+            f"Cumulative {variable_id} decreased versus the previous hour at "
+            f"{decreased_fraction:.1f}% of valid pixels; max drop {max_decrease:.1f}{location}."
+        )
+    return None
 
 
 def _build_auto_checks(
@@ -297,6 +384,7 @@ def _build_auto_checks(
         "range_min": None,
         "range_max": None,
     }
+    diagnostics: dict[str, Any] = {}
     status = "warning"
 
     if not value_path.exists():
@@ -304,6 +392,9 @@ def _build_auto_checks(
             "status": status,
             "checks": checks,
             "metrics": metrics,
+            "diagnostics": diagnostics,
+            "severity": "high",
+            "warning_summary": "Published value grid is missing or unreadable.",
         }
 
     try:
@@ -313,6 +404,9 @@ def _build_auto_checks(
             "status": status,
             "checks": checks,
             "metrics": metrics,
+            "diagnostics": diagnostics,
+            "severity": "high",
+            "warning_summary": "Published value grid could not be analyzed.",
         }
 
     coverage_fraction = (valid_count / total_count) if total_count > 0 else 0.0
@@ -337,11 +431,9 @@ def _build_auto_checks(
             if previous_forecast_hour is not None
             else None
         )
-        checks["monotonic"] = (
-            _monotonic_ok(value_path, previous_path)
-            if previous_path is not None
-            else None
-        )
+        monotonic = _monotonic_diagnostics(value_path, previous_path) if previous_path is not None else None
+        diagnostics["monotonic"] = monotonic
+        checks["monotonic"] = monotonic.get("ok") if isinstance(monotonic, dict) else None
 
     status = "pass"
     for check_name, value in checks.items():
@@ -362,6 +454,9 @@ def _build_auto_checks(
         "status": status,
         "checks": checks,
         "metrics": metrics,
+        "diagnostics": diagnostics,
+        "severity": _severity_from_diagnostics(checks=checks, diagnostics=diagnostics),
+        "warning_summary": _warning_summary(variable_id=variable_id, checks=checks, diagnostics=diagnostics),
     }
 
 
@@ -422,9 +517,12 @@ def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int
                         total_pixel_count,
                         range_min,
                         range_max,
+                        warning_summary,
+                        severity,
+                        diagnostics_json,
                         last_checked_at
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(model_id, variable_id, run_id, forecast_hour)
                     DO UPDATE SET
                         updated_at=excluded.updated_at,
@@ -435,6 +533,9 @@ def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int
                         total_pixel_count=excluded.total_pixel_count,
                         range_min=excluded.range_min,
                         range_max=excluded.range_max,
+                        warning_summary=excluded.warning_summary,
+                        severity=excluded.severity,
+                        diagnostics_json=excluded.diagnostics_json,
                         last_checked_at=excluded.last_checked_at
                     """,
                     (
@@ -452,6 +553,9 @@ def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int
                         auto_result["metrics"]["total_pixel_count"],
                         auto_result["metrics"]["range_min"],
                         auto_result["metrics"]["range_max"],
+                        _normalize_text(auto_result["warning_summary"], max_length=240),
+                        _normalize_text(auto_result["severity"], max_length=24),
+                        _serialize_meta(auto_result["diagnostics"]),
                         now,
                     ),
                 )
@@ -575,6 +679,9 @@ def get_verification_results(
                 total_pixel_count,
                 range_min,
                 range_max,
+                warning_summary,
+                severity,
+                diagnostics_json,
                 last_checked_at
             FROM qa_reviews
             {where_sql}
@@ -587,6 +694,7 @@ def get_verification_results(
     results: list[dict[str, Any]] = []
     for row in rows:
         auto_checks = {}
+        diagnostics = {}
         if row["auto_checks_json"]:
             try:
                 parsed = json.loads(str(row["auto_checks_json"]))
@@ -594,6 +702,13 @@ def get_verification_results(
                     auto_checks = parsed
             except json.JSONDecodeError:
                 auto_checks = {}
+        if row["diagnostics_json"]:
+            try:
+                parsed = json.loads(str(row["diagnostics_json"]))
+                if isinstance(parsed, dict):
+                    diagnostics = parsed
+            except json.JSONDecodeError:
+                diagnostics = {}
         results.append(
             {
                 "id": int(row["id"]),
@@ -610,11 +725,14 @@ def get_verification_results(
                 "reviewer_member_id": int(row["reviewer_member_id"]) if row["reviewer_member_id"] is not None else None,
                 "notes": _normalize_text(row["notes"], max_length=2000),
                 "auto_checks": auto_checks,
+                "diagnostics": diagnostics,
                 "coverage_fraction": float(row["coverage_fraction"]) if row["coverage_fraction"] is not None else None,
                 "valid_pixel_count": int(row["valid_pixel_count"] or 0),
                 "total_pixel_count": int(row["total_pixel_count"] or 0),
                 "range_min": float(row["range_min"]) if row["range_min"] is not None else None,
                 "range_max": float(row["range_max"]) if row["range_max"] is not None else None,
+                "warning_summary": _normalize_text(row["warning_summary"], max_length=240),
+                "severity": _normalize_text(row["severity"], max_length=24) or "none",
                 "last_checked_at": int(row["last_checked_at"]),
             }
         )
@@ -645,6 +763,9 @@ def get_verification_result(review_id: int) -> dict[str, Any] | None:
                 total_pixel_count,
                 range_min,
                 range_max,
+                warning_summary,
+                severity,
+                diagnostics_json,
                 last_checked_at
             FROM qa_reviews
             WHERE id = ?
@@ -655,6 +776,7 @@ def get_verification_result(review_id: int) -> dict[str, Any] | None:
         return None
 
     auto_checks = {}
+    diagnostics = {}
     if row["auto_checks_json"]:
         try:
             parsed = json.loads(str(row["auto_checks_json"]))
@@ -662,6 +784,13 @@ def get_verification_result(review_id: int) -> dict[str, Any] | None:
                 auto_checks = parsed
         except json.JSONDecodeError:
             auto_checks = {}
+    if row["diagnostics_json"]:
+        try:
+            parsed = json.loads(str(row["diagnostics_json"]))
+            if isinstance(parsed, dict):
+                diagnostics = parsed
+        except json.JSONDecodeError:
+            diagnostics = {}
 
     return {
         "id": int(row["id"]),
@@ -678,11 +807,14 @@ def get_verification_result(review_id: int) -> dict[str, Any] | None:
         "reviewer_member_id": int(row["reviewer_member_id"]) if row["reviewer_member_id"] is not None else None,
         "notes": _normalize_text(row["notes"], max_length=2000),
         "auto_checks": auto_checks,
+        "diagnostics": diagnostics,
         "coverage_fraction": float(row["coverage_fraction"]) if row["coverage_fraction"] is not None else None,
         "valid_pixel_count": int(row["valid_pixel_count"] or 0),
         "total_pixel_count": int(row["total_pixel_count"] or 0),
         "range_min": float(row["range_min"]) if row["range_min"] is not None else None,
         "range_max": float(row["range_max"]) if row["range_max"] is not None else None,
+        "warning_summary": _normalize_text(row["warning_summary"], max_length=240),
+        "severity": _normalize_text(row["severity"], max_length=24) or "none",
         "last_checked_at": int(row["last_checked_at"]),
     }
 

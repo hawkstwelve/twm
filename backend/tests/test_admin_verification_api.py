@@ -208,6 +208,9 @@ async def test_verification_summary_and_results(client: httpx.AsyncClient) -> No
     warning_row = next(item for item in body["results"] if item["variable_id"] == "precip_total" and item["forecast_hour"] == 2)
     assert warning_row["auto_status"] == "warning"
     assert warning_row["auto_checks"]["monotonic"] is False
+    assert warning_row["severity"] in {"low", "medium", "high"}
+    assert "decreased" in (warning_row["warning_summary"] or "").lower()
+    assert warning_row["diagnostics"]["monotonic"]["max_decrease"] > 0
 
     flagged = await client.get(
         "/api/v4/admin/verification/results?window=30d&flagged_only=true",

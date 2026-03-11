@@ -6,6 +6,7 @@ import {
   fetchAdminVerificationSummary,
   fetchTwfStatus,
   type TwfStatus,
+  type VerificationDiagnostics,
   type VerificationResult,
   type VerificationSummaryResponse,
   updateAdminVerificationReview,
@@ -34,8 +35,26 @@ function formatRange(value: number | null | undefined): string {
   return value.toFixed(1);
 }
 
-function titleizeStatus(value: string): string {
-  return value ? value.charAt(0).toUpperCase() + value.slice(1) : "—";
+function formatNumber(value: number | null | undefined, digits = 1): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return value.toFixed(digits);
+}
+
+function severityTone(value: string): "pass" | "warning" | "review" | "fail" {
+  if (value === "high") return "fail";
+  if (value === "medium" || value === "low") return "warning";
+  if (value === "none") return "pass";
+  return "review";
+}
+
+function monotonicSummary(diagnostics: VerificationDiagnostics): string {
+  const monotonic = diagnostics.monotonic;
+  if (!monotonic) return "No previous-hour comparison";
+  if (monotonic.ok) return "No cumulative drop detected";
+  if (monotonic.reason === "shape_mismatch") return "Grid shape changed vs previous hour";
+  const fraction = typeof monotonic.decreased_fraction === "number" ? `${(monotonic.decreased_fraction * 100).toFixed(1)}%` : "—";
+  const drop = formatNumber(monotonic.max_decrease, 1);
+  return `${fraction} of valid pixels decreased; max drop ${drop}`;
 }
 
 function SummaryCard(props: {
@@ -350,15 +369,17 @@ export default function AdminVerificationPage() {
           </div>
 
           <div className="overflow-x-auto pb-2">
-            <table className="w-max min-w-[980px] border-separate border-spacing-y-2 text-left text-sm">
+            <table className="w-max min-w-[1220px] border-separate border-spacing-y-2 text-left text-sm">
               <thead className="text-white/48">
                 <tr>
                   <th className="px-3 py-2 font-medium">Model</th>
                   <th className="px-3 py-2 font-medium">Variable</th>
                   <th className="px-3 py-2 font-medium">Run</th>
                   <th className="px-3 py-2 font-medium">FH</th>
+                  <th className="px-3 py-2 font-medium">Severity</th>
                   <th className="px-3 py-2 font-medium">Auto</th>
                   <th className="px-3 py-2 font-medium">Manual</th>
+                  <th className="px-3 py-2 font-medium">Issue</th>
                   <th className="px-3 py-2 font-medium">Coverage</th>
                   <th className="px-3 py-2 font-medium">Updated</th>
                 </tr>
@@ -366,7 +387,7 @@ export default function AdminVerificationPage() {
               <tbody>
                 {results.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-white/48">
+                    <td colSpan={10} className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-white/48">
                       {emptyStateMessage}
                     </td>
                   </tr>
@@ -387,10 +408,18 @@ export default function AdminVerificationPage() {
                       <td className="border-y border-white/10 px-3 py-3">{item.run_id}</td>
                       <td className="border-y border-white/10 px-3 py-3">f{item.forecast_hour}</td>
                       <td className="border-y border-white/10 px-3 py-3">
+                        <ReviewBadge tone={severityTone(item.severity)} label={item.severity} />
+                      </td>
+                      <td className="border-y border-white/10 px-3 py-3">
                         <ReviewBadge tone={item.auto_status === "pass" ? "pass" : "warning"} label={item.auto_status} />
                       </td>
                       <td className="border-y border-white/10 px-3 py-3">
                         <ReviewBadge tone={item.manual_status} label={item.manual_status} />
+                      </td>
+                      <td className="max-w-[340px] border-y border-white/10 px-3 py-3 text-white/68">
+                        <div className="line-clamp-2">
+                          {item.warning_summary ?? (item.auto_status === "pass" ? "No automatic issues detected." : monotonicSummary(item.diagnostics))}
+                        </div>
                       </td>
                       <td className="border-y border-white/10 px-3 py-3">{formatCoverage(item.coverage_fraction)}</td>
                       <td className="rounded-r-2xl border-y border-r border-white/10 px-3 py-3 text-white/58">
@@ -427,10 +456,40 @@ export default function AdminVerificationPage() {
                   <div className="mt-3"><ReviewBadge tone={selected.auto_status === "pass" ? "pass" : "warning"} label={selected.auto_status} /></div>
                 </div>
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
-                  <div className="text-xs uppercase tracking-[0.22em] text-white/42">Manual status</div>
-                  <div className="mt-3"><ReviewBadge tone={manualStatus} label={manualStatus} /></div>
+                  <div className="text-xs uppercase tracking-[0.22em] text-white/42">Severity</div>
+                  <div className="mt-3"><ReviewBadge tone={severityTone(selected.severity)} label={selected.severity} /></div>
                 </div>
               </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                <div className="text-xs uppercase tracking-[0.22em] text-white/42">Diagnostic summary</div>
+                <div className="mt-3 text-sm leading-6 text-white/78">
+                  {selected.warning_summary ?? "No automatic issues detected for this frame."}
+                </div>
+              </div>
+
+              {selected.diagnostics.monotonic && selected.auto_checks.monotonic === false ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-amber-400/18 bg-amber-500/8 p-4">
+                    <div className="text-xs uppercase tracking-[0.22em] text-amber-100/70">Pixels decreased</div>
+                    <div className="mt-2 text-2xl font-semibold text-amber-100">
+                      {formatNumber((selected.diagnostics.monotonic.decreased_fraction ?? 0) * 100, 1)}%
+                    </div>
+                    <div className="mt-1 text-sm text-amber-100/70">of valid pixels versus the previous hour</div>
+                  </div>
+                  <div className="rounded-2xl border border-amber-400/18 bg-amber-500/8 p-4">
+                    <div className="text-xs uppercase tracking-[0.22em] text-amber-100/70">Largest drop</div>
+                    <div className="mt-2 text-2xl font-semibold text-amber-100">
+                      {formatNumber(selected.diagnostics.monotonic.max_decrease, 1)}
+                    </div>
+                    <div className="mt-1 text-sm text-amber-100/70">
+                      {selected.diagnostics.monotonic.max_decrease_lat != null && selected.diagnostics.monotonic.max_decrease_lon != null
+                        ? `Near ${selected.diagnostics.monotonic.max_decrease_lat}, ${selected.diagnostics.monotonic.max_decrease_lon}`
+                        : "Location unavailable"}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                 <div className="text-xs uppercase tracking-[0.22em] text-white/42">Internal checks</div>
@@ -458,7 +517,7 @@ export default function AdminVerificationPage() {
                 </div>
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-3">
+              <div className="grid gap-3 sm:grid-cols-4">
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <div className="text-xs uppercase tracking-[0.22em] text-white/42">Coverage</div>
                   <div className="mt-2 text-xl font-semibold text-[#9dd5bf]">{formatCoverage(selected.coverage_fraction)}</div>
@@ -472,6 +531,10 @@ export default function AdminVerificationPage() {
                 <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
                   <div className="text-xs uppercase tracking-[0.22em] text-white/42">Valid pixels</div>
                   <div className="mt-2 text-xl font-semibold text-white">{selected.valid_pixel_count.toLocaleString("en-US")}</div>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                  <div className="text-xs uppercase tracking-[0.22em] text-white/42">Manual status</div>
+                  <div className="mt-2"><ReviewBadge tone={manualStatus} label={manualStatus} /></div>
                 </div>
               </div>
 

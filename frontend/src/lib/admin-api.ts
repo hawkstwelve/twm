@@ -75,6 +75,19 @@ export type VerificationAutoChecks = {
   monotonic?: boolean | null;
 };
 
+export type VerificationDiagnostics = {
+  monotonic?: {
+    ok?: boolean;
+    reason?: string;
+    decreased_pixel_count?: number;
+    decreased_fraction?: number;
+    max_decrease?: number;
+    max_increase?: number;
+    max_decrease_lon?: number | null;
+    max_decrease_lat?: number | null;
+  } | null;
+};
+
 export type VerificationSummaryResponse = {
   window: string;
   filters: {
@@ -102,11 +115,14 @@ export type VerificationResult = {
   reviewer_member_id?: number | null;
   notes?: string | null;
   auto_checks: VerificationAutoChecks;
+  diagnostics: VerificationDiagnostics;
   coverage_fraction?: number | null;
   valid_pixel_count: number;
   total_pixel_count: number;
   range_min?: number | null;
   range_max?: number | null;
+  warning_summary?: string | null;
+  severity: string;
   last_checked_at: number;
 };
 
