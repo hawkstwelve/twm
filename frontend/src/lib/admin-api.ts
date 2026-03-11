@@ -68,14 +68,14 @@ export type UsageSummaryResponse = {
   }>;
 };
 
-export type VerificationAutoChecks = {
+export type StatusAutoChecks = {
   has_valid_pixels?: boolean;
   range_present?: boolean;
   coverage_present?: boolean;
   monotonic?: boolean | null;
 };
 
-export type VerificationDiagnostics = {
+export type StatusDiagnostics = {
   monotonic?: {
     ok?: boolean;
     reason?: string;
@@ -96,19 +96,7 @@ export type VerificationDiagnostics = {
   } | null;
 };
 
-export type VerificationSummaryResponse = {
-  window: string;
-  filters: {
-    model: string | null;
-    variable: string | null;
-  };
-  total_rows: number;
-  auto_pass_rows: number;
-  manual_review_rows: number;
-  flagged_rows: number;
-};
-
-export type VerificationResult = {
+export type StatusResult = {
   id: number;
   created_at: number;
   updated_at: number;
@@ -117,13 +105,8 @@ export type VerificationResult = {
   run_id: string;
   forecast_hour: number;
   auto_status: "pass" | "warning";
-  manual_status: "review" | "pass" | "fail";
-  benchmark_site?: string | null;
-  reviewer_name?: string | null;
-  reviewer_member_id?: number | null;
-  notes?: string | null;
-  auto_checks: VerificationAutoChecks;
-  diagnostics: VerificationDiagnostics;
+  auto_checks: StatusAutoChecks;
+  diagnostics: StatusDiagnostics;
   coverage_fraction?: number | null;
   valid_pixel_count: number;
   total_pixel_count: number;
@@ -134,16 +117,14 @@ export type VerificationResult = {
   last_checked_at: number;
 };
 
-export type VerificationResultsResponse = {
+export type StatusResultsResponse = {
   window: string;
   filters: {
     model: string | null;
     variable: string | null;
-    manual_status: string | null;
     flagged_only: boolean;
-    attention_only: boolean;
   };
-  results: VerificationResult[];
+  results: StatusResult[];
 };
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -228,51 +209,18 @@ export async function fetchAdminUsageSummary(window: string): Promise<UsageSumma
   return fetchJson<UsageSummaryResponse>(`${API_ORIGIN}/api/v4/admin/usage/summary?${search.toString()}`);
 }
 
-export async function fetchAdminVerificationSummary(params: {
+export async function fetchAdminStatusResults(params: {
   window: string;
   model?: string;
   variable?: string;
-}): Promise<VerificationSummaryResponse> {
-  const search = new URLSearchParams();
-  search.set("window", params.window);
-  if (params.model && params.model !== "all") search.set("model", params.model);
-  if (params.variable && params.variable !== "all") search.set("variable", params.variable);
-  return fetchJson<VerificationSummaryResponse>(`${API_ORIGIN}/api/v4/admin/verification/summary?${search.toString()}`);
-}
-
-export async function fetchAdminVerificationResults(params: {
-  window: string;
-  model?: string;
-  variable?: string;
-  manualStatus?: string;
   flaggedOnly?: boolean;
-  attentionOnly?: boolean;
   limit?: number;
-}): Promise<VerificationResultsResponse> {
+}): Promise<StatusResultsResponse> {
   const search = new URLSearchParams();
   search.set("window", params.window);
   if (params.limit) search.set("limit", String(params.limit));
   if (params.model && params.model !== "all") search.set("model", params.model);
   if (params.variable && params.variable !== "all") search.set("variable", params.variable);
-  if (params.manualStatus && params.manualStatus !== "all") search.set("manual_status", params.manualStatus);
   if (params.flaggedOnly) search.set("flagged_only", "true");
-  if (params.attentionOnly) search.set("attention_only", "true");
-  return fetchJson<VerificationResultsResponse>(`${API_ORIGIN}/api/v4/admin/verification/results?${search.toString()}`);
-}
-
-export async function updateAdminVerificationReview(
-  reviewId: number,
-  payload: {
-    manual_status: "review" | "pass" | "fail";
-    benchmark_site?: string;
-    notes?: string;
-  },
-): Promise<VerificationResult> {
-  return fetchJson<VerificationResult>(`${API_ORIGIN}/api/v4/admin/verification/results/${reviewId}/review`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
+  return fetchJson<StatusResultsResponse>(`${API_ORIGIN}/api/v4/admin/status/results?${search.toString()}`);
 }

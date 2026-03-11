@@ -58,7 +58,7 @@ export default function AdminLayout() {
 
           <nav className="space-y-2">
             <AdminNavItem to="/admin/performance" label="Performance" icon={Activity} />
-            <AdminNavItem to="/admin/verification" label="Verification" icon={ClipboardCheck} />
+            <AdminNavItem to="/admin/status" label="Pipeline Status" icon={ClipboardCheck} />
             <AdminNavItem to="/admin/usage" label="Usage" icon={BarChart3} />
           </nav>
         </aside>

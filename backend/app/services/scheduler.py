@@ -1387,9 +1387,9 @@ def _process_run(
         )
         _write_latest_pointer(data_root, model_id, run_id)
         try:
-            admin_telemetry.sync_verification_run(data_root=data_root, model_id=model_id, run_id=run_id)
+            admin_telemetry.sync_status_run(data_root=data_root, model_id=model_id, run_id=run_id)
         except Exception as exc:
-            logger.warning("Verification sync failed for %s/%s: %s", model_id, run_id, exc)
+            logger.warning("Status sync failed for %s/%s: %s", model_id, run_id, exc)
         if loop_pregenerate_enabled:
             _pregenerate_loop_webp_for_run(
                 data_root=data_root,

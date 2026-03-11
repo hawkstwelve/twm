@@ -46,16 +46,16 @@ PERF_TARGETS_MS = {
     "animation_stall": 750.0,
 }
 
-VERIFICATION_VARIABLE_IDS = {
+STATUS_VARIABLE_IDS = {
     "tmp2m",
     "precip_total",
     "snowfall_total",
     "snowfall_kuchera_total",
 }
 
-VERIFICATION_KEEP_RUNS_PER_MODEL = 4
+STATUS_KEEP_RUNS_PER_MODEL = 4
 
-VERIFICATION_CUMULATIVE_VARIABLE_IDS = {
+STATUS_CUMULATIVE_VARIABLE_IDS = {
     "precip_total",
     "snowfall_total",
     "snowfall_kuchera_total",
@@ -234,13 +234,6 @@ def _load_json_file(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return payload if isinstance(payload, dict) else None
-
-
-def _normalize_manual_status(value: Any) -> str:
-    normalized = str(value or "").strip().lower()
-    if normalized in {"pass", "fail", "review"}:
-        return normalized
-    return "review"
 
 
 def _value_cog_path(data_root: Path, model_id: str, run_id: str, variable_id: str, forecast_hour: int) -> Path:
@@ -487,7 +480,7 @@ def _build_auto_checks(
         range_min is not None and range_max is not None and float(range_max) >= float(range_min)
     )
 
-    if variable_id in VERIFICATION_CUMULATIVE_VARIABLE_IDS:
+    if variable_id in STATUS_CUMULATIVE_VARIABLE_IDS:
         previous_path = (
             _value_cog_path(data_root, model_id, run_id, variable_id, previous_forecast_hour)
             if previous_forecast_hour is not None
@@ -522,7 +515,7 @@ def _build_auto_checks(
     }
 
 
-def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int:
+def sync_status_run(*, data_root: Path, model_id: str, run_id: str) -> int:
     manifest = _load_json_file(_manifest_path(data_root, model_id, run_id))
     if not isinstance(manifest, dict):
         return 0
@@ -535,7 +528,7 @@ def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int
     synced = 0
     with _connect() as conn:
         for variable_id, variable_meta in variables.items():
-            if str(variable_id) not in VERIFICATION_VARIABLE_IDS:
+            if str(variable_id) not in STATUS_VARIABLE_IDS:
                 continue
             if not isinstance(variable_meta, dict):
                 continue
@@ -549,7 +542,7 @@ def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int
             )
             for forecast_hour in available_hours:
                 previous_forecast_hour = None
-                if str(variable_id) in VERIFICATION_CUMULATIVE_VARIABLE_IDS:
+                if str(variable_id) in STATUS_CUMULATIVE_VARIABLE_IDS:
                     previous_values = [fh for fh in available_hours if fh < forecast_hour]
                     if previous_values:
                         previous_forecast_hour = previous_values[-1]
@@ -625,7 +618,7 @@ def sync_verification_run(*, data_root: Path, model_id: str, run_id: str) -> int
     return synced
 
 
-def sync_recent_verification_runs(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
+def sync_recent_status_runs(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
     manifests_root = data_root / "manifests"
     if not manifests_root.is_dir():
         return 0
@@ -637,11 +630,11 @@ def sync_recent_verification_runs(*, data_root: Path, limit_runs_per_model: int 
             reverse=True,
         )[: max(1, int(limit_runs_per_model))]
         for run_id in run_ids:
-            synced += sync_verification_run(data_root=data_root, model_id=model_dir.name, run_id=run_id)
+            synced += sync_status_run(data_root=data_root, model_id=model_dir.name, run_id=run_id)
     return synced
 
 
-def prune_verification_rows(*, data_root: Path, keep_runs_per_model: int = VERIFICATION_KEEP_RUNS_PER_MODEL) -> int:
+def prune_status_rows(*, data_root: Path, keep_runs_per_model: int = STATUS_KEEP_RUNS_PER_MODEL) -> int:
     published_root = data_root / "published"
     if not published_root.is_dir():
         return 0
@@ -670,7 +663,7 @@ def prune_verification_rows(*, data_root: Path, keep_runs_per_model: int = VERIF
     return deleted
 
 
-def sync_latest_missing_verification_runs(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
+def sync_latest_missing_status_runs(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
     published_root = data_root / "published"
     if not published_root.is_dir():
         return 0
@@ -691,23 +684,23 @@ def sync_latest_missing_verification_runs(*, data_root: Path, limit_runs_per_mod
                 ).fetchone()
                 if row is not None:
                     continue
-                synced += sync_verification_run(data_root=data_root, model_id=model_dir.name, run_id=run_id)
+                synced += sync_status_run(data_root=data_root, model_id=model_dir.name, run_id=run_id)
     return synced
 
 
-def verification_rows_count() -> int:
+def status_rows_count() -> int:
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(*) AS total FROM qa_reviews").fetchone()
     return int(row["total"] or 0)
 
 
-def ensure_verification_seeded(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
-    if verification_rows_count() > 0:
+def ensure_status_seeded(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
+    if status_rows_count() > 0:
         return 0
-    return sync_recent_verification_runs(data_root=data_root, limit_runs_per_model=limit_runs_per_model)
+    return sync_recent_status_runs(data_root=data_root, limit_runs_per_model=limit_runs_per_model)
 
 
-def refresh_missing_verification_diagnostics(*, data_root: Path, limit_runs: int = 50) -> int:
+def refresh_missing_status_diagnostics(*, data_root: Path, limit_runs: int = 50) -> int:
     with _connect() as conn:
         rows = conn.execute(
             """
@@ -727,7 +720,7 @@ def refresh_missing_verification_diagnostics(*, data_root: Path, limit_runs: int
 
     refreshed = 0
     for row in rows:
-        refreshed += sync_verification_run(
+        refreshed += sync_status_run(
             data_root=data_root,
             model_id=str(row["model_id"]),
             run_id=str(row["run_id"]),
@@ -735,63 +728,23 @@ def refresh_missing_verification_diagnostics(*, data_root: Path, limit_runs: int
     return refreshed
 
 
-def ensure_verification_ready(*, data_root: Path, seed_limit_runs_per_model: int = 2, refresh_limit_runs: int = 50) -> int:
-    pruned = prune_verification_rows(data_root=data_root, keep_runs_per_model=VERIFICATION_KEEP_RUNS_PER_MODEL)
-    seeded = ensure_verification_seeded(data_root=data_root, limit_runs_per_model=seed_limit_runs_per_model)
-    latest = sync_latest_missing_verification_runs(
+def ensure_status_ready(*, data_root: Path, seed_limit_runs_per_model: int = 2, refresh_limit_runs: int = 50) -> int:
+    pruned = prune_status_rows(data_root=data_root, keep_runs_per_model=STATUS_KEEP_RUNS_PER_MODEL)
+    seeded = ensure_status_seeded(data_root=data_root, limit_runs_per_model=seed_limit_runs_per_model)
+    latest = sync_latest_missing_status_runs(
         data_root=data_root,
-        limit_runs_per_model=max(VERIFICATION_KEEP_RUNS_PER_MODEL, seed_limit_runs_per_model),
+        limit_runs_per_model=max(STATUS_KEEP_RUNS_PER_MODEL, seed_limit_runs_per_model),
     )
-    refreshed = refresh_missing_verification_diagnostics(data_root=data_root, limit_runs=refresh_limit_runs)
+    refreshed = refresh_missing_status_diagnostics(data_root=data_root, limit_runs=refresh_limit_runs)
     return pruned + seeded + latest + refreshed
 
 
-def get_verification_summary(
+def get_status_results(
     *,
     since_ts: int,
     model_id: str | None = None,
     variable_id: str | None = None,
-) -> dict[str, Any]:
-    clauses = ["updated_at >= ?"]
-    params: list[Any] = [since_ts]
-    if model_id:
-        clauses.append("model_id = ?")
-        params.append(model_id)
-    if variable_id:
-        clauses.append("variable_id = ?")
-        params.append(variable_id)
-
-    where_sql = " WHERE " + " AND ".join(clauses)
-    with _connect() as conn:
-        row = conn.execute(
-            f"""
-            SELECT
-                COUNT(*) AS total_rows,
-                SUM(CASE WHEN auto_status = 'pass' THEN 1 ELSE 0 END) AS auto_pass_rows,
-                SUM(CASE WHEN manual_status = 'review' AND auto_status = 'warning' THEN 1 ELSE 0 END) AS manual_review_rows,
-                SUM(CASE WHEN auto_status = 'warning' OR manual_status = 'fail' THEN 1 ELSE 0 END) AS flagged_rows
-            FROM qa_reviews
-            {where_sql}
-            """,
-            params,
-        ).fetchone()
-
-    return {
-        "total_rows": int(row["total_rows"] or 0),
-        "auto_pass_rows": int(row["auto_pass_rows"] or 0),
-        "manual_review_rows": int(row["manual_review_rows"] or 0),
-        "flagged_rows": int(row["flagged_rows"] or 0),
-    }
-
-
-def get_verification_results(
-    *,
-    since_ts: int,
-    model_id: str | None = None,
-    variable_id: str | None = None,
-    manual_status: str | None = None,
     flagged_only: bool = False,
-    attention_only: bool = False,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     clauses = ["updated_at >= ?"]
@@ -802,14 +755,7 @@ def get_verification_results(
     if variable_id:
         clauses.append("variable_id = ?")
         params.append(variable_id)
-    normalized_manual_status = _normalize_manual_status(manual_status) if manual_status else None
-    if normalized_manual_status:
-        clauses.append("manual_status = ?")
-        params.append(normalized_manual_status)
     if flagged_only:
-        clauses.append("(auto_status = 'warning' OR manual_status = 'fail')")
-    if attention_only:
-        clauses.append("manual_status = 'review'")
         clauses.append("auto_status = 'warning'")
 
     params.append(max(1, min(500, int(limit))))
@@ -827,11 +773,6 @@ def get_verification_results(
                 run_id,
                 forecast_hour,
                 auto_status,
-                manual_status,
-                benchmark_site,
-                reviewer_name,
-                reviewer_member_id,
-                notes,
                 auto_checks_json,
                 coverage_fraction,
                 valid_pixel_count,
@@ -878,11 +819,6 @@ def get_verification_results(
                 "run_id": str(row["run_id"]),
                 "forecast_hour": int(row["forecast_hour"]),
                 "auto_status": str(row["auto_status"]),
-                "manual_status": str(row["manual_status"]),
-                "benchmark_site": _normalize_text(row["benchmark_site"], max_length=120),
-                "reviewer_name": _normalize_text(row["reviewer_name"], max_length=120),
-                "reviewer_member_id": int(row["reviewer_member_id"]) if row["reviewer_member_id"] is not None else None,
-                "notes": _normalize_text(row["notes"], max_length=2000),
                 "auto_checks": auto_checks,
                 "diagnostics": diagnostics,
                 "coverage_fraction": float(row["coverage_fraction"]) if row["coverage_fraction"] is not None else None,
@@ -896,126 +832,6 @@ def get_verification_results(
             }
         )
     return results
-
-
-def get_verification_result(review_id: int) -> dict[str, Any] | None:
-    with _connect() as conn:
-        row = conn.execute(
-            """
-            SELECT
-                id,
-                created_at,
-                updated_at,
-                model_id,
-                variable_id,
-                run_id,
-                forecast_hour,
-                auto_status,
-                manual_status,
-                benchmark_site,
-                reviewer_name,
-                reviewer_member_id,
-                notes,
-                auto_checks_json,
-                coverage_fraction,
-                valid_pixel_count,
-                total_pixel_count,
-                range_min,
-                range_max,
-                warning_summary,
-                severity,
-                diagnostics_json,
-                last_checked_at
-            FROM qa_reviews
-            WHERE id = ?
-            """,
-            (int(review_id),),
-        ).fetchone()
-    if row is None:
-        return None
-
-    auto_checks = {}
-    diagnostics = {}
-    if row["auto_checks_json"]:
-        try:
-            parsed = json.loads(str(row["auto_checks_json"]))
-            if isinstance(parsed, dict):
-                auto_checks = parsed
-        except json.JSONDecodeError:
-            auto_checks = {}
-    if row["diagnostics_json"]:
-        try:
-            parsed = json.loads(str(row["diagnostics_json"]))
-            if isinstance(parsed, dict):
-                diagnostics = parsed
-        except json.JSONDecodeError:
-            diagnostics = {}
-
-    return {
-        "id": int(row["id"]),
-        "created_at": int(row["created_at"]),
-        "updated_at": int(row["updated_at"]),
-        "model_id": str(row["model_id"]),
-        "variable_id": str(row["variable_id"]),
-        "run_id": str(row["run_id"]),
-        "forecast_hour": int(row["forecast_hour"]),
-        "auto_status": str(row["auto_status"]),
-        "manual_status": str(row["manual_status"]),
-        "benchmark_site": _normalize_text(row["benchmark_site"], max_length=120),
-        "reviewer_name": _normalize_text(row["reviewer_name"], max_length=120),
-        "reviewer_member_id": int(row["reviewer_member_id"]) if row["reviewer_member_id"] is not None else None,
-        "notes": _normalize_text(row["notes"], max_length=2000),
-        "auto_checks": auto_checks,
-        "diagnostics": diagnostics,
-        "coverage_fraction": float(row["coverage_fraction"]) if row["coverage_fraction"] is not None else None,
-        "valid_pixel_count": int(row["valid_pixel_count"] or 0),
-        "total_pixel_count": int(row["total_pixel_count"] or 0),
-        "range_min": float(row["range_min"]) if row["range_min"] is not None else None,
-        "range_max": float(row["range_max"]) if row["range_max"] is not None else None,
-        "warning_summary": _normalize_text(row["warning_summary"], max_length=240),
-        "severity": _normalize_text(row["severity"], max_length=24) or "none",
-        "last_checked_at": int(row["last_checked_at"]),
-    }
-
-
-def update_verification_review(
-    *,
-    review_id: int,
-    manual_status: str,
-    benchmark_site: str | None,
-    notes: str | None,
-    reviewer_name: str | None,
-    reviewer_member_id: int | None,
-) -> dict[str, Any] | None:
-    now = int(time.time())
-    normalized_manual_status = _normalize_manual_status(manual_status)
-    with _connect() as conn:
-        conn.execute(
-            """
-            UPDATE qa_reviews
-            SET
-                updated_at = ?,
-                manual_status = ?,
-                benchmark_site = ?,
-                notes = ?,
-                reviewer_name = ?,
-                reviewer_member_id = ?
-            WHERE id = ?
-            """,
-            (
-                now,
-                normalized_manual_status,
-                _normalize_text(benchmark_site, max_length=120),
-                _normalize_text(notes, max_length=2000),
-                _normalize_text(reviewer_name, max_length=120),
-                reviewer_member_id,
-                int(review_id),
-            ),
-        )
-        if conn.total_changes <= 0:
-            return None
-
-    return get_verification_result(int(review_id))
 
 
 def record_perf_event(payload: dict[str, Any], *, member_id: int | None = None) -> None:

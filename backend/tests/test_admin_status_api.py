@@ -126,7 +126,7 @@ async def client() -> AsyncIterator[httpx.AsyncClient]:
         yield test_client
 
 
-def _seed_verification_files(root: Path) -> None:
+def _seed_status_files(root: Path) -> None:
     model_id = "hrrr"
     run_id = "20260310_12z"
     _write_manifest(
@@ -204,23 +204,12 @@ def _seed_latest_run(root: Path, *, model_id: str, run_id: str, variable_id: str
     )
 
 
-async def test_verification_summary_and_results(client: httpx.AsyncClient) -> None:
+async def test_status_results(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")
-    _seed_verification_files(main_module.DATA_ROOT)
-
-    summary = await client.get(
-        "/api/v4/admin/verification/summary?window=30d",
-        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
-    )
-
-    assert summary.status_code == 200
-    assert summary.json()["total_rows"] == 3
-    assert summary.json()["auto_pass_rows"] == 2
-    assert summary.json()["manual_review_rows"] == 1
-    assert summary.json()["flagged_rows"] == 1
+    _seed_status_files(main_module.DATA_ROOT)
 
     results = await client.get(
-        "/api/v4/admin/verification/results?window=30d",
+        "/api/v4/admin/status/results?window=30d",
         cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
     )
 
@@ -235,7 +224,7 @@ async def test_verification_summary_and_results(client: httpx.AsyncClient) -> No
     assert warning_row["diagnostics"]["monotonic"]["max_decrease"] > 0
 
     flagged = await client.get(
-        "/api/v4/admin/verification/results?window=30d&flagged_only=true",
+        "/api/v4/admin/status/results?window=30d&flagged_only=true",
         cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
     )
 
@@ -244,22 +233,12 @@ async def test_verification_summary_and_results(client: httpx.AsyncClient) -> No
     assert len(flagged_rows) == 1
     assert flagged_rows[0]["auto_status"] == "warning"
 
-    review_queue = await client.get(
-        "/api/v4/admin/verification/results?window=30d&attention_only=true",
-        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
-    )
 
-    assert review_queue.status_code == 200
-    review_rows = review_queue.json()["results"]
-    assert len(review_rows) == 1
-    assert review_rows[0]["auto_status"] == "warning"
-
-
-async def test_verification_results_refresh_missing_diagnostics(client: httpx.AsyncClient) -> None:
+async def test_status_results_refresh_missing_diagnostics(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")
-    _seed_verification_files(main_module.DATA_ROOT)
+    _seed_status_files(main_module.DATA_ROOT)
 
-    admin_telemetry.sync_recent_verification_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=2)
+    admin_telemetry.sync_recent_status_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=2)
     with admin_telemetry._connect() as conn:
         conn.execute(
             """
@@ -270,7 +249,7 @@ async def test_verification_results_refresh_missing_diagnostics(client: httpx.As
         )
 
     results = await client.get(
-        "/api/v4/admin/verification/results?window=30d&flagged_only=true",
+        "/api/v4/admin/status/results?window=30d&flagged_only=true",
         cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
     )
 
@@ -281,10 +260,10 @@ async def test_verification_results_refresh_missing_diagnostics(client: httpx.As
     assert payload["severity"] in {"low", "medium", "high"}
 
 
-async def test_verification_ready_syncs_new_latest_runs(client: httpx.AsyncClient) -> None:
+async def test_status_ready_syncs_new_latest_runs(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")
-    _seed_verification_files(main_module.DATA_ROOT)
-    admin_telemetry.sync_recent_verification_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=2)
+    _seed_status_files(main_module.DATA_ROOT)
+    admin_telemetry.sync_recent_status_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=2)
 
     _seed_latest_run(main_module.DATA_ROOT, model_id="hrrr", run_id="20260311_13z")
     _seed_latest_run(main_module.DATA_ROOT, model_id="nbm", run_id="20260311_12z")
@@ -292,7 +271,7 @@ async def test_verification_ready_syncs_new_latest_runs(client: httpx.AsyncClien
     _seed_latest_run(main_module.DATA_ROOT, model_id="gfs", run_id="20260311_12z")
 
     results = await client.get(
-        "/api/v4/admin/verification/results?window=30d",
+        "/api/v4/admin/status/results?window=30d",
         cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
     )
 
@@ -305,7 +284,7 @@ async def test_verification_ready_syncs_new_latest_runs(client: httpx.AsyncClien
     assert ("gfs", "20260311_12z") in run_ids
 
 
-async def test_verification_ready_prunes_runs_older_than_retention(client: httpx.AsyncClient) -> None:
+async def test_status_ready_prunes_runs_older_than_retention(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")
 
     old_runs = [
@@ -318,13 +297,13 @@ async def test_verification_ready_prunes_runs_older_than_retention(client: httpx
     for run_id in old_runs:
         _seed_latest_run(main_module.DATA_ROOT, model_id="hrrr", run_id=run_id, variable_id="tmp2m")
 
-    admin_telemetry.sync_recent_verification_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=5)
+    admin_telemetry.sync_recent_status_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=5)
 
     # Simulate retention by removing the oldest manifest so only the newest four remain reviewable.
     (main_module.DATA_ROOT / "manifests" / "hrrr" / "20260310_00z.json").unlink()
 
     results = await client.get(
-        "/api/v4/admin/verification/results?window=30d",
+        "/api/v4/admin/status/results?window=30d",
         cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
     )
 
@@ -332,31 +311,3 @@ async def test_verification_ready_prunes_runs_older_than_retention(client: httpx
     run_ids = {(row["model_id"], row["run_id"]) for row in results.json()["results"]}
     assert ("hrrr", "20260310_00z") not in run_ids
     assert ("hrrr", "20260310_04z") in run_ids
-
-
-async def test_verification_review_update(client: httpx.AsyncClient) -> None:
-    _create_session(session_id="admin-session", member_id=42, name="Admin")
-    _seed_verification_files(main_module.DATA_ROOT)
-
-    results = await client.get(
-        "/api/v4/admin/verification/results?window=30d",
-        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
-    )
-    review_id = results.json()["results"][0]["id"]
-
-    update = await client.post(
-        f"/api/v4/admin/verification/results/{review_id}/review",
-        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
-        json={
-            "manual_status": "pass",
-            "benchmark_site": "Tropical Tidbits",
-            "notes": "Looks close enough.",
-        },
-    )
-
-    assert update.status_code == 200
-    payload = update.json()
-    assert payload["manual_status"] == "pass"
-    assert payload["benchmark_site"] == "Tropical Tidbits"
-    assert payload["notes"] == "Looks close enough."
-    assert payload["reviewer_name"] == "Admin"
