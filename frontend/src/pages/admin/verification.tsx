@@ -45,15 +45,21 @@ function SummaryCard(props: {
   icon: typeof ClipboardCheck;
 }) {
   const { title, value, accent, icon: Icon } = props;
+  const muted = value === 0;
   return (
-    <section className="rounded-[24px] border border-white/12 bg-black/28 p-5 shadow-[0_16px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl">
+    <section
+      className={[
+        "rounded-[24px] border p-5 shadow-[0_16px_42px_rgba(0,0,0,0.3)] backdrop-blur-xl",
+        muted ? "border-white/8 bg-black/18" : "border-white/12 bg-black/28",
+      ].join(" ")}
+    >
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-white">{title}</div>
-          <div className={`mt-3 text-[2.1rem] font-semibold tracking-tight ${accent}`}>{value}</div>
+          <div className={`text-sm font-semibold ${muted ? "text-white/72" : "text-white"}`}>{title}</div>
+          <div className={`mt-3 text-[2.1rem] font-semibold tracking-tight ${muted ? "text-white/68" : accent}`}>{value}</div>
         </div>
-        <div className="rounded-2xl border border-white/10 bg-white/[0.05] p-3">
-          <Icon className={`h-5 w-5 ${accent}`} />
+        <div className={`rounded-2xl border p-3 ${muted ? "border-white/8 bg-white/[0.025]" : "border-white/10 bg-white/[0.05]"}`}>
+          <Icon className={`h-5 w-5 ${muted ? "text-white/52" : accent}`} />
         </div>
       </div>
     </section>
@@ -77,7 +83,7 @@ export default function AdminVerificationPage() {
   const [windowValue, setWindowValue] = useState<WindowValue>("30d");
   const [modelFilter, setModelFilter] = useState<string>("all");
   const [variableFilter, setVariableFilter] = useState<string>("all");
-  const [manualFilter, setManualFilter] = useState<ManualStatusFilter>("all");
+  const [manualFilter, setManualFilter] = useState<ManualStatusFilter>("review");
   const [summary, setSummary] = useState<VerificationSummaryResponse | null>(null);
   const [results, setResults] = useState<VerificationResult[]>([]);
   const [selectedId, setSelectedId] = useState<number | null>(null);
@@ -156,6 +162,10 @@ export default function AdminVerificationPage() {
 
   const modelOptions = Array.from(new Set(results.map((item) => item.model_id))).sort();
   const variableOptions = Array.from(new Set(results.map((item) => item.variable_id))).sort();
+  const hasAnyRows = (summary?.total_rows ?? 0) > 0;
+  const emptyStateMessage = hasAnyRows
+    ? "No rows match this filter yet. Try widening the filters or switching out of the review queue."
+    : "No published verification candidates found yet. This page tracks tmp2m, precip_total, snowfall_total, and snowfall_kuchera_total.";
 
   async function saveReview() {
     if (!selected) return;
@@ -268,6 +278,10 @@ export default function AdminVerificationPage() {
             </select>
           </label>
         </div>
+
+        <div className="mt-4 text-sm text-white/48">
+          Tracking <span className="text-white/72">tmp2m</span>, <span className="text-white/72">precip_total</span>, <span className="text-white/72">snowfall_total</span>, and <span className="text-white/72">snowfall_kuchera_total</span>. The table defaults to items still needing manual review.
+        </div>
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.9fr)]">
@@ -290,7 +304,7 @@ export default function AdminVerificationPage() {
                 {results.length === 0 ? (
                   <tr>
                     <td colSpan={8} className="rounded-2xl border border-dashed border-white/10 bg-white/[0.03] px-4 py-8 text-center text-white/48">
-                      No verification rows found for this filter.
+                      {emptyStateMessage}
                     </td>
                   </tr>
                 ) : (
