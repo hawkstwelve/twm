@@ -13,7 +13,7 @@ from typing import Any
 
 import rasterio
 
-from app.models.registry import MODEL_REGISTRY
+from ..models.registry import MODEL_REGISTRY
 
 TELEMETRY_DB_PATH = Path(
     os.environ.get("CARTOSKY_TELEMETRY_DB_PATH")
