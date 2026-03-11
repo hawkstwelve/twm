@@ -143,6 +143,7 @@ export default function AdminVerificationPage() {
             variable: variableFilter,
             manualStatus: queueFilter === "review" || queueFilter === "pass" || queueFilter === "fail" ? queueFilter : "all",
             flaggedOnly: queueFilter === "flagged",
+            attentionOnly: queueFilter === "review",
             limit: 250,
           }),
         ]);

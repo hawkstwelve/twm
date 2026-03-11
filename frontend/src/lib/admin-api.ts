@@ -133,6 +133,7 @@ export type VerificationResultsResponse = {
     variable: string | null;
     manual_status: string | null;
     flagged_only: boolean;
+    attention_only: boolean;
   };
   results: VerificationResult[];
 };
@@ -237,6 +238,7 @@ export async function fetchAdminVerificationResults(params: {
   variable?: string;
   manualStatus?: string;
   flaggedOnly?: boolean;
+  attentionOnly?: boolean;
   limit?: number;
 }): Promise<VerificationResultsResponse> {
   const search = new URLSearchParams();
@@ -246,6 +248,7 @@ export async function fetchAdminVerificationResults(params: {
   if (params.variable && params.variable !== "all") search.set("variable", params.variable);
   if (params.manualStatus && params.manualStatus !== "all") search.set("manual_status", params.manualStatus);
   if (params.flaggedOnly) search.set("flagged_only", "true");
+  if (params.attentionOnly) search.set("attention_only", "true");
   return fetchJson<VerificationResultsResponse>(`${API_ORIGIN}/api/v4/admin/verification/results?${search.toString()}`);
 }
 

@@ -579,6 +579,34 @@ def sync_recent_verification_runs(*, data_root: Path, limit_runs_per_model: int 
     return synced
 
 
+def sync_latest_missing_verification_runs(*, data_root: Path, limit_runs_per_model: int = 2) -> int:
+    manifests_root = data_root / "manifests"
+    if not manifests_root.is_dir():
+        return 0
+
+    synced = 0
+    with _connect() as conn:
+        for model_dir in sorted(path for path in manifests_root.iterdir() if path.is_dir()):
+            run_ids = sorted(
+                [path.stem for path in model_dir.glob("*.json") if path.is_file()],
+                reverse=True,
+            )[: max(1, int(limit_runs_per_model))]
+            for run_id in run_ids:
+                row = conn.execute(
+                    """
+                    SELECT 1
+                    FROM qa_reviews
+                    WHERE model_id = ? AND run_id = ?
+                    LIMIT 1
+                    """,
+                    (model_dir.name, run_id),
+                ).fetchone()
+                if row is not None:
+                    continue
+                synced += sync_verification_run(data_root=data_root, model_id=model_dir.name, run_id=run_id)
+    return synced
+
+
 def verification_rows_count() -> int:
     with _connect() as conn:
         row = conn.execute("SELECT COUNT(*) AS total FROM qa_reviews").fetchone()
@@ -589,6 +617,41 @@ def ensure_verification_seeded(*, data_root: Path, limit_runs_per_model: int = 2
     if verification_rows_count() > 0:
         return 0
     return sync_recent_verification_runs(data_root=data_root, limit_runs_per_model=limit_runs_per_model)
+
+
+def refresh_missing_verification_diagnostics(*, data_root: Path, limit_runs: int = 50) -> int:
+    with _connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT model_id, run_id
+            FROM qa_reviews
+            WHERE auto_status = 'warning'
+              AND (
+                warning_summary IS NULL OR warning_summary = ''
+                OR severity IS NULL OR severity = ''
+                OR diagnostics_json IS NULL OR diagnostics_json = '' OR diagnostics_json = '{}'
+              )
+            ORDER BY updated_at DESC
+            LIMIT ?
+            """,
+            (max(1, int(limit_runs)),),
+        ).fetchall()
+
+    refreshed = 0
+    for row in rows:
+        refreshed += sync_verification_run(
+            data_root=data_root,
+            model_id=str(row["model_id"]),
+            run_id=str(row["run_id"]),
+        )
+    return refreshed
+
+
+def ensure_verification_ready(*, data_root: Path, seed_limit_runs_per_model: int = 2, refresh_limit_runs: int = 50) -> int:
+    seeded = ensure_verification_seeded(data_root=data_root, limit_runs_per_model=seed_limit_runs_per_model)
+    latest = sync_latest_missing_verification_runs(data_root=data_root, limit_runs_per_model=seed_limit_runs_per_model)
+    refreshed = refresh_missing_verification_diagnostics(data_root=data_root, limit_runs=refresh_limit_runs)
+    return seeded + latest + refreshed
 
 
 def get_verification_summary(
@@ -613,7 +676,7 @@ def get_verification_summary(
             SELECT
                 COUNT(*) AS total_rows,
                 SUM(CASE WHEN auto_status = 'pass' THEN 1 ELSE 0 END) AS auto_pass_rows,
-                SUM(CASE WHEN manual_status = 'review' THEN 1 ELSE 0 END) AS manual_review_rows,
+                SUM(CASE WHEN manual_status = 'review' AND auto_status = 'warning' THEN 1 ELSE 0 END) AS manual_review_rows,
                 SUM(CASE WHEN auto_status = 'warning' OR manual_status = 'fail' THEN 1 ELSE 0 END) AS flagged_rows
             FROM qa_reviews
             {where_sql}
@@ -636,6 +699,7 @@ def get_verification_results(
     variable_id: str | None = None,
     manual_status: str | None = None,
     flagged_only: bool = False,
+    attention_only: bool = False,
     limit: int = 200,
 ) -> list[dict[str, Any]]:
     clauses = ["updated_at >= ?"]
@@ -652,6 +716,9 @@ def get_verification_results(
         params.append(normalized_manual_status)
     if flagged_only:
         clauses.append("(auto_status = 'warning' OR manual_status = 'fail')")
+    if attention_only:
+        clauses.append("manual_status = 'review'")
+        clauses.append("auto_status = 'warning'")
 
     params.append(max(1, min(500, int(limit))))
     where_sql = " WHERE " + " AND ".join(clauses)

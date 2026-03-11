@@ -1086,7 +1086,7 @@ async def admin_verification_summary(
     variable: str | None = Query(None),
 ) -> dict[str, Any]:
     _require_admin_session(request)
-    admin_telemetry.ensure_verification_seeded(data_root=DATA_ROOT, limit_runs_per_model=2)
+    admin_telemetry.ensure_verification_ready(data_root=DATA_ROOT, seed_limit_runs_per_model=2, refresh_limit_runs=50)
     normalized_window = window.strip().lower()
     since_ts = int(time.time()) - _resolve_window_seconds(normalized_window)
     return {
@@ -1111,10 +1111,11 @@ async def admin_verification_results(
     variable: str | None = Query(None),
     manual_status: str | None = Query(None),
     flagged_only: bool = Query(False),
+    attention_only: bool = Query(False),
     limit: int = Query(200, ge=1, le=500),
 ) -> dict[str, Any]:
     _require_admin_session(request)
-    admin_telemetry.ensure_verification_seeded(data_root=DATA_ROOT, limit_runs_per_model=2)
+    admin_telemetry.ensure_verification_ready(data_root=DATA_ROOT, seed_limit_runs_per_model=2, refresh_limit_runs=50)
     normalized_window = window.strip().lower()
     since_ts = int(time.time()) - _resolve_window_seconds(normalized_window)
     normalized_manual_status = _normalize_filter_value(manual_status)
@@ -1125,6 +1126,7 @@ async def admin_verification_results(
             "variable": _normalize_filter_value(variable),
             "manual_status": normalized_manual_status,
             "flagged_only": bool(flagged_only),
+            "attention_only": bool(attention_only),
         },
         "results": admin_telemetry.get_verification_results(
             since_ts=since_ts,
@@ -1132,6 +1134,7 @@ async def admin_verification_results(
             variable_id=_normalize_filter_value(variable),
             manual_status=normalized_manual_status,
             flagged_only=bool(flagged_only),
+            attention_only=bool(attention_only),
             limit=limit,
         ),
     }

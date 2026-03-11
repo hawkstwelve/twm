@@ -182,6 +182,28 @@ def _seed_verification_files(root: Path) -> None:
     )
 
 
+def _seed_latest_run(root: Path, *, model_id: str, run_id: str, variable_id: str = "tmp2m") -> None:
+    _write_manifest(
+        root / "manifests" / model_id / f"{run_id}.json",
+        model_id=model_id,
+        run_id=run_id,
+        variables={variable_id: [1]},
+    )
+    _write_value_grid(
+        root / "published" / model_id / run_id / variable_id / "fh001.val.cog.tif",
+        np.array([[10.0, 11.0], [12.0, 13.0]], dtype=np.float32),
+    )
+    _write_sidecar(
+        root / "published" / model_id / run_id / variable_id / "fh001.json",
+        model_id=model_id,
+        variable_id=variable_id,
+        run_id=run_id,
+        forecast_hour=1,
+        min_value=10.0,
+        max_value=13.0,
+    )
+
+
 async def test_verification_summary_and_results(client: httpx.AsyncClient) -> None:
     _create_session(session_id="admin-session", member_id=42, name="Admin")
     _seed_verification_files(main_module.DATA_ROOT)
@@ -194,7 +216,7 @@ async def test_verification_summary_and_results(client: httpx.AsyncClient) -> No
     assert summary.status_code == 200
     assert summary.json()["total_rows"] == 3
     assert summary.json()["auto_pass_rows"] == 2
-    assert summary.json()["manual_review_rows"] == 3
+    assert summary.json()["manual_review_rows"] == 1
     assert summary.json()["flagged_rows"] == 1
 
     results = await client.get(
@@ -221,6 +243,66 @@ async def test_verification_summary_and_results(client: httpx.AsyncClient) -> No
     flagged_rows = flagged.json()["results"]
     assert len(flagged_rows) == 1
     assert flagged_rows[0]["auto_status"] == "warning"
+
+    review_queue = await client.get(
+        "/api/v4/admin/verification/results?window=30d&attention_only=true",
+        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
+    )
+
+    assert review_queue.status_code == 200
+    review_rows = review_queue.json()["results"]
+    assert len(review_rows) == 1
+    assert review_rows[0]["auto_status"] == "warning"
+
+
+async def test_verification_results_refresh_missing_diagnostics(client: httpx.AsyncClient) -> None:
+    _create_session(session_id="admin-session", member_id=42, name="Admin")
+    _seed_verification_files(main_module.DATA_ROOT)
+
+    admin_telemetry.sync_recent_verification_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=2)
+    with admin_telemetry._connect() as conn:
+        conn.execute(
+            """
+            UPDATE qa_reviews
+            SET warning_summary = NULL, diagnostics_json = NULL, severity = NULL
+            WHERE variable_id = 'precip_total' AND forecast_hour = 2
+            """
+        )
+
+    results = await client.get(
+        "/api/v4/admin/verification/results?window=30d&flagged_only=true",
+        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
+    )
+
+    assert results.status_code == 200
+    payload = results.json()["results"][0]
+    assert payload["warning_summary"]
+    assert payload["diagnostics"]["monotonic"]["max_decrease"] > 0
+    assert payload["severity"] in {"low", "medium", "high"}
+
+
+async def test_verification_ready_syncs_new_latest_runs(client: httpx.AsyncClient) -> None:
+    _create_session(session_id="admin-session", member_id=42, name="Admin")
+    _seed_verification_files(main_module.DATA_ROOT)
+    admin_telemetry.sync_recent_verification_runs(data_root=main_module.DATA_ROOT, limit_runs_per_model=2)
+
+    _seed_latest_run(main_module.DATA_ROOT, model_id="hrrr", run_id="20260311_13z")
+    _seed_latest_run(main_module.DATA_ROOT, model_id="nbm", run_id="20260311_12z")
+    _seed_latest_run(main_module.DATA_ROOT, model_id="nam", run_id="20260311_12z")
+    _seed_latest_run(main_module.DATA_ROOT, model_id="gfs", run_id="20260311_12z")
+
+    results = await client.get(
+        "/api/v4/admin/verification/results?window=30d",
+        cookies={twf_oauth.SESSION_COOKIE_NAME: "admin-session"},
+    )
+
+    assert results.status_code == 200
+    rows = results.json()["results"]
+    run_ids = {(row["model_id"], row["run_id"]) for row in rows}
+    assert ("hrrr", "20260311_13z") in run_ids
+    assert ("nbm", "20260311_12z") in run_ids
+    assert ("nam", "20260311_12z") in run_ids
+    assert ("gfs", "20260311_12z") in run_ids
 
 
 async def test_verification_review_update(client: httpx.AsyncClient) -> None:
