@@ -403,7 +403,10 @@ export function MapLegend({
             return next;
           })
         }
-        className="flex w-full items-center justify-between gap-1.5 border-b border-border/25 px-1.5 py-1 text-left transition-all duration-150 hover:bg-secondary/25 active:bg-secondary/45"
+        className={cn(
+          "flex w-full items-center justify-between gap-1.5 px-1.5 py-1 text-left transition-all duration-150 hover:bg-secondary/25 active:bg-secondary/45",
+          collapsed ? "border-b border-transparent" : "border-b border-border/25"
+        )}
         aria-expanded={!collapsed}
         aria-controls="legend-body"
       >
