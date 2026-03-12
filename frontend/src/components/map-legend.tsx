@@ -54,7 +54,7 @@ type PrecipPtypeLegendRow = {
 
 const DENSE_LEGEND_THRESHOLD = 18;
 const DENSE_GRADIENT_LABEL_COUNT = 6;
-const DENSE_GRADIENT_HEIGHT = 236;
+const DENSE_GRADIENT_HEIGHT = 268;
 
 function radarGroupLabelForCode(code: string, index: number): string {
   const normalized = code.toLowerCase();
@@ -126,7 +126,7 @@ function DenseGradientLegend({ entries }: { entries: LegendEntry[] }) {
   return (
     <div className="py-1.5">
       <div className="flex justify-start px-0.5">
-        <div className="inline-grid grid-cols-[26px_auto] items-stretch gap-2.5">
+        <div className="inline-grid grid-cols-[26px_auto] items-stretch gap-1.5">
           <div
             className="rounded-[14px] bg-black/14 p-[3px] ring-1 ring-inset ring-white/12 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_6px_16px_rgba(0,0,0,0.18)]"
             style={{ height: DENSE_GRADIENT_HEIGHT }}
@@ -138,12 +138,12 @@ function DenseGradientLegend({ entries }: { entries: LegendEntry[] }) {
           </div>
           <div className="flex flex-col justify-between py-[2px]" style={{ height: DENSE_GRADIENT_HEIGHT }}>
             {ticks.map((entry, index) => (
-              <span
-                key={`${entry.value}-${index}`}
-                className="font-mono text-[10px] font-semibold leading-none tabular-nums tracking-tight text-foreground/95 whitespace-nowrap"
-              >
-                {formatValue(entry.value)}
-              </span>
+              <div key={`${entry.value}-${index}`} className="flex items-center gap-1">
+                <span className="h-px w-[7px] shrink-0 rounded-full bg-white/45" />
+                <span className="font-mono text-[10px] font-semibold leading-none tabular-nums tracking-tight text-foreground/95 whitespace-nowrap">
+                  {formatValue(entry.value)}
+                </span>
+              </div>
             ))}
           </div>
         </div>
@@ -323,7 +323,7 @@ export function MapLegend({
       ref={containerRef}
       className={cn(
         "fixed z-[55] flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
-        showPrecipPtypeRows ? "w-[220px]" : showDenseLegend ? "w-[130px]" : "w-[156px]",
+        showPrecipPtypeRows ? "w-[220px]" : showDenseLegend ? "w-[122px]" : "w-[156px]",
         isSmallScreen ? "right-3 top-40 max-w-[min(72vw,220px)]" : "right-4 top-[4.35rem]"
       )}
       role="complementary"
