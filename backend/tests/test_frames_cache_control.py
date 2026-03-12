@@ -168,21 +168,23 @@ async def test_frames_incomplete_historical_cache_control_is_short(client: httpx
     assert response.headers.get("etag")
 
 
-async def test_frame_loop_urls_emit_static_cache_paths_when_pregenerated(client: httpx.AsyncClient) -> None:
+async def test_radar_ptype_frame_loop_urls_use_runtime_paths_when_pregenerated(client: httpx.AsyncClient) -> None:
     response = await client.get("/api/v4/hrrr/latest/radar_ptype/frames")
 
     assert response.status_code == 200
     rows = response.json()
     assert isinstance(rows, list) and rows
     first = rows[0]
-    assert first["loop_webp_url"].startswith("/loop/hrrr/")
-    assert "/tier0/fh000.loop.webp?v=" in first["loop_webp_url"]
-    assert first["loop_webp_tier0_url"].startswith("/loop/hrrr/")
+    assert first["loop_webp_url"].startswith("/api/v4/hrrr/20260224_14z/radar_ptype/0/loop.webp")
+    assert "/loop.webp?tier=0" in first["loop_webp_url"]
+    assert first["loop_webp_tier0_url"].startswith("/api/v4/hrrr/20260224_14z/radar_ptype/0/loop.webp")
 
     tier1_row = next((row for row in rows if row.get("loop_webp_tier1_url")), None)
     assert tier1_row is not None
-    assert tier1_row["loop_webp_tier1_url"].startswith("/loop/hrrr/")
-    assert "/tier1/fh000.loop.webp?v=" in tier1_row["loop_webp_tier1_url"]
+    assert tier1_row["loop_webp_tier1_url"].startswith(
+        f"/api/v4/hrrr/20260224_14z/radar_ptype/{tier1_row['fh']}/loop.webp"
+    )
+    assert "/loop.webp?tier=1" in tier1_row["loop_webp_tier1_url"]
 
 
 async def test_frame_loop_urls_include_tier0_runtime_fallback_without_pregenerated_cache(

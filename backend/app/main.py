@@ -85,6 +85,7 @@ LOOP_URL_PREFIX = _normalized_path_prefix(
     _env_value("CARTOSKY_LOOP_URL_PREFIX", "CARTOSKY_V3_LOOP_URL_PREFIX", "TWF_V3_LOOP_URL_PREFIX", default="/loop/"),
     default="/loop/",
 )
+RUNTIME_ONLY_LOOP_URL_VARS = {"radar_ptype"}
 CAPABILITIES_CONTRACT_VERSION = "v1"
 
 _RUN_ID_RE = re.compile(r"^\d{8}_\d{2}z$")
@@ -1635,10 +1636,15 @@ def _resolve_existing_loop_urls(
 ) -> tuple[str | None, str | None]:
     tier0_url: str | None = None
     tier1_url: str | None = None
+    var_norm = str(var or "").strip().lower()
+    runtime_only = var_norm in RUNTIME_ONLY_LOOP_URL_VARS
 
     tier0_path = _loop_webp_path(model, run, var, fh, tier=0)
     if tier0_path is not None and tier0_path.is_file():
-        tier0_url = _static_loop_webp_url(model, run, var, fh, tier=0, version_token=version_token)
+        if runtime_only:
+            tier0_url = _loop_webp_url(model, run, var, fh, tier=0, version_token=version_token)
+        else:
+            tier0_url = _static_loop_webp_url(model, run, var, fh, tier=0, version_token=version_token)
     else:
         legacy_path = _legacy_loop_webp_path(model, run, var, fh, tier=0)
         if legacy_path is not None and legacy_path.is_file():
@@ -1646,7 +1652,10 @@ def _resolve_existing_loop_urls(
 
     tier1_path = _loop_webp_path(model, run, var, fh, tier=1)
     if tier1_path is not None and tier1_path.is_file():
-        tier1_url = _static_loop_webp_url(model, run, var, fh, tier=1, version_token=version_token)
+        if runtime_only:
+            tier1_url = _loop_webp_url(model, run, var, fh, tier=1, version_token=version_token)
+        else:
+            tier1_url = _static_loop_webp_url(model, run, var, fh, tier=1, version_token=version_token)
 
     return tier0_url, tier1_url
 
