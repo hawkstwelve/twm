@@ -27,6 +27,15 @@ _TARGETED_LOOP_FIXED_WIDTHS: dict[int, int] = {
     0: 2300,
     1: 3400,
 }
+_TARGETED_LOOP_RESAMPLING_OVERRIDES: dict[str, str] = {
+    "radar_ptype": "bilinear",
+}
+_TARGETED_LOOP_MAX_DIMS: dict[tuple[str, int], int] = {
+    ("radar_ptype", 0): 2048,
+}
+_TARGETED_LOOP_QUALITY: dict[tuple[str, int], int] = {
+    ("radar_ptype", 0): 90,
+}
 _MODEL_GRID_KM_FALLBACK: dict[str, float] = {
     "gfs": 25.0,
 }
@@ -227,6 +236,19 @@ def render_resampling_name(
     return name
 
 
+def loop_resampling_name(
+    *,
+    model_id: str,
+    var_key: str,
+    kind: str | None = None,
+) -> str:
+    var_norm = str(var_key or "").strip().lower()
+    override = _TARGETED_LOOP_RESAMPLING_OVERRIDES.get(var_norm)
+    if override in _SUPPORTED_DISPLAY_RESAMPLING:
+        return override
+    return render_resampling_name(model_id=model_id, var_key=var_key, kind=kind)
+
+
 def use_fixed_loop_size_for_variable(
     *,
     model_id: str,
@@ -293,6 +315,46 @@ def loop_fixed_width_for_tier(
     return max(1, int(default_width))
 
 
+def loop_max_dim_for_tier(
+    *,
+    model_id: str,
+    var_key: str,
+    tier: int,
+    default_max_dim: int,
+) -> int:
+    del model_id
+    var_norm = str(var_key or "").strip().lower()
+    try:
+        tier_int = int(tier)
+    except (TypeError, ValueError):
+        tier_int = 0
+
+    override = _TARGETED_LOOP_MAX_DIMS.get((var_norm, tier_int))
+    if override is not None:
+        return max(1, int(override))
+    return max(1, int(default_max_dim))
+
+
+def loop_quality_for_tier(
+    *,
+    model_id: str,
+    var_key: str,
+    tier: int,
+    default_quality: int,
+) -> int:
+    del model_id
+    var_norm = str(var_key or "").strip().lower()
+    try:
+        tier_int = int(tier)
+    except (TypeError, ValueError):
+        tier_int = 0
+
+    override = _TARGETED_LOOP_QUALITY.get((var_norm, tier_int))
+    if override is not None:
+        return max(1, min(100, int(override)))
+    return max(1, min(100, int(default_quality)))
+
+
 def log_fixed_loop_size_once(
     *,
     model_id: str,
@@ -354,5 +416,5 @@ def rasterio_resampling_for_loop(
     var_key: str,
     kind: str | None = None,
 ) -> Resampling:
-    name = render_resampling_name(model_id=model_id, var_key=var_key, kind=kind)
+    name = loop_resampling_name(model_id=model_id, var_key=var_key, kind=kind)
     return Resampling.nearest if name == "nearest" else Resampling.bilinear

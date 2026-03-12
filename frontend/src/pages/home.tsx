@@ -175,7 +175,7 @@ export default function Home() {
           <GlassCard title="GFS" desc="Global guidance. Great for synoptic trends and longer lead time.">
             <div className="grid grid-cols-3 gap-3 text-xs text-white/65">
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">Global</div>
-              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">3h to 240h, then 6h</div>
+              <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">Every 6 hours</div>
               <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">~25km</div>
             </div>
           </GlassCard>
@@ -206,17 +206,6 @@ export default function Home() {
               <div className="px-4 py-3 text-white/70">{row.notes}</div>
             </div>
           ))}
-        </div>
-      </section>
-
-      {/* FOOTER TRUST ROW */}
-      <section className="pt-4">
-        <div className="flex flex-wrap items-center gap-6 text-xs text-white/55">
-          <span>Built for fast model map sharing</span>
-          <span>•</span>
-          <span>Optimized for smooth scrubbing</span>
-          <span>•</span>
-          <span>Forum tie-in coming soon</span>
         </div>
       </section>
     </div>

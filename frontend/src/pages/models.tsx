@@ -144,7 +144,7 @@ export default function Models() {
         id: "gfs",
         name: "GFS",
         oneLiner: "Global guidance for synoptic trends and longer lead time. Great context setter.",
-        pills: ["Global", "3h to 240h, then 6h", "~25 km"],
+        pills: ["Global", "Every 6 hours", "~25 km"],
         bestFor: [
           "Pattern recognition (ridges/troughs and timing)",
           "Longer-range temperature trends",
@@ -160,7 +160,7 @@ export default function Models() {
         ],
         specs: [
           { k: "Domain", v: "Global" },
-          { k: "Cadence", v: "00/06/12/18Z" },
+          { k: "Cadence", v: "Every 6 hours" },
           { k: "Horizon", v: "Long range" },
         ],
       },
@@ -206,7 +206,7 @@ export default function Models() {
         specs: [
           { k: "Domain", v: "CONUS, PNW" },
           { k: "Cadence", v: "Every 3 hours" },
-          { k: "Horizon", v: "0-120h in 6h steps" },
+          { k: "Horizon", v: "Mid range" },
         ],
       },
     ],

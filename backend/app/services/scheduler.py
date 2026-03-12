@@ -27,6 +27,8 @@ from app.services.render_resampling import (
     high_quality_loop_resampling,
     log_fixed_loop_size_once,
     loop_fixed_width_for_tier,
+    loop_max_dim_for_tier,
+    loop_quality_for_tier,
     rasterio_resampling_for_loop,
     use_value_render_for_variable,
     variable_kind,
@@ -1122,6 +1124,18 @@ def _convert_rgba_cog_to_loop_webp(
         sharpen_enable_cfg, sharpen_radius, sharpen_percent, sharpen_threshold = _loop_sharpen_config()
         kind = variable_kind(model_id, var_key)
         sharpen_enable = sharpen_enable_cfg and _should_sharpen_loop(model_id, kind)
+        resolved_max_dim = loop_max_dim_for_tier(
+            model_id=model_id,
+            var_key=var_key,
+            tier=tier,
+            default_max_dim=max_dim,
+        )
+        resolved_quality = loop_quality_for_tier(
+            model_id=model_id,
+            var_key=var_key,
+            tier=tier,
+            default_quality=quality,
+        )
         with rasterio.open(cog_path) as ds:
             src_h = int(ds.height)
             src_w = int(ds.width)
@@ -1136,7 +1150,7 @@ def _convert_rgba_cog_to_loop_webp(
                 var_key=var_key,
                 src_h=src_h,
                 src_w=src_w,
-                max_dim=max_dim,
+                max_dim=resolved_max_dim,
                 fixed_width=resolved_fixed_width,
             )
             if out_h <= 0 or out_w <= 0:
@@ -1188,7 +1202,7 @@ def _convert_rgba_cog_to_loop_webp(
                             threshold=sharpen_threshold,
                         )
                         image = Image.fromarray(rgba_hwc, mode="RGBA")
-                        image.save(out_path, format="WEBP", quality=quality, method=6)
+                        image.save(out_path, format="WEBP", quality=resolved_quality, method=6)
                         return True, "value"
                     except PermissionError:
                         raise
@@ -1236,7 +1250,7 @@ def _convert_rgba_cog_to_loop_webp(
             threshold=sharpen_threshold,
         )
         image = Image.fromarray(rgba, mode="RGBA")
-        image.save(out_path, format="WEBP", quality=quality, method=6)
+        image.save(out_path, format="WEBP", quality=resolved_quality, method=6)
         return True, mode_used
     except PermissionError as exc:
         logger.error(

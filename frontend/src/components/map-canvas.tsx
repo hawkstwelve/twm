@@ -132,6 +132,14 @@ function getResamplingMode(variableKind?: string | null): "nearest" | "linear" {
   return "linear";
 }
 
+function getLoopResamplingMode(variable?: string, variableKind?: string | null): "nearest" | "linear" {
+  const variableId = String(variable ?? "").trim().toLowerCase();
+  if (variableId === "radar_ptype") {
+    return "linear";
+  }
+  return getResamplingMode(variableKind);
+}
+
 function loopCoordinatesFromBbox(
   bbox: [number, number, number, number] | null | undefined
 ): [[number, number], [number, number], [number, number], [number, number]] {
@@ -337,6 +345,7 @@ function styleFor(
   basemapMode: BasemapMode = "light"
 ): StyleSpecification {
   const resamplingMode = getResamplingMode(variableKind);
+  const loopResamplingMode = getLoopResamplingMode(variable, variableKind);
   const paintSettings = getOverlayPaintSettings(variable, basemapMode);
   const basemapTiles = basemapMode === "dark" ? CARTO_DARK_BASE_TILES : CARTO_LIGHT_BASE_TILES;
   const labelTiles = basemapMode === "dark" ? CARTO_DARK_LABEL_TILES : CARTO_LIGHT_LABEL_TILES;
@@ -569,7 +578,7 @@ function styleFor(
         },
         paint: {
           "raster-opacity": opacity,
-          "raster-resampling": resamplingMode,
+          "raster-resampling": loopResamplingMode,
           "raster-fade-duration": 0,
           "raster-contrast": paintSettings.contrast,
           "raster-saturation": paintSettings.saturation,
@@ -751,7 +760,9 @@ export function MapCanvas({
       if (!map.getLayer(id)) {
         return;
       }
-      const resamplingMode = getResamplingMode(variableKindId);
+      const resamplingMode = id === LOOP_LAYER_ID
+        ? getLoopResamplingMode(variableId, variableKindId)
+        : getResamplingMode(variableKindId);
       const paintSettings = getOverlayPaintSettings(variableId, basemapModeValue);
       map.setPaintProperty(id, "raster-resampling", resamplingMode);
       map.setPaintProperty(id, "raster-contrast", paintSettings.contrast);
