@@ -68,6 +68,12 @@ def test_maybe_unsharp_rgba_preserves_alpha_shape_and_dtype():
     assert np.array_equal(out[..., 3], rgba[..., 3])
 
 
+def test_should_sharpen_loop_disabled_for_gfs_continuous():
+    assert main_module._should_sharpen_loop("gfs", "continuous") is False
+    assert main_module._should_sharpen_loop("gfs", "indexed") is False
+    assert main_module._should_sharpen_loop("nam", "continuous") is False
+
+
 def test_render_loop_webp_bytes_uses_value_render_for_gfs_continuous(tmp_path, monkeypatch):
     cog_path = tmp_path / "fh000.rgba.cog.tif"
     val_path = tmp_path / "fh000.val.cog.tif"

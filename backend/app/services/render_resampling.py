@@ -27,6 +27,12 @@ _TARGETED_LOOP_FIXED_WIDTHS: dict[int, int] = {
     0: 2300,
     1: 3400,
 }
+_TARGETED_LOOP_FIXED_WIDTHS_BY_MODEL_VAR: dict[tuple[str, str, int], int] = {
+    ("gfs", "snowfall_total", 0): 2300,
+    ("gfs", "snowfall_total", 1): 3400,
+    ("gfs", "snowfall_kuchera_total", 0): 2300,
+    ("gfs", "snowfall_kuchera_total", 1): 3400,
+}
 _TARGETED_LOOP_FIXED_WIDTHS_BY_VAR: dict[tuple[str, int], int] = {
     ("radar_ptype", 0): 3072,
     ("radar_ptype", 1): 3200,
@@ -308,6 +314,10 @@ def loop_fixed_width_for_tier(
         tier_int = int(tier)
     except (TypeError, ValueError):
         tier_int = 0
+
+    model_var_override = _TARGETED_LOOP_FIXED_WIDTHS_BY_MODEL_VAR.get((model_norm, var_norm, tier_int))
+    if model_var_override is not None:
+        return max(1, int(model_var_override))
 
     var_override = _TARGETED_LOOP_FIXED_WIDTHS_BY_VAR.get((var_norm, tier_int))
     if var_override is not None:

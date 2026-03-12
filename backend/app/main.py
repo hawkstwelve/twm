@@ -2113,9 +2113,9 @@ def _maybe_blur_loop_values(values: np.ndarray, *, sigma: float | None = None) -
 
 
 def _should_sharpen_loop(model: str, kind: str | None) -> bool:
-    model_norm = str(model or "").strip().lower()
-    kind_norm = str(kind or "").strip().lower()
-    return model_norm == "gfs" and kind_norm == "continuous"
+    del model, kind
+    # Disabled because sharpening exaggerated coarse-field artifacts in loop WebPs.
+    return False
 
 
 def _maybe_unsharp_rgba(
