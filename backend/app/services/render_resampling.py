@@ -23,15 +23,10 @@ _VALUE_RENDER_MIN_MODEL_KM = 10.0
 _VALUE_RENDER_MODEL_ALLOWLIST = {"gfs"}
 _TARGETED_VALUE_RENDER_MODELS = {"hrrr", "nam", "nbm"}
 _TARGETED_VALUE_RENDER_VARS = {"snowfall_total", "snowfall_kuchera_total", "precip_total"}
+_EXPANDED_LOOP_WIDTH_CONTINUOUS_MODELS = {"gfs"}
 _TARGETED_LOOP_FIXED_WIDTHS: dict[int, int] = {
     0: 2300,
     1: 3400,
-}
-_TARGETED_LOOP_FIXED_WIDTHS_BY_MODEL_VAR: dict[tuple[str, str, int], int] = {
-    ("gfs", "snowfall_total", 0): 2300,
-    ("gfs", "snowfall_total", 1): 3400,
-    ("gfs", "snowfall_kuchera_total", 0): 2300,
-    ("gfs", "snowfall_kuchera_total", 1): 3400,
 }
 _TARGETED_LOOP_FIXED_WIDTHS_BY_VAR: dict[tuple[str, int], int] = {
     ("radar_ptype", 0): 3072,
@@ -315,13 +310,15 @@ def loop_fixed_width_for_tier(
     except (TypeError, ValueError):
         tier_int = 0
 
-    model_var_override = _TARGETED_LOOP_FIXED_WIDTHS_BY_MODEL_VAR.get((model_norm, var_norm, tier_int))
-    if model_var_override is not None:
-        return max(1, int(model_var_override))
-
     var_override = _TARGETED_LOOP_FIXED_WIDTHS_BY_VAR.get((var_norm, tier_int))
     if var_override is not None:
         return max(1, int(var_override))
+
+    resolved_kind = _normalize_kind(variable_kind(model_norm, var_norm))
+    if model_norm in _EXPANDED_LOOP_WIDTH_CONTINUOUS_MODELS and resolved_kind == "continuous":
+        override = _TARGETED_LOOP_FIXED_WIDTHS.get(tier_int)
+        if override is not None:
+            return max(1, int(override))
 
     if model_norm in _TARGETED_VALUE_RENDER_MODELS and var_norm in _TARGETED_VALUE_RENDER_VARS:
         override = _TARGETED_LOOP_FIXED_WIDTHS.get(tier_int)

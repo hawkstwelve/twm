@@ -151,20 +151,22 @@ def test_targeted_accumulations_use_larger_loop_widths(monkeypatch):
         var_key="tmp2m",
         tier=0,
         default_width=1600,
-    ) == 1600
+    ) == 2300
 
 
-def test_gfs_snowfall_loops_use_targeted_larger_widths(monkeypatch):
+def test_gfs_continuous_loops_use_larger_widths(monkeypatch):
     _set_capabilities(
         monkeypatch,
         {
             "snowfall_total": SimpleNamespace(kind="continuous", color_map_id="snowfall_total"),
             "snowfall_kuchera_total": SimpleNamespace(kind="continuous", color_map_id="snowfall_total"),
+            "precip_total": SimpleNamespace(kind="continuous", color_map_id="precip_total"),
             "tmp2m": SimpleNamespace(kind="continuous", color_map_id="tmp2m"),
+            "precip_ptype": SimpleNamespace(kind="indexed", color_map_id="precip_ptype"),
         },
     )
 
-    for var_key in ("snowfall_total", "snowfall_kuchera_total"):
+    for var_key in ("snowfall_total", "snowfall_kuchera_total", "precip_total", "tmp2m"):
         assert render_resampling.loop_fixed_width_for_tier(
             model_id="gfs",
             var_key=var_key,
@@ -180,7 +182,7 @@ def test_gfs_snowfall_loops_use_targeted_larger_widths(monkeypatch):
 
     assert render_resampling.loop_fixed_width_for_tier(
         model_id="gfs",
-        var_key="tmp2m",
+        var_key="precip_ptype",
         tier=0,
         default_width=1600,
     ) == 1600
