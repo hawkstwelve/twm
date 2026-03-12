@@ -192,26 +192,26 @@ function GradientColorBar({ entries }: { entries: LegendEntry[] }) {
   const labelIndices = Array.from(tickSet).sort((a, b) => b - a);
 
   return (
-    <div className="flex items-stretch gap-3 py-2">
-      {/* Smooth vertical gradient pill */}
-      <div
-        className="w-5 shrink-0 rounded-2xl shadow-[0_4px_20px_rgba(0,0,0,0.6)] ring-1 ring-inset ring-white/10"
-        style={{
-          backgroundImage: `linear-gradient(to bottom, ${gradientColors})`,
-          minHeight: 180,
-        }}
-      />
-      {/* Value labels evenly distributed top-to-bottom — no tick marks */}
-      <div className="flex flex-col justify-between py-[1px] flex-1">
+    <div className="flex items-stretch gap-2 py-2">
+      {/* Labels on the LEFT, right-aligned — shrink to their natural text width */}
+      <div className="flex flex-col justify-between shrink-0 py-px">
         {labelIndices.map((i) => (
           <span
             key={i}
-            className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/80 leading-none whitespace-nowrap"
+            className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/70 leading-none whitespace-nowrap text-right"
           >
             {formatValue(entries[i].value)}
           </span>
         ))}
       </div>
+      {/* Gradient pill fills ALL remaining panel width */}
+      <div
+        className="flex-1 rounded-2xl shadow-[0_2px_16px_rgba(0,0,0,0.55)] ring-1 ring-inset ring-white/8"
+        style={{
+          backgroundImage: `linear-gradient(to bottom, ${gradientColors})`,
+          minHeight: 180,
+        }}
+      />
     </div>
   );
 }
