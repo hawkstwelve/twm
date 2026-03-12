@@ -263,8 +263,8 @@ precip_levels = [
 
 # Total snowfall (inches, 10:1 ratio)
 snow_colors = [
-    "#ffffff", "#dbdbdb", "#9fd0f8", "#73b9f1", 
-    "#4fa2e7", "#3c9de8","#1f86dc", "#0f72c8",
+    "#ffffff", "#dbdbdb", "#5099ee", "#488ef7", 
+    "#2f76df", "#3565e1","#1f5cc4", "#204eb5",
     "#3e0091", "#4c008f", "#5a008d", "#67008a", "#860087",
     "#a10285", "#c90181", "#f3027c",
     "#f41484", "#f53b9b", "#f65faf", "#f76eb7", "#f885c3",
