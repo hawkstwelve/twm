@@ -54,7 +54,7 @@ type PrecipPtypeLegendRow = {
 
 const DENSE_LEGEND_THRESHOLD = 18;
 const DENSE_GRADIENT_LABEL_COUNT = 6;
-const DENSE_GRADIENT_HEIGHT = 268;
+const DENSE_GRADIENT_HEIGHT = "clamp(268px, calc(100vh - 24rem), 372px)";
 
 function radarGroupLabelForCode(code: string, index: number): string {
   const normalized = code.toLowerCase();
