@@ -52,6 +52,16 @@ type PrecipPtypeLegendRow = {
   colors: string[];
 };
 
+type DenseLegendRow = {
+  min: number;
+  max: number;
+  startColor: string;
+  endColor: string;
+};
+
+const DENSE_LEGEND_THRESHOLD = 18;
+const DENSE_LEGEND_MAX_ROWS = 18;
+
 function radarGroupLabelForCode(code: string, index: number): string {
   const normalized = code.toLowerCase();
   if (normalized === "rain") return "Rain";
@@ -96,6 +106,68 @@ function isPrecipPtypeLegend(legend: LegendPayload): boolean {
   const kind = legend.kind?.toLowerCase() ?? "";
   const id = legend.id?.toLowerCase() ?? "";
   return kind.includes("precip_ptype") || id === "precip_ptype";
+}
+
+function formatRangeLabel(min: number, max: number): string {
+  return Math.abs(max - min) < 1e-9 ? formatValue(max) : `${formatValue(min)}-${formatValue(max)}`;
+}
+
+function buildDenseLegendRows(entries: LegendEntry[], maxRows = DENSE_LEGEND_MAX_ROWS): DenseLegendRow[] {
+  const displayed = entries.slice().reverse();
+  if (displayed.length === 0) return [];
+
+  const rowCount = Math.min(displayed.length, maxRows);
+  const rows: DenseLegendRow[] = [];
+
+  for (let rowIndex = 0; rowIndex < rowCount; rowIndex += 1) {
+    const start = Math.floor((rowIndex * displayed.length) / rowCount);
+    const rawEnd = Math.floor(((rowIndex + 1) * displayed.length) / rowCount);
+    const end = Math.max(start + 1, rawEnd);
+    const segment = displayed.slice(start, end);
+    if (segment.length === 0) continue;
+    const first = segment[0];
+    const last = segment[segment.length - 1];
+    rows.push({
+      min: Math.min(first.value, last.value),
+      max: Math.max(first.value, last.value),
+      startColor: first.color,
+      endColor: last.color,
+    });
+  }
+
+  return rows;
+}
+
+function DenseLegendRows({ entries }: { entries: LegendEntry[] }) {
+  const rows = buildDenseLegendRows(entries);
+
+  return (
+    <div className="py-0.5">
+      <div
+        className="grid gap-[2px]"
+        style={{
+          gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))`,
+          height: 198,
+        }}
+      >
+        {rows.map((row, index) => (
+          <div key={`${row.min}-${row.max}-${index}`} className="grid min-h-0 grid-cols-[10px_1fr] items-center gap-1">
+            <span
+              className="h-full min-h-[8px] rounded-[2px] border border-border/20 shadow-sm"
+              style={
+                row.startColor === row.endColor
+                  ? { backgroundColor: row.startColor }
+                  : { backgroundImage: `linear-gradient(to bottom, ${row.startColor}, ${row.endColor})` }
+              }
+            />
+            <span className="font-mono text-[9px] font-medium leading-none tabular-nums tracking-tight text-foreground/92 whitespace-nowrap">
+              {formatRangeLabel(row.min, row.max)}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function groupRadarEntries(
@@ -262,6 +334,7 @@ export function MapLegend({
     ? groupRadarEntries(legend.entries, legend.ptype_breaks, legend.ptype_order)
     : [];
   const showGroupedRadar = groupedRadarEntries.length > 0;
+  const showDenseLegend = !showPrecipPtypeRows && !showGroupedRadar && legend.entries.length > DENSE_LEGEND_THRESHOLD;
 
   return (
     <div
@@ -303,7 +376,7 @@ export function MapLegend({
       >
         <div className="overflow-hidden">
           <div key={fadeKey} className="flex flex-col gap-1.5 px-1.5 py-1.5 animate-in fade-in duration-200">
-            <div className="legend-scroll max-h-[45vh] space-y-px overflow-y-auto scroll-smooth">
+            <div className={cn(showDenseLegend ? "" : "legend-scroll max-h-[45vh] space-y-px overflow-y-auto scroll-smooth")}>
               {showPrecipPtypeRows
                 ? precipPtypeRows.map((row, rowIndex) => (
                     <div
@@ -349,6 +422,8 @@ export function MapLegend({
                       ))}
                     </div>
                   ))
+                : showDenseLegend
+                ? <DenseLegendRows entries={legend.entries} />
                 : legend.entries.slice().reverse().map((entry, index) => (
                     <div
                       key={`${entry.value}-${entry.color}-${index}`}
