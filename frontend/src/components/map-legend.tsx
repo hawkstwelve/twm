@@ -116,6 +116,13 @@ function buildDenseLegendTicks(entries: LegendEntry[], targetCount = DENSE_GRADI
   return indices.map((index) => displayed[index]);
 }
 
+function formatDenseTickValue(value: number, isMinTick: boolean): string {
+  if (isMinTick && value > 0 && value < 1) {
+    return "0";
+  }
+  return formatValue(value);
+}
+
 function DenseGradientLegend({ entries, height }: { entries: LegendEntry[]; height: string }) {
   const displayed = entries.slice().reverse();
   const ticks = buildDenseLegendTicks(entries);
@@ -127,7 +134,7 @@ function DenseGradientLegend({ entries, height }: { entries: LegendEntry[]; heig
   return (
     <div className="py-1.5">
       <div className="flex justify-start px-0.5">
-        <div className="inline-grid grid-cols-[26px_auto] items-stretch gap-1.5">
+        <div className="inline-grid grid-cols-[26px_auto] items-stretch gap-0">
           <div
             className="rounded-[14px] bg-black/14 p-[3px] ring-1 ring-inset ring-white/12 shadow-[inset_0_1px_0_rgba(255,255,255,0.06),0_6px_16px_rgba(0,0,0,0.18)]"
             style={{ height }}
@@ -137,12 +144,12 @@ function DenseGradientLegend({ entries, height }: { entries: LegendEntry[]; heig
               style={{ backgroundImage: `linear-gradient(to bottom, ${gradientStops})` }}
             />
           </div>
-          <div className="flex flex-col justify-between py-[2px]" style={{ height }}>
+          <div className="flex flex-col justify-between py-[2px] pl-[1px]" style={{ height }}>
             {ticks.map((entry, index) => (
-              <div key={`${entry.value}-${index}`} className="flex items-center gap-1">
-                <span className="h-px w-[7px] shrink-0 rounded-full bg-white/45" />
+              <div key={`${entry.value}-${index}`} className="flex items-center gap-[3px]">
+                <span className="h-px w-[8px] shrink-0 rounded-full bg-white/52" />
                 <span className="font-mono text-[10px] font-semibold leading-none tabular-nums tracking-tight text-foreground/95 whitespace-nowrap">
-                  {formatValue(entry.value)}
+                  {formatDenseTickValue(entry.value, index === ticks.length - 1)}
                 </span>
               </div>
             ))}
