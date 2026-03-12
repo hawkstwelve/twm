@@ -38,6 +38,7 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     nam_model = "nam"
     nam_run_id = "20260224_12z"
     var = "radar_ptype"
+    temp_var = "tmp2m"
     gfs_model = "gfs"
     gfs_run_id = "20260224_12z"
     gfs_invalid_run_id = "20260224_20z"
@@ -50,6 +51,14 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
             {
                 "variables": {
                     var: {
+                        "expected_frames": 2,
+                        "available_frames": 2,
+                        "frames": [
+                            {"fh": 0},
+                            {"fh": 1},
+                        ]
+                    },
+                    temp_var: {
                         "expected_frames": 2,
                         "available_frames": 2,
                         "frames": [
@@ -144,6 +153,9 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
         tier0_path = loop_cache_root / model / run_id / var / "tier0" / f"fh{fh:03d}.loop.webp"
         tier0_path.parent.mkdir(parents=True, exist_ok=True)
         tier0_path.write_bytes(b"RIFFxxxxWEBPVP8 ")
+        temp_tier0_path = loop_cache_root / model / run_id / temp_var / "tier0" / f"fh{fh:03d}.loop.webp"
+        temp_tier0_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_tier0_path.write_bytes(b"RIFFxxxxWEBPVP8 ")
     tier1_path = loop_cache_root / model / run_id / var / "tier1" / "fh000.loop.webp"
     tier1_path.parent.mkdir(parents=True, exist_ok=True)
     tier1_path.write_bytes(b"RIFFxxxxWEBPVP8 ")
@@ -228,6 +240,18 @@ async def test_nam_radar_ptype_runtime_loop_urls_are_emitted_when_pregenerated(
     assert first["loop_webp_tier0_url"] == first["loop_webp_url"]
 
 
+async def test_tmp2m_frame_loop_urls_use_runtime_paths_when_pregenerated(client: httpx.AsyncClient) -> None:
+    response = await client.get("/api/v4/hrrr/latest/tmp2m/frames")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert isinstance(rows, list) and rows
+    first = rows[0]
+    assert first["loop_webp_url"].startswith("/api/v4/hrrr/20260224_14z/tmp2m/0/loop.webp")
+    assert "/loop.webp?tier=0" in first["loop_webp_url"]
+    assert first["loop_webp_tier0_url"] == first["loop_webp_url"]
+
+
 async def test_frame_loop_urls_include_tier0_runtime_fallback_without_pregenerated_cache(
     client: httpx.AsyncClient,
 ) -> None:
@@ -305,8 +329,8 @@ async def test_capabilities_availability_readiness_fields(client: httpx.AsyncCli
     hrrr = availability["hrrr"]
     assert hrrr["latest_run"] == "20260224_14z"
     assert hrrr["latest_run_ready"] is True
-    assert hrrr["latest_run_ready_vars"] == ["radar_ptype"]
-    assert hrrr["latest_run_ready_frame_count"] == 2
+    assert hrrr["latest_run_ready_vars"] == ["radar_ptype", "tmp2m"]
+    assert hrrr["latest_run_ready_frame_count"] == 4
 
     gfs = availability["gfs"]
     assert gfs["latest_run"] == "20260224_12z"
