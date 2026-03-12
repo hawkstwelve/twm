@@ -187,72 +187,98 @@ function groupRadarEntries(
 
 const GRADIENT_THRESHOLD = 12;
 const GRADIENT_LABEL_COUNT = 6;
-// Canvas pixel height — determines the resolution of the rendered gradient.
-const GRADIENT_BAR_HEIGHT = 200;
+const BAR_HEIGHT = 200;
+
+function drawGradient(canvas: HTMLCanvasElement, rgbs: [number, number, number][]) {
+  const w = canvas.width;
+  const h = canvas.height;
+  if (w === 0 || h === 0) return;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const n = rgbs.length;
+  const img = ctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) {
+    const t = y / (h - 1);
+    const fi = t * (n - 1);
+    const lo = Math.floor(fi);
+    const hi = Math.min(lo + 1, n - 1);
+    const frac = fi - lo;
+    const [r1, g1, b1] = rgbs[lo] ?? [0, 0, 0];
+    const [r2, g2, b2] = rgbs[hi] ?? [0, 0, 0];
+    const r = Math.round(lerp(r1, r2, frac));
+    const g = Math.round(lerp(g1, g2, frac));
+    const b = Math.round(lerp(b1, b2, frac));
+    for (let x = 0; x < w; x++) {
+      const idx = (y * w + x) * 4;
+      img.data[idx] = r;
+      img.data[idx + 1] = g;
+      img.data[idx + 2] = b;
+      img.data[idx + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
 
 function GradientColorBar({ entries }: { entries: LegendEntry[] }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // entries ascending (low→high); reverse so index 0 = top = hottest.
+  const rgbs = useMemo(
+    () => entries.slice().reverse().map((e) => hexToRgb(e.color)),
+    [entries]
+  );
+  const reversed = useMemo(() => entries.slice().reverse(), [entries]);
   const n = entries.length;
 
-  // entries is ascending (low→high); reverse so index 0 = top of bar (highest).
-  const reversed = useMemo(() => entries.slice().reverse(), [entries]);
-
+  // Draw immediately when rgbs change, and again whenever the canvas is resized.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
 
-    // Draw 2px wide — CSS flex-1 stretches it; gradient is uniform on x-axis.
-    canvas.width = 2;
-    canvas.height = GRADIENT_BAR_HEIGHT;
+    // Set pixel height once.
+    canvas.height = BAR_HEIGHT;
 
-    const rgbs = reversed.map((e) => hexToRgb(e.color));
+    const ro = new ResizeObserver(() => {
+      // Sync canvas pixel width to its CSS width, then redraw.
+      const cssW = canvas.getBoundingClientRect().width;
+      if (cssW > 0) {
+        canvas.width = Math.round(cssW * window.devicePixelRatio);
+        drawGradient(canvas, rgbs);
+      }
+    });
+    ro.observe(canvas);
+    return () => ro.disconnect();
+  }, [rgbs]);
 
-    for (let y = 0; y < GRADIENT_BAR_HEIGHT; y++) {
-      const t = y / (GRADIENT_BAR_HEIGHT - 1);
-      const fi = t * (n - 1);
-      const lo = Math.floor(fi);
-      const hi = Math.min(lo + 1, n - 1);
-      const frac = fi - lo;
-      const rgb1 = rgbs[lo] ?? [0, 0, 0];
-      const rgb2 = rgbs[hi] ?? [0, 0, 0];
-      const r = Math.round(lerp(rgb1[0], rgb2[0], frac));
-      const g = Math.round(lerp(rgb1[1], rgb2[1], frac));
-      const b = Math.round(lerp(rgb1[2], rgb2[2], frac));
-      ctx.fillStyle = `rgb(${r},${g},${b})`;
-      ctx.fillRect(0, y, 2, 1);
-    }
-  }, [reversed, n]);
-
-  // 6 evenly-spaced label indices into `reversed` (index 0 = top = highest value).
+  // Evenly-spaced label indices across `reversed` (0 = top = max value).
   const step = (n - 1) / (GRADIENT_LABEL_COUNT - 1);
   const labelIndices = Array.from({ length: GRADIENT_LABEL_COUNT }, (_, k) =>
     Math.min(Math.round(k * step), n - 1)
   );
 
   return (
-    <div className="flex items-stretch gap-2.5 py-2">
-      {/* Right-aligned value labels, height-matched to bar via justify-between */}
+    <div className="flex gap-2 py-2">
+      {/* Per-pixel canvas — height fixed, width fills remaining space */}
+      <canvas
+        ref={canvasRef}
+        height={BAR_HEIGHT}
+        className="block flex-1 rounded-xl shadow-[0_2px_16px_rgba(0,0,0,0.5)] ring-1 ring-inset ring-white/10"
+        style={{ height: BAR_HEIGHT }}
+      />
+      {/* Right-edge labels, distributed top-to-bottom */}
       <div
-        className="flex flex-col justify-between shrink-0 py-px"
-        style={{ height: GRADIENT_BAR_HEIGHT }}
+        className="flex flex-col justify-between shrink-0"
+        style={{ height: BAR_HEIGHT }}
       >
         {labelIndices.map((i, k) => (
           <span
             key={k}
-            className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/75 leading-none whitespace-nowrap text-right"
+            className="font-mono text-[10px] font-medium tabular-nums tracking-tight text-foreground/80 leading-none whitespace-nowrap"
           >
             {formatValue(reversed[i].value)}
           </span>
         ))}
       </div>
-      {/* Per-pixel canvas gradient — fills all remaining width, perfectly smooth */}
-      <canvas
-        ref={canvasRef}
-        height={GRADIENT_BAR_HEIGHT}
-        className="block flex-1 rounded-2xl shadow-[0_2px_20px_rgba(0,0,0,0.5)] ring-1 ring-inset ring-white/10"
-      />
     </div>
   );
 }
@@ -361,7 +387,7 @@ export function MapLegend({
       ref={containerRef}
       className={cn(
         "fixed z-[55] flex flex-col max-h-[70vh] overflow-hidden rounded-xl glass bg-black/34 shadow-[0_6px_22px_rgba(0,0,0,0.3)] transition-all duration-200",
-        showPrecipPtypeRows ? "w-[220px]" : "w-[156px]",
+        showPrecipPtypeRows ? "w-[220px]" : (legend.entries.length > GRADIENT_THRESHOLD ? "w-[180px]" : "w-[156px]"),
         isSmallScreen ? "right-3 top-40 max-w-[min(72vw,220px)]" : "right-4 top-[4.35rem]"
       )}
       role="complementary"
