@@ -164,7 +164,7 @@ def test_radar_ptype_uses_larger_tier0_loop_budget(monkeypatch):
         var_key="radar_ptype",
         tier=0,
         default_width=1600,
-    ) == 2560
+    ) == 3072
     assert render_resampling.loop_fixed_width_for_tier(
         model_id="hrrr",
         var_key="radar_ptype",
