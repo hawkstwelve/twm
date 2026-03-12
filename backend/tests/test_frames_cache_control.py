@@ -35,6 +35,8 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     run_id = "20260224_14z"
     incomplete_run_id = "20260224_15z"
     model = "hrrr"
+    nam_model = "nam"
+    nam_run_id = "20260224_12z"
     var = "radar_ptype"
     gfs_model = "gfs"
     gfs_run_id = "20260224_12z"
@@ -69,6 +71,24 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
                         "frames": [
                             {"fh": 0},
                         ],
+                    }
+                }
+            }
+        )
+    )
+    nam_manifest_dir = manifests_root / nam_model
+    nam_manifest_dir.mkdir(parents=True, exist_ok=True)
+    (nam_manifest_dir / f"{nam_run_id}.json").write_text(
+        json.dumps(
+            {
+                "variables": {
+                    var: {
+                        "expected_frames": 2,
+                        "available_frames": 2,
+                        "frames": [
+                            {"fh": 0},
+                            {"fh": 1},
+                        ]
                     }
                 }
             }
@@ -109,6 +129,9 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     (model_published_dir / run_id).mkdir(parents=True, exist_ok=True)
     (model_published_dir / incomplete_run_id).mkdir(parents=True, exist_ok=True)
     (model_published_dir / "LATEST.json").write_text(json.dumps({"run_id": run_id}))
+    nam_published_dir = published_root / nam_model
+    (nam_published_dir / nam_run_id).mkdir(parents=True, exist_ok=True)
+    (nam_published_dir / "LATEST.json").write_text(json.dumps({"run_id": nam_run_id}))
     gfs_published_dir = published_root / gfs_model
     (gfs_published_dir / gfs_run_id).mkdir(parents=True, exist_ok=True)
     (gfs_published_dir / gfs_invalid_run_id).mkdir(parents=True, exist_ok=True)
@@ -124,6 +147,10 @@ async def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterat
     tier1_path = loop_cache_root / model / run_id / var / "tier1" / "fh000.loop.webp"
     tier1_path.parent.mkdir(parents=True, exist_ok=True)
     tier1_path.write_bytes(b"RIFFxxxxWEBPVP8 ")
+    for fh in (0, 1):
+        nam_tier0_path = loop_cache_root / nam_model / nam_run_id / var / "tier0" / f"fh{fh:03d}.loop.webp"
+        nam_tier0_path.parent.mkdir(parents=True, exist_ok=True)
+        nam_tier0_path.write_bytes(b"RIFFxxxxWEBPVP8 ")
 
     monkeypatch.setattr(main_module, "DATA_ROOT", data_root)
     monkeypatch.setattr(main_module, "MANIFESTS_ROOT", manifests_root)
@@ -185,6 +212,20 @@ async def test_radar_ptype_frame_loop_urls_use_runtime_paths_when_pregenerated(c
         f"/api/v4/hrrr/20260224_14z/radar_ptype/{tier1_row['fh']}/loop.webp"
     )
     assert "/loop.webp?tier=1" in tier1_row["loop_webp_tier1_url"]
+
+
+async def test_nam_radar_ptype_runtime_loop_urls_are_emitted_when_pregenerated(
+    client: httpx.AsyncClient,
+) -> None:
+    response = await client.get("/api/v4/nam/20260224_12z/radar_ptype/frames")
+
+    assert response.status_code == 200
+    rows = response.json()
+    assert isinstance(rows, list) and rows
+    first = rows[0]
+    assert first["loop_webp_url"].startswith("/api/v4/nam/20260224_12z/radar_ptype/0/loop.webp")
+    assert "/loop.webp?tier=0" in first["loop_webp_url"]
+    assert first["loop_webp_tier0_url"] == first["loop_webp_url"]
 
 
 async def test_frame_loop_urls_include_tier0_runtime_fallback_without_pregenerated_cache(

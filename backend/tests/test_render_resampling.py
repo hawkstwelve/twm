@@ -64,8 +64,9 @@ def test_radar_ptype_keeps_crisp_backend_loop_resampling(monkeypatch):
         {"radar_ptype": SimpleNamespace(kind="indexed", color_map_id="radar_ptype")},
     )
 
-    assert render_resampling.resampling_name_for_kind(model_id="hrrr", var_key="radar_ptype") == "nearest"
-    assert render_resampling.rasterio_resampling_for_loop(model_id="hrrr", var_key="radar_ptype").name == "nearest"
+    for model_id in ("hrrr", "nam"):
+        assert render_resampling.resampling_name_for_kind(model_id=model_id, var_key="radar_ptype") == "nearest"
+        assert render_resampling.rasterio_resampling_for_loop(model_id=model_id, var_key="radar_ptype").name == "nearest"
 
 
 def test_unknown_kind_falls_back_to_bilinear_and_warns(monkeypatch, caplog):
@@ -159,42 +160,43 @@ def test_radar_ptype_uses_larger_tier0_loop_budget(monkeypatch):
         {"radar_ptype": SimpleNamespace(kind="indexed", color_map_id="radar_ptype")},
     )
 
-    assert render_resampling.loop_fixed_width_for_tier(
-        model_id="hrrr",
-        var_key="radar_ptype",
-        tier=0,
-        default_width=1600,
-    ) == 3072
-    assert render_resampling.loop_fixed_width_for_tier(
-        model_id="hrrr",
-        var_key="radar_ptype",
-        tier=1,
-        default_width=2400,
-    ) == 3200
-    assert render_resampling.loop_max_dim_for_tier(
-        model_id="hrrr",
-        var_key="radar_ptype",
-        tier=0,
-        default_max_dim=1600,
-    ) == 2048
-    assert render_resampling.loop_quality_for_tier(
-        model_id="hrrr",
-        var_key="radar_ptype",
-        tier=0,
-        default_quality=82,
-    ) == 92
-    assert render_resampling.loop_max_dim_for_tier(
-        model_id="hrrr",
-        var_key="radar_ptype",
-        tier=1,
-        default_max_dim=2400,
-    ) == 2400
-    assert render_resampling.loop_quality_for_tier(
-        model_id="hrrr",
-        var_key="radar_ptype",
-        tier=1,
-        default_quality=86,
-    ) == 90
+    for model_id in ("hrrr", "nam"):
+        assert render_resampling.loop_fixed_width_for_tier(
+            model_id=model_id,
+            var_key="radar_ptype",
+            tier=0,
+            default_width=1600,
+        ) == 3072
+        assert render_resampling.loop_fixed_width_for_tier(
+            model_id=model_id,
+            var_key="radar_ptype",
+            tier=1,
+            default_width=2400,
+        ) == 3200
+        assert render_resampling.loop_max_dim_for_tier(
+            model_id=model_id,
+            var_key="radar_ptype",
+            tier=0,
+            default_max_dim=1600,
+        ) == 2048
+        assert render_resampling.loop_quality_for_tier(
+            model_id=model_id,
+            var_key="radar_ptype",
+            tier=0,
+            default_quality=82,
+        ) == 92
+        assert render_resampling.loop_max_dim_for_tier(
+            model_id=model_id,
+            var_key="radar_ptype",
+            tier=1,
+            default_max_dim=2400,
+        ) == 2400
+        assert render_resampling.loop_quality_for_tier(
+            model_id=model_id,
+            var_key="radar_ptype",
+            tier=1,
+            default_quality=86,
+        ) == 90
 
 
 def test_loop_fixed_size_applied_for_all_continuous_models(monkeypatch):

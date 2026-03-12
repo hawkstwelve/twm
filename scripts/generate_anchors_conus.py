@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -412,25 +411,7 @@ STATE_CITY_CANDIDATES: dict[str, list[CityCandidate]] = {
     ],
 }
 
-FORCE_TWO_ANCHOR_STATES: set[str] = {
-    "AZ",
-    "CA",
-    "FL",
-    "GA",
-    "MI",
-    "MN",
-    "MO",
-    "NC",
-    "NV",
-    "NY",
-    "OH",
-    "PA",
-    "TN",
-    "TX",
-    "VA",
-    "WA",
-    "WI",
-}
+MAX_ANCHORS_PER_STATE = 3
 
 PRIMARY_CITY_OVERRIDES: dict[str, str] = {
     "CO": "Denver",
@@ -458,19 +439,6 @@ SECONDARY_CITY_OVERRIDES: dict[str, str] = {
     "WI": "Madison",
 }
 
-
-def haversine_km(lat_a: float, lon_a: float, lat_b: float, lon_b: float) -> float:
-    radius_km = 6371.0
-    phi_a = math.radians(lat_a)
-    phi_b = math.radians(lat_b)
-    delta_phi = math.radians(lat_b - lat_a)
-    delta_lambda = math.radians(lon_b - lon_a)
-    sin_phi = math.sin(delta_phi / 2.0)
-    sin_lambda = math.sin(delta_lambda / 2.0)
-    arc = sin_phi * sin_phi + math.cos(phi_a) * math.cos(phi_b) * sin_lambda * sin_lambda
-    return 2.0 * radius_km * math.asin(math.sqrt(arc))
-
-
 def candidate_by_name(state_code: str, city_name: str) -> CityCandidate:
     for candidate in STATE_CITY_CANDIDATES[state_code]:
         if candidate.name == city_name:
@@ -485,36 +453,26 @@ def select_primary(state_code: str, candidates: list[CityCandidate]) -> tuple[Ci
     return max(candidates, key=lambda candidate: candidate.population), "population-primary"
 
 
-def second_anchor_score(primary: CityCandidate, candidate: CityCandidate, top_population: int) -> float:
-    distance_km = haversine_km(primary.lat, primary.lon, candidate.lat, candidate.lon)
-    population_score = candidate.population / top_population
-    distance_score = min(distance_km, 800.0) / 800.0
-    proximity_penalty = 0.30 if distance_km < 140.0 else 0.0
-    return population_score * 0.72 + distance_score * 0.28 - proximity_penalty
-
-
-def select_secondary(
-    state_code: str,
-    primary: CityCandidate,
-    candidates: list[CityCandidate],
-) -> tuple[CityCandidate, str]:
+def select_secondary(state_code: str, primary: CityCandidate, candidates: list[CityCandidate]) -> tuple[CityCandidate, str]:
     override_name = SECONDARY_CITY_OVERRIDES.get(state_code)
     if override_name:
         return candidate_by_name(state_code, override_name), "manual-secondary"
 
     remaining_candidates = [candidate for candidate in candidates if candidate.name != primary.name]
-    top_population = max(candidate.population for candidate in candidates)
-    selected = max(
-        remaining_candidates,
-        key=lambda candidate: second_anchor_score(primary, candidate, top_population),
-    )
-    return selected, "greedy-secondary"
+    selected = max(remaining_candidates, key=lambda candidate: candidate.population)
+    return selected, "population-secondary"
 
 
 def target_anchor_count(state_code: str, candidates: list[CityCandidate]) -> int:
-    if state_code in FORCE_TWO_ANCHOR_STATES and len(candidates) >= 2:
-        return 2
-    return 1
+    return min(len(candidates), MAX_ANCHORS_PER_STATE)
+
+
+def sort_remaining_candidates(candidates: list[CityCandidate], excluded_names: set[str]) -> list[CityCandidate]:
+    return sorted(
+        (candidate for candidate in candidates if candidate.name not in excluded_names),
+        key=lambda candidate: candidate.population,
+        reverse=True,
+    )
 
 
 def build_selected_anchors() -> list[SelectedAnchor]:
@@ -536,7 +494,8 @@ def build_selected_anchors() -> list[SelectedAnchor]:
             )
         )
 
-        if target_anchor_count(state_code, candidates) != 2:
+        anchor_target = target_anchor_count(state_code, candidates)
+        if anchor_target < 2:
             continue
 
         secondary, secondary_mode = select_secondary(state_code, primary, candidates)
@@ -549,6 +508,23 @@ def build_selected_anchors() -> list[SelectedAnchor]:
                 lon=secondary.lon,
                 index=2,
                 selection_mode=secondary_mode,
+            )
+        )
+
+        if anchor_target < 3:
+            continue
+
+        remaining_candidates = sort_remaining_candidates(candidates, {primary.name, secondary.name})
+        tertiary = remaining_candidates[0]
+        selected_anchors.append(
+            SelectedAnchor(
+                state_code=state_code,
+                state_name=state_name,
+                city_name=tertiary.name,
+                lat=tertiary.lat,
+                lon=tertiary.lon,
+                index=3,
+                selection_mode="population-tertiary",
             )
         )
 
@@ -583,8 +559,8 @@ def print_summary(selected_anchors: list[SelectedAnchor]) -> None:
         per_state[anchor.state_code].append(anchor)
 
     total_anchors = len(selected_anchors)
-    if total_anchors < 60 or total_anchors > 90:
-        raise ValueError(f"Anchor count {total_anchors} is outside the expected sparse target range")
+    if total_anchors < 90 or total_anchors > 150:
+        raise ValueError(f"Anchor count {total_anchors} is outside the expected expanded target range")
 
     print(f"total_anchors={total_anchors}")
     print("per_state_counts=")

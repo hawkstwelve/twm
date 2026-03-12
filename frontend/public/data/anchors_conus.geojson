@@ -19,6 +19,38 @@
     },
     {
       "type": "Feature",
+      "id": "AL_2",
+      "properties": {
+        "st": "AL",
+        "state": "Alabama",
+        "city": "Huntsville"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -86.5861,
+          34.7304
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AL_3",
+      "properties": {
+        "st": "AL",
+        "state": "Alabama",
+        "city": "Mobile"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -88.0399,
+          30.6954
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "AR_1",
       "properties": {
         "st": "AR",
@@ -30,6 +62,38 @@
         "coordinates": [
           -92.2896,
           34.7465
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AR_2",
+      "properties": {
+        "st": "AR",
+        "state": "Arkansas",
+        "city": "Fayetteville"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -94.1719,
+          36.0822
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "AR_3",
+      "properties": {
+        "st": "AR",
+        "state": "Arkansas",
+        "city": "Fort Smith"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -94.3985,
+          35.3859
         ]
       }
     },
@@ -67,6 +131,22 @@
     },
     {
       "type": "Feature",
+      "id": "AZ_3",
+      "properties": {
+        "st": "AZ",
+        "state": "Arizona",
+        "city": "Yuma"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -114.6277,
+          32.6927
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "CA_1",
       "properties": {
         "st": "CA",
@@ -99,6 +179,22 @@
     },
     {
       "type": "Feature",
+      "id": "CA_3",
+      "properties": {
+        "st": "CA",
+        "state": "California",
+        "city": "San Diego"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -117.1611,
+          32.7157
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "CO_1",
       "properties": {
         "st": "CO",
@@ -115,6 +211,38 @@
     },
     {
       "type": "Feature",
+      "id": "CO_2",
+      "properties": {
+        "st": "CO",
+        "state": "Colorado",
+        "city": "Colorado Springs"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -104.8214,
+          38.8339
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "CO_3",
+      "properties": {
+        "st": "CO",
+        "state": "Colorado",
+        "city": "Fort Collins"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -105.0844,
+          40.5853
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "CT_1",
       "properties": {
         "st": "CT",
@@ -126,6 +254,38 @@
         "coordinates": [
           -72.6734,
           41.7658
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "CT_2",
+      "properties": {
+        "st": "CT",
+        "state": "Connecticut",
+        "city": "Bridgeport"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -73.1894,
+          41.1792
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "CT_3",
+      "properties": {
+        "st": "CT",
+        "state": "Connecticut",
+        "city": "New Haven"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -72.9279,
+          41.3083
         ]
       }
     },
@@ -163,6 +323,22 @@
     },
     {
       "type": "Feature",
+      "id": "DE_2",
+      "properties": {
+        "st": "DE",
+        "state": "Delaware",
+        "city": "Dover"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.5244,
+          39.1582
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "FL_1",
       "properties": {
         "st": "FL",
@@ -190,6 +366,22 @@
         "coordinates": [
           -82.4572,
           27.9506
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "FL_3",
+      "properties": {
+        "st": "FL",
+        "state": "Florida",
+        "city": "Orlando"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -81.3792,
+          28.5383
         ]
       }
     },
@@ -227,6 +419,22 @@
     },
     {
       "type": "Feature",
+      "id": "GA_3",
+      "properties": {
+        "st": "GA",
+        "state": "Georgia",
+        "city": "Augusta"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -82.0105,
+          33.4735
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "IA_1",
       "properties": {
         "st": "IA",
@@ -238,6 +446,38 @@
         "coordinates": [
           -93.625,
           41.5868
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "IA_2",
+      "properties": {
+        "st": "IA",
+        "state": "Iowa",
+        "city": "Davenport"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -90.5776,
+          41.5236
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "IA_3",
+      "properties": {
+        "st": "IA",
+        "state": "Iowa",
+        "city": "Cedar Rapids"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -91.6656,
+          41.9779
         ]
       }
     },
@@ -259,6 +499,38 @@
     },
     {
       "type": "Feature",
+      "id": "ID_2",
+      "properties": {
+        "st": "ID",
+        "state": "Idaho",
+        "city": "Coeur d'Alene"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -116.7805,
+          47.6777
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "ID_3",
+      "properties": {
+        "st": "ID",
+        "state": "Idaho",
+        "city": "Idaho Falls"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -112.0333,
+          43.4917
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "IL_1",
       "properties": {
         "st": "IL",
@@ -270,6 +542,38 @@
         "coordinates": [
           -87.6298,
           41.8781
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "IL_2",
+      "properties": {
+        "st": "IL",
+        "state": "Illinois",
+        "city": "Peoria"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -89.589,
+          40.6936
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "IL_3",
+      "properties": {
+        "st": "IL",
+        "state": "Illinois",
+        "city": "Rockford"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -89.0937,
+          42.2711
         ]
       }
     },
@@ -291,6 +595,38 @@
     },
     {
       "type": "Feature",
+      "id": "IN_2",
+      "properties": {
+        "st": "IN",
+        "state": "Indiana",
+        "city": "Fort Wayne"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -85.1394,
+          41.0793
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "IN_3",
+      "properties": {
+        "st": "IN",
+        "state": "Indiana",
+        "city": "South Bend"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -86.252,
+          41.6764
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "KS_1",
       "properties": {
         "st": "KS",
@@ -302,6 +638,38 @@
         "coordinates": [
           -97.3301,
           37.6872
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "KS_2",
+      "properties": {
+        "st": "KS",
+        "state": "Kansas",
+        "city": "Kansas City"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -94.6275,
+          39.1142
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "KS_3",
+      "properties": {
+        "st": "KS",
+        "state": "Kansas",
+        "city": "Topeka"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -95.6752,
+          39.0473
         ]
       }
     },
@@ -323,6 +691,38 @@
     },
     {
       "type": "Feature",
+      "id": "KY_2",
+      "properties": {
+        "st": "KY",
+        "state": "Kentucky",
+        "city": "Lexington"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5037,
+          38.0406
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "KY_3",
+      "properties": {
+        "st": "KY",
+        "state": "Kentucky",
+        "city": "Bowling Green"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -86.4808,
+          36.9685
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "LA_1",
       "properties": {
         "st": "LA",
@@ -334,6 +734,38 @@
         "coordinates": [
           -90.0715,
           29.9511
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "LA_2",
+      "properties": {
+        "st": "LA",
+        "state": "Louisiana",
+        "city": "Baton Rouge"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -91.1871,
+          30.4515
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "LA_3",
+      "properties": {
+        "st": "LA",
+        "state": "Louisiana",
+        "city": "Lafayette"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -92.0198,
+          30.2241
         ]
       }
     },
@@ -355,6 +787,38 @@
     },
     {
       "type": "Feature",
+      "id": "MA_2",
+      "properties": {
+        "st": "MA",
+        "state": "Massachusetts",
+        "city": "Worcester"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -71.8023,
+          42.2626
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "MA_3",
+      "properties": {
+        "st": "MA",
+        "state": "Massachusetts",
+        "city": "Springfield"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -72.5898,
+          42.1015
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "MD_1",
       "properties": {
         "st": "MD",
@@ -371,6 +835,38 @@
     },
     {
       "type": "Feature",
+      "id": "MD_2",
+      "properties": {
+        "st": "MD",
+        "state": "Maryland",
+        "city": "Hagerstown"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.7199,
+          39.6418
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "MD_3",
+      "properties": {
+        "st": "MD",
+        "state": "Maryland",
+        "city": "Salisbury"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.5994,
+          38.3607
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "ME_1",
       "properties": {
         "st": "ME",
@@ -382,6 +878,38 @@
         "coordinates": [
           -70.2568,
           43.6591
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "ME_2",
+      "properties": {
+        "st": "ME",
+        "state": "Maine",
+        "city": "Bangor"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -68.7778,
+          44.8012
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "ME_3",
+      "properties": {
+        "st": "ME",
+        "state": "Maine",
+        "city": "Augusta"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -69.7795,
+          44.3106
         ]
       }
     },
@@ -419,6 +947,22 @@
     },
     {
       "type": "Feature",
+      "id": "MI_3",
+      "properties": {
+        "st": "MI",
+        "state": "Michigan",
+        "city": "Lansing"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.5555,
+          42.7325
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "MN_1",
       "properties": {
         "st": "MN",
@@ -446,6 +990,22 @@
         "coordinates": [
           -92.1005,
           46.7867
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "MN_3",
+      "properties": {
+        "st": "MN",
+        "state": "Minnesota",
+        "city": "Rochester"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -92.4802,
+          44.0121
         ]
       }
     },
@@ -483,6 +1043,22 @@
     },
     {
       "type": "Feature",
+      "id": "MO_3",
+      "properties": {
+        "st": "MO",
+        "state": "Missouri",
+        "city": "Springfield"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -93.2923,
+          37.2089
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "MS_1",
       "properties": {
         "st": "MS",
@@ -499,6 +1075,38 @@
     },
     {
       "type": "Feature",
+      "id": "MS_2",
+      "properties": {
+        "st": "MS",
+        "state": "Mississippi",
+        "city": "Gulfport"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -89.0928,
+          30.3674
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "MS_3",
+      "properties": {
+        "st": "MS",
+        "state": "Mississippi",
+        "city": "Hattiesburg"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -89.2903,
+          31.3271
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "MT_1",
       "properties": {
         "st": "MT",
@@ -510,6 +1118,38 @@
         "coordinates": [
           -108.5007,
           45.7833
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "MT_2",
+      "properties": {
+        "st": "MT",
+        "state": "Montana",
+        "city": "Bozeman"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -111.0429,
+          45.677
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "MT_3",
+      "properties": {
+        "st": "MT",
+        "state": "Montana",
+        "city": "Missoula"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -113.994,
+          46.8721
         ]
       }
     },
@@ -547,6 +1187,22 @@
     },
     {
       "type": "Feature",
+      "id": "NC_3",
+      "properties": {
+        "st": "NC",
+        "state": "North Carolina",
+        "city": "Greensboro"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -79.792,
+          36.0726
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "ND_1",
       "properties": {
         "st": "ND",
@@ -558,6 +1214,38 @@
         "coordinates": [
           -96.7898,
           46.8772
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "ND_2",
+      "properties": {
+        "st": "ND",
+        "state": "North Dakota",
+        "city": "Bismarck"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -100.7837,
+          46.8083
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "ND_3",
+      "properties": {
+        "st": "ND",
+        "state": "North Dakota",
+        "city": "Grand Forks"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -97.0329,
+          47.9253
         ]
       }
     },
@@ -579,6 +1267,38 @@
     },
     {
       "type": "Feature",
+      "id": "NE_2",
+      "properties": {
+        "st": "NE",
+        "state": "Nebraska",
+        "city": "Lincoln"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -96.7026,
+          40.8136
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NE_3",
+      "properties": {
+        "st": "NE",
+        "state": "Nebraska",
+        "city": "Grand Island"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -98.342,
+          40.9264
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "NH_1",
       "properties": {
         "st": "NH",
@@ -590,6 +1310,38 @@
         "coordinates": [
           -71.4548,
           42.9956
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NH_2",
+      "properties": {
+        "st": "NH",
+        "state": "New Hampshire",
+        "city": "Concord"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -71.5376,
+          43.2081
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NH_3",
+      "properties": {
+        "st": "NH",
+        "state": "New Hampshire",
+        "city": "Portsmouth"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -70.7626,
+          43.0718
         ]
       }
     },
@@ -611,6 +1363,38 @@
     },
     {
       "type": "Feature",
+      "id": "NJ_2",
+      "properties": {
+        "st": "NJ",
+        "state": "New Jersey",
+        "city": "Camden"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -75.1196,
+          39.9259
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NJ_3",
+      "properties": {
+        "st": "NJ",
+        "state": "New Jersey",
+        "city": "Trenton"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -74.7429,
+          40.2171
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "NM_1",
       "properties": {
         "st": "NM",
@@ -622,6 +1406,38 @@
         "coordinates": [
           -106.6504,
           35.0844
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NM_2",
+      "properties": {
+        "st": "NM",
+        "state": "New Mexico",
+        "city": "Las Cruces"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -106.7637,
+          32.3199
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NM_3",
+      "properties": {
+        "st": "NM",
+        "state": "New Mexico",
+        "city": "Santa Fe"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -105.9378,
+          35.687
         ]
       }
     },
@@ -659,6 +1475,22 @@
     },
     {
       "type": "Feature",
+      "id": "NV_3",
+      "properties": {
+        "st": "NV",
+        "state": "Nevada",
+        "city": "Elko"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -115.7631,
+          40.8324
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "NY_1",
       "properties": {
         "st": "NY",
@@ -686,6 +1518,22 @@
         "coordinates": [
           -78.8784,
           42.8864
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "NY_3",
+      "properties": {
+        "st": "NY",
+        "state": "New York",
+        "city": "Rochester"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -77.6088,
+          43.1566
         ]
       }
     },
@@ -723,6 +1571,22 @@
     },
     {
       "type": "Feature",
+      "id": "OH_3",
+      "properties": {
+        "st": "OH",
+        "state": "Ohio",
+        "city": "Cincinnati"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -84.512,
+          39.1031
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "OK_1",
       "properties": {
         "st": "OK",
@@ -739,6 +1603,38 @@
     },
     {
       "type": "Feature",
+      "id": "OK_2",
+      "properties": {
+        "st": "OK",
+        "state": "Oklahoma",
+        "city": "Tulsa"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -95.9928,
+          36.154
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "OK_3",
+      "properties": {
+        "st": "OK",
+        "state": "Oklahoma",
+        "city": "Lawton"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -98.3959,
+          34.6036
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "OR_1",
       "properties": {
         "st": "OR",
@@ -750,6 +1646,38 @@
         "coordinates": [
           -122.6784,
           45.5152
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "OR_2",
+      "properties": {
+        "st": "OR",
+        "state": "Oregon",
+        "city": "Eugene"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -123.0868,
+          44.0521
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "OR_3",
+      "properties": {
+        "st": "OR",
+        "state": "Oregon",
+        "city": "Medford"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -122.8756,
+          42.3265
         ]
       }
     },
@@ -787,6 +1715,22 @@
     },
     {
       "type": "Feature",
+      "id": "PA_3",
+      "properties": {
+        "st": "PA",
+        "state": "Pennsylvania",
+        "city": "Harrisburg"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -76.8867,
+          40.2732
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "RI_1",
       "properties": {
         "st": "RI",
@@ -819,6 +1763,38 @@
     },
     {
       "type": "Feature",
+      "id": "SC_2",
+      "properties": {
+        "st": "SC",
+        "state": "South Carolina",
+        "city": "Greenville"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -82.394,
+          34.8526
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "SC_3",
+      "properties": {
+        "st": "SC",
+        "state": "South Carolina",
+        "city": "Columbia"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -81.0348,
+          34.0007
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "SD_1",
       "properties": {
         "st": "SD",
@@ -830,6 +1806,38 @@
         "coordinates": [
           -96.7311,
           43.5446
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "SD_2",
+      "properties": {
+        "st": "SD",
+        "state": "South Dakota",
+        "city": "Rapid City"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -103.231,
+          44.0805
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "SD_3",
+      "properties": {
+        "st": "SD",
+        "state": "South Dakota",
+        "city": "Aberdeen"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -98.4865,
+          45.4647
         ]
       }
     },
@@ -867,6 +1875,22 @@
     },
     {
       "type": "Feature",
+      "id": "TN_3",
+      "properties": {
+        "st": "TN",
+        "state": "Tennessee",
+        "city": "Knoxville"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -83.9207,
+          35.9606
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "TX_1",
       "properties": {
         "st": "TX",
@@ -899,6 +1923,22 @@
     },
     {
       "type": "Feature",
+      "id": "TX_3",
+      "properties": {
+        "st": "TX",
+        "state": "Texas",
+        "city": "San Antonio"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -98.4936,
+          29.4241
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "UT_1",
       "properties": {
         "st": "UT",
@@ -910,6 +1950,38 @@
         "coordinates": [
           -111.891,
           40.7608
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "UT_2",
+      "properties": {
+        "st": "UT",
+        "state": "Utah",
+        "city": "Provo"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -111.6585,
+          40.2338
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "UT_3",
+      "properties": {
+        "st": "UT",
+        "state": "Utah",
+        "city": "St. George"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -113.5684,
+          37.0965
         ]
       }
     },
@@ -947,6 +2019,22 @@
     },
     {
       "type": "Feature",
+      "id": "VA_3",
+      "properties": {
+        "st": "VA",
+        "state": "Virginia",
+        "city": "Roanoke"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -79.9414,
+          37.2709
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "VT_1",
       "properties": {
         "st": "VT",
@@ -958,6 +2046,22 @@
         "coordinates": [
           -73.2121,
           44.4759
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "VT_2",
+      "properties": {
+        "st": "VT",
+        "state": "Vermont",
+        "city": "Rutland"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -72.9726,
+          43.6106
         ]
       }
     },
@@ -995,6 +2099,22 @@
     },
     {
       "type": "Feature",
+      "id": "WA_3",
+      "properties": {
+        "st": "WA",
+        "state": "Washington",
+        "city": "Tri-Cities"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -119.09,
+          46.23
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "WI_1",
       "properties": {
         "st": "WI",
@@ -1027,6 +2147,22 @@
     },
     {
       "type": "Feature",
+      "id": "WI_3",
+      "properties": {
+        "st": "WI",
+        "state": "Wisconsin",
+        "city": "Green Bay"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -88.0133,
+          44.5133
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "WV_1",
       "properties": {
         "st": "WV",
@@ -1043,6 +2179,38 @@
     },
     {
       "type": "Feature",
+      "id": "WV_2",
+      "properties": {
+        "st": "WV",
+        "state": "West Virginia",
+        "city": "Huntington"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -82.4452,
+          38.4192
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "WV_3",
+      "properties": {
+        "st": "WV",
+        "state": "West Virginia",
+        "city": "Morgantown"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -79.9559,
+          39.6295
+        ]
+      }
+    },
+    {
+      "type": "Feature",
       "id": "WY_1",
       "properties": {
         "st": "WY",
@@ -1054,6 +2222,38 @@
         "coordinates": [
           -104.8202,
           41.14
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "WY_2",
+      "properties": {
+        "st": "WY",
+        "state": "Wyoming",
+        "city": "Jackson"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -110.7624,
+          43.4799
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "id": "WY_3",
+      "properties": {
+        "st": "WY",
+        "state": "Wyoming",
+        "city": "Casper"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          -106.3252,
+          42.8501
         ]
       }
     }
