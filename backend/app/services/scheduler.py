@@ -70,6 +70,11 @@ ENV_LOOP_PREGENERATE_WORKERS = (
     "CARTOSKY_V3_LOOP_PREGENERATE_WORKERS",
     "TWF_V3_LOOP_PREGENERATE_WORKERS",
 )
+ENV_PROGRESS_PUBLISH_MIN_NEW_FRAMES = (
+    "CARTOSKY_PROGRESS_PUBLISH_MIN_NEW_FRAMES",
+    "CARTOSKY_V3_PROGRESS_PUBLISH_MIN_NEW_FRAMES",
+    "TWF_V3_PROGRESS_PUBLISH_MIN_NEW_FRAMES",
+)
 ENV_LOOP_WEBP_QUALITY = ("CARTOSKY_LOOP_WEBP_QUALITY", "CARTOSKY_V3_LOOP_WEBP_QUALITY", "TWF_V3_LOOP_WEBP_QUALITY")
 ENV_LOOP_WEBP_MAX_DIM = ("CARTOSKY_LOOP_WEBP_MAX_DIM", "CARTOSKY_V3_LOOP_WEBP_MAX_DIM", "TWF_V3_LOOP_WEBP_MAX_DIM")
 ENV_LOOP_WEBP_TIER1_QUALITY = (
@@ -115,6 +120,7 @@ ENV_DERIVE_BUNDLE = ("CARTOSKY_DERIVE_BUNDLE", "CARTOSKY_V3_DERIVE_BUNDLE", "TWF
 DEFAULT_LOOP_PREGENERATE_ENABLED = True
 DEFAULT_LOOP_CACHE_ROOT = DEFAULT_DATA_ROOT / "loop_cache"
 DEFAULT_LOOP_PREGENERATE_WORKERS = 4
+DEFAULT_PROGRESS_PUBLISH_MIN_NEW_FRAMES = 12
 DEFAULT_LOOP_WEBP_QUALITY = 82
 DEFAULT_LOOP_WEBP_MAX_DIM = 1600
 DEFAULT_LOOP_WEBP_TIER1_QUALITY = 86
@@ -869,6 +875,19 @@ def _promote_run(data_root: Path, model: str, run_id: str) -> None:
     shutil.move(str(tmp_run), str(published_run))
 
 
+def _available_target_count(
+    data_root: Path,
+    model: str,
+    run_id: str,
+    targets: list[tuple[str, int]],
+) -> int:
+    available = 0
+    for var_id, fh in targets:
+        if _frame_artifacts_exist(data_root, model, run_id, var_id, fh):
+            available += 1
+    return available
+
+
 def _write_run_manifest(
     *,
     data_root: Path,
@@ -1370,12 +1389,17 @@ def _process_run(
     built_ok = 0
     blocked_vars: set[str] = set()
     derive_bundle_enabled = _bool_from_env(ENV_DERIVE_BUNDLE, DEFAULT_DERIVE_BUNDLE)
+    progress_publish_min_new_frames = _int_from_env(
+        ENV_PROGRESS_PUBLISH_MIN_NEW_FRAMES,
+        DEFAULT_PROGRESS_PUBLISH_MIN_NEW_FRAMES,
+        min_value=1,
+    )
     published_once = False
     built_ok_at_last_publish = -1
     rebuild_attempts: dict[tuple[str, str, int], int] = {}
     rebuild_max_attempts = 2
 
-    def _publish_run_snapshot(*, reason: str) -> None:
+    def _publish_run_snapshot(*, reason: str, pregenerate_loops: bool) -> None:
         _promote_run(data_root, model_id, run_id)
         _write_run_manifest(
             data_root=data_root,
@@ -1385,7 +1409,7 @@ def _process_run(
             plugin=plugin,
         )
         _write_latest_pointer(data_root, model_id, run_id)
-        if loop_pregenerate_enabled:
+        if loop_pregenerate_enabled and pregenerate_loops:
             _pregenerate_loop_webp_for_run(
                 data_root=data_root,
                 model=model_id,
@@ -1585,15 +1609,26 @@ def _process_run(
         # Publish as soon as promotion criteria is met so "latest" can switch
         # before the full catch-up pass exits.
         if not published_once and _should_promote(data_root, model_id, run_id, primary_vars, promotion_fhs):
-            _publish_run_snapshot(reason=f"catchup_round_{rounds}")
+            _publish_run_snapshot(reason=f"catchup_round_{rounds}", pregenerate_loops=False)
             published_once = True
+            built_ok_at_last_publish = built_ok
+        elif (
+            published_once
+            and built_ok > built_ok_at_last_publish
+            and (built_ok - built_ok_at_last_publish) >= progress_publish_min_new_frames
+        ):
+            _publish_run_snapshot(reason=f"catchup_progress_{rounds}", pregenerate_loops=False)
             built_ok_at_last_publish = built_ok
 
+    available = _available_target_count(data_root, model_id, run_id, targets)
     if _should_promote(data_root, model_id, run_id, primary_vars, promotion_fhs):
-        if (not published_once) or (built_ok > built_ok_at_last_publish):
-            _publish_run_snapshot(reason="catchup_complete")
+        if (not published_once) or (available > built_ok_at_last_publish):
+            _publish_run_snapshot(
+                reason="catchup_complete",
+                pregenerate_loops=available >= total,
+            )
             published_once = True
-            built_ok_at_last_publish = built_ok
+            built_ok_at_last_publish = available
 
     _enforce_run_retention(data_root / "staging" / model_id, keep_runs)
     _enforce_run_retention(data_root / "published" / model_id, keep_runs)
@@ -1602,10 +1637,6 @@ def _process_run(
     if herbie_save_dir_raw:
         _enforce_herbie_cache_retention(Path(herbie_save_dir_raw).resolve(), model_id, keep_runs)
 
-    available = 0
-    for var_id, fh in targets:
-        if _frame_artifacts_exist(data_root, model_id, run_id, var_id, fh):
-            available += 1
     return run_id, available, total
 
 
