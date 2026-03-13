@@ -2238,7 +2238,7 @@ export function MapCanvas({
       )}
 
       <div
-        className={`pointer-events-none fixed left-4 top-[4.35rem] z-50 hidden sm:block${showZoomControls ? "" : " sm:hidden"}`}
+        className={`pointer-events-none fixed left-4 top-[calc(4.35rem+4.5rem)] z-50 hidden sm:block${showZoomControls ? "" : " sm:hidden"}`}
       >
         <div className="pointer-events-auto overflow-hidden rounded-xl border border-white/10 bg-black/40 shadow-[0_8px_32px_rgba(0,0,0,0.35)] backdrop-blur-md">
           <button
