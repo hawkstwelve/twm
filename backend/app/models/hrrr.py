@@ -237,7 +237,7 @@ HRRR_VARS: dict[str, VarSpec] = {
                 "kuchera_profile_mode": "simplified",
                 "kuchera_use_sfc_pressure_mask": "true",
                 **kuchera_hint_overrides(
-                    levels_hpa=(850, 700, 600, 500),
+                    levels_hpa=(925, 850, 700, 600),
                     require_rh=False,
                 ),
             }

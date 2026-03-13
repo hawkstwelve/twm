@@ -81,6 +81,7 @@ def test_kuchera_can_use_distinct_profile_product_without_rh_fetch(monkeypatch) 
     transform = Affine.identity()
     apcp = np.full((2, 2), 1.0, dtype=np.float32)
     temp = np.full((2, 2), -12.0, dtype=np.float32)
+    exact_apcp_pattern = derive_module._apcp_exact_window_pattern(0, 1)
 
     seen_products: list[tuple[str, str, int]] = []
 
@@ -101,6 +102,31 @@ def test_kuchera_can_use_distinct_profile_product_without_rh_fetch(monkeypatch) 
         raise AssertionError(f"unexpected component {var_key}")
 
     monkeypatch.setattr(derive_module, "_fetch_component", _fake_fetch_component)
+    monkeypatch.setattr(
+        derive_module,
+        "_kuchera_inventory_lines",
+        lambda *, model_id, product, run_date, fh, search_pattern: [exact_apcp_pattern.rstrip("$")],
+    )
+
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
+        del model_id, product, run_date, fh, herbie_kwargs
+        pattern = str(search_pattern)
+        pattern_no_anchor = pattern[:-1] if pattern.endswith("$") else pattern
+        if pattern == exact_apcp_pattern or pattern_no_anchor == exact_apcp_pattern.rstrip("$"):
+            meta = {"inventory_line": pattern_no_anchor, "search_pattern": pattern}
+            return (apcp, crs, transform, meta) if return_meta else (apcp, crs, transform)
+        raise AssertionError(f"unexpected search_pattern: {pattern}")
+
+    monkeypatch.setattr(derive_module, "fetch_variable", _fake_fetch_variable)
 
     var_spec_model = SimpleNamespace(
         selectors=SimpleNamespace(
@@ -108,7 +134,7 @@ def test_kuchera_can_use_distinct_profile_product_without_rh_fetch(monkeypatch) 
                 "apcp_component": "apcp_step",
                 "step_hours": "1",
                 "kuchera_profile_product": "prs",
-                "kuchera_levels_hpa": "925,850,700,600,500",
+                "kuchera_levels_hpa": "925,850,700,600",
             }
         )
     )
@@ -126,13 +152,13 @@ def test_kuchera_can_use_distinct_profile_product_without_rh_fetch(monkeypatch) 
     assert out_crs == crs
     assert out_transform == transform
     assert np.isfinite(data).all()
-    assert ("sfc", "apcp_step", 1) in seen_products
     temp_fetches = [(product, var_key, fh) for product, var_key, fh in seen_products if var_key.startswith("tmp")]
     assert temp_fetches
     assert all(product == "prs" for product, _, _ in temp_fetches)
+    assert ("prs", "tmp925", 1) in temp_fetches
     assert ("prs", "tmp850", 1) in temp_fetches
     assert ("prs", "tmp700", 1) in temp_fetches
     assert ("prs", "tmp600", 1) in temp_fetches
-    assert ("prs", "tmp500", 1) in temp_fetches
+    assert not any(var_key == "tmp500" for _, var_key, _ in temp_fetches)
     assert len(temp_fetches) <= 4
     assert not any(var_key.startswith("rh") for _, var_key, _ in seen_products)
