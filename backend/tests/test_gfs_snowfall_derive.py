@@ -354,3 +354,97 @@ def test_snowfall_derive_reuses_prior_cumulative_for_final_gfs_step(monkeypatch,
     assert "reused_prev_cumulative=true" in caplog.text
     expected_inches = 6.0 * 0.03937007874015748 * 10.0
     np.testing.assert_allclose(data, np.full((2, 2), expected_inches, dtype=np.float32), rtol=1e-6, atol=1e-6)
+
+
+def test_snowfall_derive_reuses_prior_cumulative_across_gfs_late_cadence_transition(monkeypatch, caplog) -> None:
+    crs = CRS.from_epsg(4326)
+    transform = Affine.identity()
+    fetch_patterns: list[str] = []
+
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
+        del model_id, product, run_date, herbie_kwargs
+        pattern = str(search_pattern)
+        fetch_patterns.append(f"{int(fh)}:{pattern}")
+        data_by_pattern = {
+            ":APCP:surface:240-246 hour acc fcst:$": np.full((2, 2), 6.0, dtype=np.float32),
+            ":CSNOW:surface:": np.ones((2, 2), dtype=np.float32),
+        }
+        data = data_by_pattern[pattern]
+        inventory_line = {
+            ":APCP:surface:240-246 hour acc fcst:$": ":APCP:surface:240-246 hour acc fcst:",
+            ":CSNOW:surface:": "",
+        }[pattern]
+        meta = {"inventory_line": inventory_line, "search_pattern": pattern, "fh": int(fh)}
+        if return_meta:
+            return data, crs, transform, meta
+        return data, crs, transform
+
+    def _fake_inventory_lines(*, model_id, product, run_date, fh, search_pattern):
+        del model_id, product, run_date, search_pattern
+        return {
+            246: [":APCP:surface:240-246 hour acc fcst:"],
+        }[int(fh)]
+
+    def _fake_prior_cumulative(*, model_id, run_date, var_key, fh, ctx, scale_divisor=0.03937007874015748):
+        del model_id, run_date, ctx, scale_divisor
+        if int(fh) != 240:
+            return None
+        if str(var_key) == "snowfall_total":
+            return np.full((2, 2), 240.0, dtype=np.float32), crs, transform
+        if str(var_key) == "precip_total":
+            return np.full((2, 2), 240.0, dtype=np.float32), crs, transform
+        return None
+
+    monkeypatch.setattr(derive_module, "fetch_variable", _fake_fetch_variable)
+    monkeypatch.setattr(derive_module, "_kuchera_inventory_lines", _fake_inventory_lines)
+    monkeypatch.setattr(derive_module, "_kuchera_load_prior_cumulative", _fake_prior_cumulative)
+    plugin = _FakePlugin()
+
+    var_spec_model = SimpleNamespace(
+        selectors=SimpleNamespace(
+            hints={
+                "apcp_component": "apcp_step",
+                "snow_component": "csnow",
+                "step_hours": "3",
+                "step_transition_fh": "240",
+                "step_hours_after_fh": "6",
+                "snow_interval_sample_mode": "three_point",
+                "slr": "10",
+                "snow_mask_threshold": "0.5",
+                "min_step_lwe_kgm2": "0.01",
+            }
+        )
+    )
+
+    with caplog.at_level("INFO"):
+        data, out_crs, out_transform = derive_module._derive_snowfall_total_10to1_cumulative(
+            model_id="gfs",
+            var_key="snowfall_total",
+            product="pgrb2.0p25",
+            run_date=datetime(2026, 3, 2, 12, 0),
+            fh=246,
+            var_spec_model=var_spec_model,
+            var_capability=None,
+            model_plugin=plugin,
+        )
+
+    assert out_crs == crs
+    assert out_transform == transform
+    assert fetch_patterns == [
+        "246::APCP:surface:240-246 hour acc fcst:$",
+        "240::CSNOW:surface:",
+        "246::CSNOW:surface:",
+    ]
+    assert "reused_prev_cumulative=true" in caplog.text
+    assert "computed_steps=1" in caplog.text
+    expected_inches = 246.0 * 0.03937007874015748 * 10.0
+    np.testing.assert_allclose(data, np.full((2, 2), expected_inches, dtype=np.float32), rtol=1e-6, atol=1e-6)

@@ -588,7 +588,7 @@ def build_twf_share_html(
         blocks.append(f'<img src="{image_src}" alt="Model screenshot">')
 
     permalink_attr = html.escape(permalink_value, quote=True)
-    permalink_text = html.escape(permalink_value, quote=False)
+    permalink_text = "View map on CartoSky"
     blocks.append(
         f'<a href="{permalink_attr}" rel="nofollow noopener" target="_blank">{permalink_text}</a>'
     )

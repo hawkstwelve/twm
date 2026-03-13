@@ -199,7 +199,7 @@ async def test_twf_share_post_structured_payload_builds_html(
             '<img src="https://cdn.theweathermodels.com/share/example.png" alt="Model screenshot">'
             "<br><br>"
             '<a href="https://theweathermodels.com/viewer?model=hrrr" rel="nofollow noopener" target="_blank">'
-            "https://theweathermodels.com/viewer?model=hrrr"
+            "View map on CartoSky"
             "</a>"
         ),
     }
@@ -262,7 +262,7 @@ async def test_twf_share_topic_structured_payload_builds_html_without_image(
             "GFS summary"
             "<br><br>"
             '<a href="https://theweathermodels.com/viewer?model=gfs" rel="nofollow noopener" target="_blank">'
-            "https://theweathermodels.com/viewer?model=gfs"
+            "View map on CartoSky"
             "</a>"
         ),
     }

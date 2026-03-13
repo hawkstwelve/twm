@@ -456,6 +456,8 @@ GFS_VARS: dict[str, VarSpec] = {
                 "apcp_component": "apcp_step",
                 "snow_component": "csnow",
                 "step_hours": "3",
+                "step_transition_fh": "240",
+                "step_hours_after_fh": "6",
                 "snow_interval_sample_mode": "three_point",
                 "slr": "10",
                 "snow_mask_threshold": "0.5",
@@ -475,6 +477,8 @@ GFS_VARS: dict[str, VarSpec] = {
             hints={
                 "apcp_component": "apcp_step",
                 "step_hours": "3",
+                "step_transition_fh": "240",
+                "step_hours_after_fh": "6",
                 "kuchera_use_ptype_gate": "true",
                 **kuchera_hint_overrides(),
             },

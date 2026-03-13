@@ -60,6 +60,8 @@ type TwfShareModalProps = {
   getLegend?: () => LegendPayload | null;
 };
 
+const TWF_PERMALINK_LABEL = "View map on CartoSky";
+
 const QUICK_FORUMS: Array<{ id: number; label: string }> = [
   { id: 4, label: "West" },
   { id: 9, label: "East" },
@@ -1329,7 +1331,7 @@ export function TwfShareModal({
               <div className="min-w-0 flex-1">
                 <div className="text-[11px] font-semibold uppercase tracking-wider text-white/52">Share preview</div>
                 <div className="mt-1 line-clamp-2 text-sm text-white/90">{payload.summary}</div>
-                <div className="mt-1 truncate text-xs text-white/64">{payload.permalink}</div>
+                <div className="mt-1 truncate text-xs text-white/64">{TWF_PERMALINK_LABEL}</div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <button

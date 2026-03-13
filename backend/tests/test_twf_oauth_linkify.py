@@ -59,7 +59,7 @@ def test_build_twf_share_html_renders_summary_image_and_permalink() -> None:
         "<br><br>"
         '<a href="https://theweathermodels.com/viewer?model=hrrr&amp;run=20260308_00z" '
         'rel="nofollow noopener" target="_blank">'
-        "https://theweathermodels.com/viewer?model=hrrr&amp;run=20260308_00z"
+        "View map on CartoSky"
         "</a>"
     )
 
@@ -75,7 +75,7 @@ def test_build_twf_share_html_omits_image_block_when_not_provided() -> None:
         "GFS update"
         "<br><br>"
         '<a href="https://theweathermodels.com/viewer?model=gfs" rel="nofollow noopener" target="_blank">'
-        "https://theweathermodels.com/viewer?model=gfs"
+        "View map on CartoSky"
         "</a>"
     )
 
