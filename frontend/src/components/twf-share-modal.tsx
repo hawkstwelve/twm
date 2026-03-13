@@ -66,7 +66,7 @@ const QUICK_FORUMS: Array<{ id: number; label: string }> = [
 ];
 
 const modalCardClass =
-  "my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/8 bg-[rgba(40,46,55,0.58)] text-white shadow-[0_18px_44px_rgba(0,0,0,0.3)] backdrop-blur-[20px] sm:my-4 sm:max-h-[calc(100dvh-2rem)]";
+  "my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/8 bg-[rgba(34,39,47,0.64)] text-white shadow-[0_18px_44px_rgba(0,0,0,0.32)] backdrop-blur-[20px] backdrop-brightness-[0.55] backdrop-saturate-125 sm:my-4 sm:max-h-[calc(100dvh-2rem)]";
 
 const sectionCardClass =
   "rounded-2xl border border-white/8 bg-white/[0.045]";
@@ -907,7 +907,7 @@ export function TwfShareModal({
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-black/48 p-2 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-[80] flex items-start justify-center overflow-y-auto bg-slate-950/46 p-2 backdrop-blur-sm backdrop-brightness-[0.62] backdrop-saturate-75 sm:items-center sm:p-4"
       role="dialog"
       aria-modal="true"
       aria-label="Share"
