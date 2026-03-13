@@ -261,6 +261,69 @@ def test_process_run_publishes_early_then_refreshes_after_more_progress(
     assert pointer_calls == 2
 
 
+class _TimingPlugin:
+    id = "gfs"
+
+    def scheduled_fhs_for_var(self, var_key: str, cycle_hour: int) -> list[int]:
+        del var_key, cycle_hour
+        return [0]
+
+    def normalize_var_id(self, var_key: str) -> str:
+        return str(var_key)
+
+
+def test_process_run_logs_frame_timing_for_single_and_bundle(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    run_dt = datetime(2026, 2, 27, 12, tzinfo=timezone.utc)
+
+    monkeypatch.setenv("CARTOSKY_DERIVE_BUNDLE", "1")
+    monkeypatch.setattr(scheduler_module, "_frame_artifacts_exist", lambda *args, **kwargs: False)
+    monkeypatch.setattr(scheduler_module, "_should_promote", lambda *args, **kwargs: False)
+    monkeypatch.setattr(scheduler_module, "_enforce_run_retention", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        scheduler_module,
+        "_is_derive_bundle_candidate",
+        lambda plugin, var_id: str(var_id) == "snowfall_total",
+    )
+    monkeypatch.setattr(
+        scheduler_module,
+        "_build_bundle",
+        lambda **kwargs: [("snowfall_total", 0, True, 111)],
+    )
+    monkeypatch.setattr(
+        scheduler_module,
+        "_build_one",
+        lambda **kwargs: (str(kwargs["var_id"]), int(kwargs["fh"]), True, 222),
+    )
+
+    with caplog.at_level("INFO"):
+        scheduler_module._process_run(
+            plugin=_TimingPlugin(),
+            model_id="gfs",
+            vars_to_build=["snowfall_total", "tmp2m"],
+            primary_vars=["tmp2m"],
+            run_dt=run_dt,
+            data_root=tmp_path,
+            workers=1,
+            keep_runs=2,
+            loop_pregenerate_enabled=False,
+            loop_cache_root=tmp_path / "loop-cache",
+            loop_workers=1,
+            loop_tier0_quality=82,
+            loop_tier0_max_dim=1600,
+            loop_tier0_fixed_w=1600,
+            loop_tier1_quality=86,
+            loop_tier1_max_dim=2400,
+            loop_tier1_fixed_w=2400,
+        )
+
+    assert "Frame timing: run=20260227_12z model=gfs var=snowfall_total fh000 ok=true mode=bundle elapsed_ms=111" in caplog.text
+    assert "Frame timing: run=20260227_12z model=gfs var=tmp2m fh000 ok=true mode=single elapsed_ms=222" in caplog.text
+
+
 def test_process_run_republishes_progress_during_long_catchup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

@@ -1540,7 +1540,7 @@ def _resolve_apcp_step_data(
         same_transform = step_transform == cum_diff_state.consumed_sum_transform
         if not (same_shape and same_crs and same_transform):
             raise ValueError(
-                f"KUCHERA_APCP cumulative grid mismatch for fh{step_fh:03d}: "
+                f"APCP_STEP_RESOLUTION cumulative grid mismatch for fh{step_fh:03d}: "
                 f"shape_match={same_shape} crs_match={same_crs} transform_match={same_transform}"
             )
         step_apcp_data = np.clip(
@@ -1550,7 +1550,7 @@ def _resolve_apcp_step_data(
             apcp_valid = apcp_valid_raw & cum_diff_state.consumed_sum_valid
         fallback_differencing_applied = True
         logger.info(
-            'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d"',
+            'APCP_STEP_FALLBACK step_fh=%d prev_fh=%d reason="cumulative 0-%d"',
             step_fh,
             cum_diff_state.consumed_through_fh,
             step_fh,
@@ -1569,7 +1569,7 @@ def _resolve_apcp_step_data(
             same_transform = step_transform == cum_diff_state.bucket_cumulative_transform
             if not (same_shape and same_crs and same_transform):
                 raise ValueError(
-                    f"KUCHERA_APCP overlap grid mismatch for fh{step_fh:03d}: "
+                    f"APCP_STEP_RESOLUTION overlap grid mismatch for fh{step_fh:03d}: "
                     f"shape_match={same_shape} crs_match={same_crs} transform_match={same_transform}"
                 )
             step_apcp_data = np.clip(
@@ -1581,7 +1581,7 @@ def _resolve_apcp_step_data(
                 apcp_valid = apcp_valid_raw & cum_diff_state.bucket_cumulative_valid
             fallback_differencing_applied = True
             logger.info(
-                'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="overlap %s"',
+                'APCP_STEP_FALLBACK step_fh=%d prev_fh=%d reason="overlap %s"',
                 step_fh,
                 cum_diff_state.bucket_through_fh,
                 selected_window,
@@ -1599,7 +1599,7 @@ def _resolve_apcp_step_data(
                 same_transform = step_transform == prior_transform
                 if not (same_shape and same_crs and same_transform):
                     raise ValueError(
-                        f"KUCHERA_APCP reconstructed overlap grid mismatch for fh{step_fh:03d}: "
+                        f"APCP_STEP_RESOLUTION reconstructed overlap grid mismatch for fh{step_fh:03d}: "
                         f"shape_match={same_shape} crs_match={same_crs} transform_match={same_transform}"
                     )
                 step_apcp_data = np.clip(
@@ -1610,7 +1610,7 @@ def _resolve_apcp_step_data(
                 apcp_valid = apcp_valid_raw & prior_valid
                 fallback_differencing_applied = True
                 logger.info(
-                    'KUCHERA_APCP_FALLBACK step_fh=%d prev_fh=%d reason="overlap_reconstructed %s"',
+                    'APCP_STEP_FALLBACK step_fh=%d prev_fh=%d reason="overlap_reconstructed %s"',
                     step_fh,
                     expected_start_fh,
                     selected_window,
@@ -1619,7 +1619,7 @@ def _resolve_apcp_step_data(
                 selector_reason = "history_gap_overlap_rebuild"
             else:
                 raise ValueError(
-                    f"KUCHERA_APCP overlap state missing for fh{step_fh:03d}: "
+                    f"APCP_STEP_RESOLUTION overlap state missing for fh{step_fh:03d}: "
                     f"expected_start={expected_start_fh} selected_window={selected_window}"
                 )
 
@@ -1631,7 +1631,7 @@ def _resolve_apcp_step_data(
     }.get(apcp_mode, apcp_mode)
 
     logger.info(
-        'KUCHERA_APCP step_fh=%d product=%s inv="%s" mode=%s fallback=%s '
+        'APCP_STEP_RESOLUTION step_fh=%d product=%s inv="%s" mode=%s fallback=%s '
         'exact_guess_used=%s inventory_selected=%s selected_window="%s" selector_fallback=%s '
         'reason="%s" pattern="%s"',
         step_fh,
@@ -1660,7 +1660,7 @@ def _resolve_apcp_step_data(
         same_transform = step_transform == cum_diff_state.consumed_sum_transform
         if not (same_shape and same_crs and same_transform):
             raise ValueError(
-                f"KUCHERA_APCP consumed-sum grid mismatch for fh{step_fh:03d}: "
+                f"APCP_STEP_RESOLUTION consumed-sum grid mismatch for fh{step_fh:03d}: "
                 f"shape_match={same_shape} crs_match={same_crs} transform_match={same_transform}"
             )
         cum_diff_state.consumed_sum = (

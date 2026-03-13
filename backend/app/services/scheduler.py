@@ -712,7 +712,8 @@ def _build_one(
     run_dt: datetime,
     data_root: Path,
     plugin,
-) -> tuple[str, int, bool]:
+) -> tuple[str, int, bool, int]:
+    started_at = time.perf_counter()
     result = build_frame(
         model=model_id,
         region=CANONICAL_COVERAGE,
@@ -723,7 +724,7 @@ def _build_one(
         product=getattr(plugin, "product", "sfc"),
         model_plugin=plugin,
     )
-    return var_id, fh, result is not None
+    return var_id, fh, result is not None, int((time.perf_counter() - started_at) * 1000)
 
 
 def _is_derive_bundle_candidate(plugin: Any, var_id: str) -> bool:
@@ -754,7 +755,7 @@ def _build_bundle(
     run_dt: datetime,
     data_root: Path,
     plugin: Any,
-) -> list[tuple[str, int, bool]]:
+) -> list[tuple[str, int, bool, int]]:
     normalize = getattr(plugin, "normalize_var_id", None)
     normalized_vars: list[str] = []
     seen: set[str] = set()
@@ -768,7 +769,7 @@ def _build_bundle(
     if not normalized_vars:
         return []
 
-    results = build_frame_bundle(
+    results, timings_ms = build_frame_bundle(
         model=model_id,
         region=CANONICAL_COVERAGE,
         var_keys=normalized_vars,
@@ -777,11 +778,46 @@ def _build_bundle(
         data_root=data_root,
         product=getattr(plugin, "product", "sfc"),
         model_plugin=plugin,
+        include_timings=True,
     )
     return [
-        (var_key, fh, results.get(var_key) is not None)
+        (var_key, fh, results.get(var_key) is not None, int(timings_ms.get(var_key, 0)))
         for var_key in normalized_vars
     ]
+
+
+def _coerce_build_outcome(outcome: tuple[Any, ...]) -> tuple[str, int, bool, int | None]:
+    if len(outcome) < 3:
+        raise ValueError(f"Invalid build outcome: {outcome!r}")
+    var_id = str(outcome[0])
+    fh = int(outcome[1])
+    ok = bool(outcome[2])
+    elapsed_ms: int | None = None
+    if len(outcome) >= 4 and outcome[3] is not None:
+        elapsed_ms = int(outcome[3])
+    return var_id, fh, ok, elapsed_ms
+
+
+def _log_frame_timing(
+    *,
+    run_id: str,
+    model_id: str,
+    var_id: str,
+    fh: int,
+    ok: bool,
+    elapsed_ms: int | None,
+    mode: str,
+) -> None:
+    logger.info(
+        "Frame timing: run=%s model=%s var=%s fh%03d ok=%s mode=%s elapsed_ms=%s",
+        run_id,
+        model_id,
+        var_id,
+        fh,
+        "true" if ok else "false",
+        mode,
+        str(int(elapsed_ms)) if elapsed_ms is not None else "unknown",
+    )
 
 
 def _write_json_atomic(path: Path, payload: dict) -> None:
@@ -1566,14 +1602,25 @@ def _process_run(
 
             for future in concurrent.futures.as_completed(futures):
                 future_result = future.result()
+                result_mode = "single" if isinstance(future_result, tuple) else "bundle"
                 if isinstance(future_result, tuple):
                     round_results = [future_result]
                 else:
                     round_results = list(future_result)
 
-                for var_id, fh, ok in round_results:
+                for outcome in round_results:
+                    var_id, fh, ok, elapsed_ms = _coerce_build_outcome(tuple(outcome))
                     rebuild_key = (run_id, str(var_id), int(fh))
                     is_rebuild_job = rebuild_round and rebuild_key in rebuild_attempts
+                    _log_frame_timing(
+                        run_id=run_id,
+                        model_id=model_id,
+                        var_id=str(var_id),
+                        fh=int(fh),
+                        ok=ok,
+                        elapsed_ms=elapsed_ms,
+                        mode=result_mode,
+                    )
                     if ok:
                         built_ok += 1
                         round_successes += 1

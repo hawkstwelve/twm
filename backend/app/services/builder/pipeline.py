@@ -26,6 +26,7 @@ import json
 import logging
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -1174,7 +1175,8 @@ def build_frame_bundle(
     data_root: Path,
     product: str = "sfc",
     model_plugin: Any = None,
-) -> dict[str, Path | None]:
+    include_timings: bool = False,
+) -> dict[str, Path | None] | tuple[dict[str, Path | None], dict[str, int]]:
     """Build multiple variables for one fh with shared fetch/warp caches."""
     resolved_plugin = model_plugin or _resolve_model_plugin(model)
     shared_ctx = FetchContext(coverage=region)
@@ -1190,7 +1192,9 @@ def build_frame_bundle(
         ordered_vars.append(normalized)
 
     results: dict[str, Path | None] = {}
+    timings_ms: dict[str, int] = {}
     for var_key in ordered_vars:
+        started_at = time.perf_counter()
         results[var_key] = build_frame(
             model=model,
             region=region,
@@ -1205,6 +1209,7 @@ def build_frame_bundle(
             log_fetch_cache_stats=False,
             derive_component_warp_cache=True,
         )
+        timings_ms[var_key] = int((time.perf_counter() - started_at) * 1000)
 
     fetch_hits = int(shared_ctx.stats.get("hits", 0))
     fetch_misses = int(shared_ctx.stats.get("misses", 0))
@@ -1219,6 +1224,8 @@ def build_frame_bundle(
         warp_hits,
         warp_misses,
     )
+    if include_timings:
+        return results, timings_ms
     return results
 
 
