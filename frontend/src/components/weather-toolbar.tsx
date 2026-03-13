@@ -160,10 +160,10 @@ function DisplayToggle(props: {
       onClick={onToggle}
       aria-pressed={checked}
       className={cn(
-        "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
+        "flex w-full items-center justify-between gap-3 rounded-lg border border-transparent px-3 py-2 text-left transition-all duration-150",
         checked
-          ? "border-white/8 bg-white/12 text-white hover:bg-white/18"
-          : "border-white/6 bg-white/[0.07] text-white/88 hover:bg-white/[0.12]"
+          ? "bg-white/12 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.035)] hover:bg-white/18"
+          : "bg-white/[0.07] text-white/88 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.025)] hover:bg-white/[0.12]"
       )}
     >
       <div className="min-w-0">
