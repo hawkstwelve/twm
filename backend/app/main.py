@@ -31,6 +31,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from PIL import Image, ImageFilter
 from pyproj import Transformer
 from rasterio.enums import Resampling
+from rasterio.warp import transform_bounds
 from rasterio.windows import Window
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -1568,6 +1569,7 @@ _sample_lock = threading.Lock()
 LOOP_MANIFEST_VERSION = 1
 LOOP_MANIFEST_PROJECTION = "EPSG:4326"
 LOOP_MANIFEST_BBOX = [-134.0, 24.0, -60.0, 55.0]
+_LOOP_MANIFEST_BBOX_DENSIFY_POINTS = 21
 
 
 def _run_hour(run_id: str) -> int | None:
@@ -1742,6 +1744,44 @@ def _get_cached_dataset(path: Path) -> rasterio.DatasetReader:
         ds = rasterio.open(path)
         _ds_cache[key] = ds
         return ds
+
+
+@lru_cache(maxsize=512)
+def _loop_manifest_bbox_for_path(path_str: str) -> tuple[float, float, float, float] | None:
+    path = Path(path_str)
+    try:
+        ds = _get_cached_dataset(path)
+        if ds.crs is None:
+            return None
+        west, south, east, north = transform_bounds(
+            ds.crs,
+            LOOP_MANIFEST_PROJECTION,
+            *ds.bounds,
+            densify_pts=_LOOP_MANIFEST_BBOX_DENSIFY_POINTS,
+        )
+        return (float(west), float(south), float(east), float(north))
+    except Exception:
+        logger.exception("Failed deriving loop manifest bbox from %s", path)
+        return None
+
+
+def _resolve_loop_manifest_bbox(
+    model: str,
+    run: str,
+    var: str,
+    frame_entries: list[dict[str, Any]],
+) -> list[float]:
+    for item in frame_entries:
+        fh = item.get("fh")
+        if not isinstance(fh, int):
+            continue
+        cog_path = _resolve_rgba_cog(model, run, var, fh)
+        if cog_path is None:
+            continue
+        bbox = _loop_manifest_bbox_for_path(str(cog_path))
+        if bbox is not None:
+            return [float(value) for value in bbox]
+    return [float(value) for value in LOOP_MANIFEST_BBOX]
 
 
 def _latest_run_from_pointer(model: str) -> str | None:
@@ -2800,6 +2840,13 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
     if not isinstance(frame_entries, list):
         frame_entries = []
 
+    loop_bbox = _resolve_loop_manifest_bbox(
+        model,
+        resolved,
+        var,
+        [item for item in frame_entries if isinstance(item, dict)],
+    )
+
     version_token = _run_version_token(model, resolved)
 
     tier_frames: dict[int, list[dict[str, Any]]] = {0: [], 1: []}
@@ -2833,7 +2880,7 @@ def get_loop_manifest(request: Request, model: str, run: str, var: str):
         "run": resolved,
         "model": model,
         "var": var,
-        "bbox": LOOP_MANIFEST_BBOX,
+        "bbox": loop_bbox,
         "projection": LOOP_MANIFEST_PROJECTION,
         "loop_tiers": [
             {
