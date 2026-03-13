@@ -66,13 +66,13 @@ const QUICK_FORUMS: Array<{ id: number; label: string }> = [
 ];
 
 const modalCardClass =
-  "my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/8 bg-[rgba(34,39,47,0.64)] text-white shadow-[0_18px_44px_rgba(0,0,0,0.32)] backdrop-blur-[20px] backdrop-brightness-[0.55] backdrop-saturate-125 sm:my-4 sm:max-h-[calc(100dvh-2rem)]";
+  "my-2 flex max-h-[calc(100dvh-1rem)] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/8 bg-[rgba(31,36,44,0.7)] text-white shadow-[0_18px_44px_rgba(0,0,0,0.34)] backdrop-blur-[20px] backdrop-brightness-[0.52] backdrop-saturate-120 sm:my-4 sm:max-h-[calc(100dvh-2rem)]";
 
 const sectionCardClass =
-  "rounded-2xl border border-white/8 bg-white/[0.045]";
+  "rounded-2xl border border-white/8 bg-white/[0.038]";
 
 const insetCardClass =
-  "rounded-xl border border-white/8 bg-white/[0.04]";
+  "rounded-xl border border-white/8 bg-white/[0.032]";
 
 const secondaryButtonClass =
   "inline-flex h-8 items-center rounded-md border border-white/9 bg-white/[0.12] px-2.5 text-xs font-medium text-white/90 transition-colors hover:bg-white/[0.16]";
@@ -989,7 +989,7 @@ export function TwfShareModal({
               </div>
             ) : (
               <div className="space-y-4">
-                <div className={`${insetCardClass} bg-white/[0.03] p-3 backdrop-blur-xl`}>
+                <div className={`${insetCardClass} bg-white/[0.024] p-3 backdrop-blur-xl`}>
                   <div className="space-y-2">
                     <div className={`${insetCardClass} px-3 py-2`}>
                       <div className="flex items-start justify-between gap-3">
