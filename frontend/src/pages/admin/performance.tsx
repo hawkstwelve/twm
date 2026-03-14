@@ -599,13 +599,13 @@ export default function AdminPerformancePage() {
         {
           key: "scrub_latency",
           title: "Scrub Latency",
-          description: "How responsive timeline scrubbing feels under real interaction.",
+          description: "Time from a committed scrub target to the exact requested frame becoming visible.",
           icon: TimerReset,
           metric: summary.scrub_latency,
           detailContent: (
             <BreakdownList
               title="Scrub Latency by Model"
-              subtitle="Scrub response time per model — reveals which datasets are cache-miss prone."
+              subtitle="Committed scrub latency per model — reveals which datasets take longest to land on the requested frame."
               items={scrubModelBreakdown}
             />
           ),
@@ -640,14 +640,14 @@ export default function AdminPerformancePage() {
         {
           key: "viewer_first_frame",
           title: "First Viewer Frame",
-          description: "Time from viewer open to first frame being rendered.",
+          description: "Time from viewer open to the first visible weather frame, whether loop or tiles.",
           icon: Zap,
           metric: summary.viewer_first_frame,
           detailContent: (
             <>
               <TrendChart
                 title="First Viewer Frame Trend"
-                subtitle="Time from viewer open to first frame being rendered."
+                subtitle="Time from viewer open to the first visible weather frame."
                 points={firstFrameTrend}
                 lineColor="#f0a575"
               />

@@ -158,6 +158,8 @@ type PendingVariableSwitchMetric = {
   regionId: string | null;
 };
 
+type ForecastHourChangeReason = "standard" | "scrub-live" | "scrub-commit";
+
 const BASEMAP_MODE_STORAGE_KEY = "twf.map.basemap_mode";
 const MODEL_ORDER_BY_ID: Record<string, number> = {
   hrrr: 0,
@@ -2385,6 +2387,33 @@ export default function App() {
     finalizePendingFrameMetric("loop");
   }, [loopDisplayHour, finalizePendingFrameMetric]);
 
+  const trackFirstViewerFrame = useCallback((frameHour: number | null) => {
+    if (firstViewerFrameTrackedRef.current) {
+      return;
+    }
+    firstViewerFrameTrackedRef.current = true;
+    const durationMs = performance.now() - viewerMountedAtRef.current;
+    if (!Number.isFinite(durationMs) || durationMs < 0) {
+      return;
+    }
+    trackPerfEvent({
+      event_name: "viewer_first_frame",
+      duration_ms: durationMs,
+      model_id: modelRef.current || null,
+      variable_id: variableRef.current || null,
+      run_id: telemetryRunId,
+      region_id: region || null,
+      forecast_hour: Number.isFinite(frameHour) ? frameHour : null,
+    });
+  }, [telemetryRunId, region]);
+
+  useEffect(() => {
+    if (!isLoopDisplayActive || !Number.isFinite(loopDisplayHour)) {
+      return;
+    }
+    trackFirstViewerFrame(loopDisplayHour);
+  }, [isLoopDisplayActive, loopDisplayHour, trackFirstViewerFrame]);
+
   // Finalize variable_switch in loop mode: fires when the first loop frame for the
   // new variable becomes displayable.
   useEffect(() => {
@@ -2624,9 +2653,10 @@ export default function App() {
   }, [prefetchHours, updateBufferSnapshot]);
 
   const requestForecastHour = useCallback(
-    (requestedHour: number) => {
-      if (!isScrubbing) {
+    (requestedHour: number, reason: ForecastHourChangeReason = "standard") => {
+      if (reason === "standard") {
         setScrubRequestedHour(null);
+        pendingScrubHourRef.current = null;
         const snappedHour = frameHours.length > 0 ? nearestFrame(frameHours, requestedHour) : requestedHour;
         const nextLoopHour = loopFrameHours.length > 0 ? nearestFrame(loopFrameHours, requestedHour) : snappedHour;
         startPendingFrameMetric({
@@ -2637,6 +2667,65 @@ export default function App() {
           forecastHour: isLoopDisplayActive ? nextLoopHour : snappedHour,
         });
         setTargetForecastHour(requestedHour);
+        return;
+      }
+
+      if (reason === "scrub-commit") {
+        setScrubRequestedHour(null);
+        pendingScrubHourRef.current = null;
+
+        if (!isLoopDisplayActive) {
+          if (frameHours.length === 0) {
+            return;
+          }
+          const snappedTileHour = nearestFrame(frameHours, requestedHour);
+          startPendingFrameMetric({
+            eventName: "scrub_latency",
+            renderTarget: "tiles",
+            expectedTileUrl: tileUrlForHour(snappedTileHour),
+            expectedLoopHour: null,
+            forecastHour: snappedTileHour,
+          });
+          setTargetForecastHour(snappedTileHour);
+          return;
+        }
+
+        const nextHour = loopFrameHours.length > 0
+          ? nearestFrame(loopFrameHours, requestedHour)
+          : requestedHour;
+        startPendingFrameMetric({
+          eventName: "scrub_latency",
+          renderTarget: "loop",
+          expectedTileUrl: null,
+          expectedLoopHour: nextHour,
+          forecastHour: nextHour,
+        });
+
+        const readyLoopHour = hasDecodedLoopFrame(nextHour, visibleRenderMode)
+          ? nextHour
+          : findNearestDecodedLoopScrubHour(nextHour, visibleRenderMode);
+        if (Number.isFinite(readyLoopHour)) {
+          const resolvedReadyHour = readyLoopHour as number;
+          setTargetForecastHour(resolvedReadyHour);
+          setLoopDisplayHour(resolvedReadyHour);
+        }
+
+        loopDisplayDecodeTokenRef.current += 1;
+        const decodeToken = loopDisplayDecodeTokenRef.current;
+        ensureLoopFrameDecoded(nextHour, visibleRenderMode)
+          .then((ready) => {
+            if (!ready) {
+              return;
+            }
+            if (decodeToken !== loopDisplayDecodeTokenRef.current) {
+              return;
+            }
+            setLoopDisplayHour(nextHour);
+            setTargetForecastHour(nextHour);
+          })
+          .catch(() => {
+            // best-effort decode path for scrub commit; keep previous visible frame on failure.
+          });
         return;
       }
 
@@ -2659,16 +2748,6 @@ export default function App() {
             return;
           }
           const snappedTileHour = nearestFrame(frameHours, requested);
-          const expectedTileHour = useExactScrubSelection
-            ? snappedTileHour
-            : (findNearestReadyTileScrubHour(snappedTileHour) ?? snappedTileHour);
-          startPendingFrameMetric({
-            eventName: "scrub_latency",
-            renderTarget: "tiles",
-            expectedTileUrl: tileUrlForHour(expectedTileHour),
-            expectedLoopHour: null,
-            forecastHour: expectedTileHour,
-          });
           if (useExactScrubSelection) {
             setTargetForecastHour(snappedTileHour);
             return;
@@ -2683,16 +2762,6 @@ export default function App() {
         const nextHour = loopFrameHours.length > 0
           ? nearestFrame(loopFrameHours, requested)
           : requested;
-        const expectedLoopHour = useExactScrubSelection
-          ? nextHour
-          : (findNearestDecodedLoopScrubHour(nextHour, visibleRenderMode) ?? nextHour);
-        startPendingFrameMetric({
-          eventName: "scrub_latency",
-          renderTarget: "loop",
-          expectedTileUrl: null,
-          expectedLoopHour,
-          forecastHour: expectedLoopHour,
-        });
         if (useExactScrubSelection) {
           setTargetForecastHour(nextHour);
           setLoopDisplayHour(nextHour);
@@ -2727,7 +2796,6 @@ export default function App() {
       });
     },
     [
-      isScrubbing,
       isLoopDisplayActive,
       loopFrameHours,
       frameHours,
@@ -2735,6 +2803,7 @@ export default function App() {
       tileUrlForHour,
       ensureLoopFrameDecoded,
       visibleRenderMode,
+      hasDecodedLoopFrame,
       findNearestReadyTileScrubHour,
       findNearestDecodedLoopScrubHour,
       startPendingFrameMetric,
@@ -3512,20 +3581,8 @@ export default function App() {
   }, []);
 
   const handleTileViewportReady = useCallback((readyTileUrl: string) => {
-    if (!firstViewerFrameTrackedRef.current && readyTileUrl === tileUrl) {
-      firstViewerFrameTrackedRef.current = true;
-      const durationMs = performance.now() - viewerMountedAtRef.current;
-      if (Number.isFinite(durationMs) && durationMs >= 0) {
-        trackPerfEvent({
-          event_name: "viewer_first_frame",
-          duration_ms: durationMs,
-          model_id: modelRef.current || null,
-          variable_id: variableRef.current || null,
-          run_id: telemetryRunId,
-          region_id: region || null,
-          forecast_hour: Number.isFinite(forecastHour) ? forecastHour : null,
-        });
-      }
+    if (readyTileUrl === tileUrl) {
+      trackFirstViewerFrame(forecastHour);
     }
     // Finalize variable_switch: fires once the first tile for the new variable is viewport-ready.
     const pendingVarSwitch = pendingVariableSwitchRef.current;
@@ -3563,10 +3620,11 @@ export default function App() {
     renderMode,
     tileUrl,
     visibleRenderMode,
-    telemetryRunId,
     region,
     forecastHour,
     finalizePendingFrameMetric,
+    telemetryRunId,
+    trackFirstViewerFrame,
   ]);
 
   const handleRegionChange = useCallback((nextRegion: string) => {

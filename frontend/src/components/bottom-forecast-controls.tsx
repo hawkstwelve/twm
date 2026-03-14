@@ -13,7 +13,7 @@ import {
 type BottomForecastControlsProps = {
   forecastHour: number;
   availableFrames: number[];
-  onForecastHourChange: (fh: number) => void;
+  onForecastHourChange: (fh: number, reason?: "standard" | "scrub-live" | "scrub-commit") => void;
   onScrubStateChange?: (isScrubbing: boolean) => void;
   isPlaying: boolean;
   setIsPlaying: (value: boolean) => void;
@@ -108,7 +108,7 @@ export function BottomForecastControls({
     }
     lastDragEmitAtRef.current = now;
     lastSentHourRef.current = next;
-    onForecastHourChange(next);
+    onForecastHourChange(next, force ? "scrub-commit" : "scrub-live");
   };
 
   return (
