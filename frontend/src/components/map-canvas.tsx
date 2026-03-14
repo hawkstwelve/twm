@@ -663,7 +663,6 @@ type MapCanvasProps = {
   variable?: string;
   variableKind?: string | null;
   overlayFadeOutZoom?: { start: number; end: number } | null;
-  zoomHintMinZoom?: number | null;
   basemapMode: BasemapMode;
   prefetchTileUrls?: string[];
   crossfade?: boolean;
@@ -674,7 +673,6 @@ type MapCanvasProps = {
   onTileReady?: (tileUrl: string) => void;
   onTileViewportReady?: (tileUrl: string) => void;
   onFrameLoadingChange?: (tileUrl: string, isLoading: boolean) => void;
-  onZoomHint?: (show: boolean) => void;
   onZoomBucketChange?: (bucket: number) => void;
   onZoomRoutingSignal?: (payload: { zoom: number; gestureActive: boolean }) => void;
   onViewportChange?: (payload: { lat: number; lon: number; z: number }) => void;
@@ -696,7 +694,6 @@ export function MapCanvas({
   variable,
   variableKind,
   overlayFadeOutZoom = null,
-  zoomHintMinZoom = null,
   basemapMode,
   prefetchTileUrls = [],
   crossfade = false,
@@ -707,7 +704,6 @@ export function MapCanvas({
   onTileReady,
   onTileViewportReady,
   onFrameLoadingChange,
-  onZoomHint,
   onZoomBucketChange,
   onZoomRoutingSignal,
   onViewportChange,
@@ -1551,13 +1547,6 @@ export function MapCanvas({
         lastZoomBucketRef.current = bucket;
         onZoomBucketChange?.(bucket);
       }
-      if (onZoomHint) {
-        const shouldShow = Number.isFinite(zoomHintMinZoom) && zoom >= Number(zoomHintMinZoom);
-        if (shouldShow !== lastHintStateRef.current) {
-          lastHintStateRef.current = shouldShow;
-          onZoomHint(shouldShow);
-        }
-      }
       scheduleRoutingSignal();
     };
 
@@ -1597,11 +1586,8 @@ export function MapCanvas({
         window.cancelAnimationFrame(rafId);
         rafId = null;
       }
-      if (onZoomHint && lastHintStateRef.current) {
-        onZoomHint(false);
-      }
     };
-  }, [isLoaded, zoomHintMinZoom, onZoomHint, onZoomBucketChange, onZoomRoutingSignal]);
+  }, [isLoaded, onZoomBucketChange, onZoomRoutingSignal]);
 
   useEffect(() => {
     const map = mapRef.current;

@@ -764,7 +764,6 @@ export default function App() {
   const [settledTileUrl, setSettledTileUrl] = useState<string | null>(null);
   const [mapLoadingTileUrl, setMapLoadingTileUrl] = useState<string | null>(null);
   const [frameStatusMessage, setFrameStatusMessage] = useState<string | null>(null);
-  const [showZoomHint, setShowZoomHint] = useState(false);
   const [mapViewTick, setMapViewTick] = useState(0);
   const [isMapReady, setIsMapReady] = useState(false);
   const [bootstrapHydrated, setBootstrapHydrated] = useState(false);
@@ -920,7 +919,6 @@ export default function App() {
   const selectedVariableDefaultFh = selectedCapabilityVarMap.get(variable)?.defaultFh ?? null;
   const selectedVariableKind = selectedCapabilityVarMap.get(variable)?.kind ?? null;
   const selectedModelConstraints = (selectedModelCapability?.constraints ?? {}) as Record<string, unknown>;
-  const zoomHintMinZoom = toNumberOrNull(selectedModelConstraints.zoom_hint_min);
   const overlayFadeOutZoom = useMemo(() => {
     const start = toNumberOrNull(selectedModelConstraints.overlay_fade_out_zoom_start);
     const end = toNumberOrNull(selectedModelConstraints.overlay_fade_out_zoom_end);
@@ -3924,7 +3922,6 @@ export default function App() {
           variable={variable}
           variableKind={selectedVariableKind}
           overlayFadeOutZoom={overlayFadeOutZoom}
-          zoomHintMinZoom={zoomHintMinZoom}
           basemapMode={basemapMode}
           prefetchTileUrls={prefetchTileUrls}
           crossfade={false}
@@ -3935,7 +3932,6 @@ export default function App() {
           onTileReady={handleTileReady}
           onFrameLoadingChange={handleFrameLoadingChange}
           onTileViewportReady={handleTileViewportReady}
-          onZoomHint={setShowZoomHint}
           onZoomBucketChange={setZoomBucket}
           onZoomRoutingSignal={handleZoomRoutingSignal}
           onViewportChange={handleViewportChange}
@@ -3990,13 +3986,6 @@ export default function App() {
           <div className="absolute left-4 top-4 z-40 flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive shadow-lg backdrop-blur-md">
             <AlertCircle className="h-3.5 w-3.5" />
             {error}
-          </div>
-        )}
-
-        {showZoomHint && (
-          <div className="glass absolute left-1/2 top-4 z-40 flex -translate-x-1/2 items-center gap-2 rounded-xl px-3 py-2 text-xs">
-            <AlertCircle className="h-3.5 w-3.5" />
-            GFS is low-resolution at this zoom. Switch to HRRR for sharper detail.
           </div>
         )}
 
