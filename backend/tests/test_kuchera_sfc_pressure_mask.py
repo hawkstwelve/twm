@@ -159,7 +159,7 @@ def test_sfc_pressure_mask_raises_slr_for_high_terrain(monkeypatch) -> None:
     monkeypatch.setattr(
         derive_module,
         "_resolve_cumulative_step_fhs",
-        lambda *, hints, fh, default_step_hours=6: [1],
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
     )
 
     # Run WITH surface pressure mask
@@ -245,7 +245,7 @@ def test_sfc_pressure_mask_excludes_correct_levels(monkeypatch) -> None:
     monkeypatch.setattr(
         derive_module,
         "_resolve_cumulative_step_fhs",
-        lambda *, hints, fh, default_step_hours=6: [1],
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
     )
 
     data_masked, _, _ = derive_module._derive_snowfall_kuchera_total_cumulative(
@@ -306,7 +306,7 @@ def test_sfc_pressure_mask_all_levels_underground_falls_back_to_10to1(monkeypatc
     monkeypatch.setattr(
         derive_module,
         "_resolve_cumulative_step_fhs",
-        lambda *, hints, fh, default_step_hours=6: [1],
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
     )
 
     data, _, _ = derive_module._derive_snowfall_kuchera_total_cumulative(
@@ -385,7 +385,7 @@ def test_sfc_pressure_mask_graceful_fallback_on_fetch_failure(monkeypatch) -> No
     monkeypatch.setattr(
         derive_module,
         "_resolve_cumulative_step_fhs",
-        lambda *, hints, fh, default_step_hours=6: [1],
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
     )
 
     # Should NOT raise — proceeds without filtering
@@ -450,7 +450,7 @@ def test_sfc_pressure_margin_keeps_barely_underground_levels(monkeypatch) -> Non
     monkeypatch.setattr(
         derive_module,
         "_resolve_cumulative_step_fhs",
-        lambda *, hints, fh, default_step_hours=6: [1],
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
     )
 
     data_with_margin, _, _ = derive_module._derive_snowfall_kuchera_total_cumulative(

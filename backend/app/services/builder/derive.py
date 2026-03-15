@@ -816,6 +816,7 @@ def _kuchera_frozen_fraction_for_step(
     product: str,
     run_date: datetime,
     step_fh: int,
+    sample_fhs: list[int] | None,
     model_plugin: Any,
     use_warped: bool,
     target_region: str,
@@ -825,23 +826,33 @@ def _kuchera_frozen_fraction_for_step(
     expected_shape: tuple[int, ...],
 ) -> tuple[np.ndarray, bool, int]:
     component_keys = ("csnow", "crain", "cicep", "cfrzr")
-    fetched: dict[str, np.ndarray] = {}
     fetch_count = 0
-    try:
+    resolved_sample_fhs = list(sample_fhs or [int(step_fh)])
+    sample_frozen_fracs: list[np.ndarray] = []
+    sample_errors: list[str] = []
+
+    for sample_fh in resolved_sample_fhs:
+        fetched: dict[str, np.ndarray] = {}
+        sample_failed = False
         for key in component_keys:
-            component_data, _, _ = _fetch_step_component(
-                model_id=model_id,
-                product=product,
-                run_date=run_date,
-                step_fh=step_fh,
-                model_plugin=model_plugin,
-                var_key=key,
-                use_warped=use_warped,
-                target_region=target_region,
-                target_grid_id=target_grid_id,
-                resampling=resampling,
-                ctx=ctx,
-            )
+            try:
+                component_data, _, _ = _fetch_step_component(
+                    model_id=model_id,
+                    product=product,
+                    run_date=run_date,
+                    step_fh=int(sample_fh),
+                    model_plugin=model_plugin,
+                    var_key=key,
+                    use_warped=use_warped,
+                    target_region=target_region,
+                    target_grid_id=target_grid_id,
+                    resampling=resampling,
+                    ctx=ctx,
+                )
+            except Exception as exc:
+                sample_errors.append(f"fh{int(sample_fh):03d}:{exc}")
+                sample_failed = True
+                break
             fetch_count += 1
             component_clean = np.asarray(component_data, dtype=np.float32)
             if component_clean.shape != expected_shape:
@@ -850,20 +861,42 @@ def _kuchera_frozen_fraction_for_step(
                     f"{component_clean.shape} != {expected_shape}"
                 )
             fetched[key] = component_clean
-    except Exception as exc:
+
+        if sample_failed:
+            continue
+
+        csnow_prob = _normalize_ptype_probability(fetched["csnow"])
+        _ = _normalize_ptype_probability(fetched["crain"])
+        cicep_prob = _normalize_ptype_probability(fetched["cicep"])
+        _ = _normalize_ptype_probability(fetched["cfrzr"])
+        sample_frozen_fracs.append(
+            np.clip(csnow_prob + cicep_prob, 0.0, 1.0).astype(np.float32, copy=False)
+        )
+
+    if not sample_frozen_fracs:
+        reason = sample_errors[0] if sample_errors else "no_valid_samples"
         _log_kuchera_ptype_gate_warning_once(
             model_id=model_id,
             var_key=var_key,
             step_fh=step_fh,
-            reason=str(exc),
+            reason=reason,
         )
         return np.ones(expected_shape, dtype=np.float32), True, fetch_count
 
-    csnow_prob = _normalize_ptype_probability(fetched["csnow"])
-    _ = _normalize_ptype_probability(fetched["crain"])
-    cicep_prob = _normalize_ptype_probability(fetched["cicep"])
-    _ = _normalize_ptype_probability(fetched["cfrzr"])
-    frozen_frac = np.clip(csnow_prob + cicep_prob, 0.0, 1.0).astype(np.float32, copy=False)
+    if len(sample_frozen_fracs) == 1:
+        return sample_frozen_fracs[0], False, fetch_count
+
+    sample_stack = np.stack(sample_frozen_fracs, axis=0).astype(np.float32, copy=False)
+    sample_valid_counts = np.sum(np.isfinite(sample_stack), axis=0).astype(np.int32, copy=False)
+    sample_sum = np.nansum(sample_stack, axis=0).astype(np.float32, copy=False)
+    frozen_frac = np.full(expected_shape, np.nan, dtype=np.float32)
+    np.divide(
+        sample_sum,
+        sample_valid_counts.astype(np.float32, copy=False),
+        out=frozen_frac,
+        where=sample_valid_counts > 0,
+    )
+    frozen_frac = np.clip(frozen_frac, 0.0, 1.0).astype(np.float32, copy=False)
     return frozen_frac, False, fetch_count
 
 
@@ -2600,6 +2633,9 @@ def _derive_snowfall_kuchera_total_cumulative(
         hints.get("kuchera_use_ptype_gate"),
         default=False,
     )
+    ptype_interval_sample_mode = str(
+        hints.get("kuchera_ptype_interval_sample_mode", "auto"),
+    ).strip().lower() or "auto"
     use_sfc_pressure_mask = _parse_hint_bool(
         hints.get("kuchera_use_sfc_pressure_mask"),
         default=False,
@@ -2627,6 +2663,36 @@ def _derive_snowfall_kuchera_total_cumulative(
     step_fhs = _resolve_cumulative_step_fhs(hints=hints, fh=fh, run_date=run_date, default_step_hours=6)
     if not step_fhs:
         raise ValueError(f"No cumulative Kuchera source steps resolved for {model_id}/{var_key} fh{fh:03d}")
+    ptype_interval_plan: dict[int, tuple[int, list[int]]] = {}
+    if use_ptype_gate:
+        # Keep ptype interval sampling aligned to the resolved APCP step cadence
+        # so midpoint requests do not drift onto forecast hours the model does
+        # not actually provide for precip-type fields.
+        ptype_cadence_sample_fhs: set[int] | None = {0, *[int(step_fh) for step_fh in step_fhs]}
+
+        prev_step_fh = 0
+        for step_fh in step_fhs:
+            step_len = int(step_fh) - int(prev_step_fh)
+            prev_step_fh = int(step_fh)
+            if step_len <= 0:
+                raise ValueError(
+                    f"Non-increasing cumulative Kuchera step sequence for {model_id}/{var_key}: "
+                    f"step_len={step_len} at fh{int(step_fh):03d}"
+                )
+            sample_fhs = [
+                sample_fh
+                for sample_fh in _interval_sample_fhs(
+                    int(step_fh),
+                    step_len,
+                    sample_mode=ptype_interval_sample_mode,
+                )
+                if sample_fh >= 0
+            ]
+            sample_fhs = _filter_sample_fhs_to_available_steps(
+                sample_fhs,
+                available_fhs=ptype_cadence_sample_fhs,
+            )
+            ptype_interval_plan[int(step_fh)] = (step_len, sample_fhs)
     logger.info(
         "derive %s fh%03d apcp_steps=%d profile_levels=%s profile_mode=%s apcp_product=%s profile_product=%s%s",
         var_key,
@@ -2802,12 +2868,14 @@ def _derive_snowfall_kuchera_total_cumulative(
 
             step_apcp_for_snow = step_apcp_clean
             if use_ptype_gate:
+                _ptype_step_len, ptype_sample_fhs = ptype_interval_plan.get(int(step_fh), (0, [int(step_fh)]))
                 frozen_frac, _ptype_fallback_used, ptype_fetch_count = _kuchera_frozen_fraction_for_step(
                     model_id=model_id,
                     var_key=var_key,
                     product=str(ptype_product),
                     run_date=run_date,
                     step_fh=step_fh,
+                    sample_fhs=ptype_sample_fhs,
                     model_plugin=model_plugin,
                     use_warped=use_warped,
                     target_region=target_region,

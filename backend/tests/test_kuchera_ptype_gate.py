@@ -60,6 +60,19 @@ def _kuchera_var_spec() -> SimpleNamespace:
     )
 
 
+def _kuchera_var_spec_with_overrides(**overrides) -> SimpleNamespace:
+    hints = {
+        "apcp_component": "apcp_step",
+        "step_hours": "1",
+        "kuchera_levels_hpa": "850",
+        "kuchera_require_rh": "false",
+        "kuchera_min_levels": "1",
+        "kuchera_use_ptype_gate": "true",
+    }
+    hints.update({str(key): str(value) for key, value in overrides.items()})
+    return SimpleNamespace(selectors=SimpleNamespace(hints=hints))
+
+
 def test_ptype_scaling_detects_0_to_1_and_0_to_100() -> None:
     frac_data = np.array([[0.0, 0.25], [0.5, 1.0]], dtype=np.float32)
     pct_data = np.array([[0.0, 25.0], [50.0, 100.0]], dtype=np.float32)
@@ -132,7 +145,7 @@ def test_kuchera_ptype_gate_masks_rain_only_step(monkeypatch) -> None:
     monkeypatch.setattr(
         derive_module,
         "_resolve_cumulative_step_fhs",
-        lambda *, hints, fh, default_step_hours=6: [1],
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
     )
 
     data, _, _ = derive_module._derive_snowfall_kuchera_total_cumulative(
@@ -147,3 +160,164 @@ def test_kuchera_ptype_gate_masks_rain_only_step(monkeypatch) -> None:
     )
 
     np.testing.assert_allclose(data, np.zeros((2, 2), dtype=np.float32), rtol=1e-6, atol=1e-6)
+
+
+def test_kuchera_ptype_gate_interval_averages_frozen_fraction(monkeypatch) -> None:
+    crs = CRS.from_epsg(4326)
+    transform = Affine.identity()
+    apcp = np.full((2, 2), 2.0, dtype=np.float32)
+    temp_850 = np.full((2, 2), -10.0, dtype=np.float32)
+    zeros = np.zeros((2, 2), dtype=np.float32)
+    ones = np.ones((2, 2), dtype=np.float32)
+    exact_apcp_pattern = ":APCP:surface:0-1 hour acc fcst:"
+
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
+        del model_id, product, run_date, herbie_kwargs
+        pattern = str(search_pattern)
+        sample_fh = int(fh)
+        if pattern == exact_apcp_pattern or pattern == f"{exact_apcp_pattern}$":
+            meta = {"inventory_line": exact_apcp_pattern, "search_pattern": pattern}
+            return (apcp, crs, transform, meta) if return_meta else (apcp, crs, transform)
+        if pattern == ":TMP:850 mb:":
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (temp_850, crs, transform, meta) if return_meta else (temp_850, crs, transform)
+        if pattern == ":CSNOW:surface:":
+            sample = zeros if sample_fh == 0 else ones
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (sample, crs, transform, meta) if return_meta else (sample, crs, transform)
+        if pattern == ":CRAIN:surface:":
+            sample = ones if sample_fh == 0 else zeros
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (sample, crs, transform, meta) if return_meta else (sample, crs, transform)
+        if pattern == ":CICEP:surface:":
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (zeros, crs, transform, meta) if return_meta else (zeros, crs, transform)
+        if pattern == ":CFRZR:surface:":
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (zeros, crs, transform, meta) if return_meta else (zeros, crs, transform)
+        raise AssertionError(f"unexpected search pattern: {pattern}")
+
+    monkeypatch.setattr(derive_module, "fetch_variable", _fake_fetch_variable)
+    monkeypatch.setattr(
+        derive_module,
+        "_kuchera_inventory_lines",
+        lambda *, model_id, product, run_date, fh, search_pattern: [exact_apcp_pattern],
+    )
+    monkeypatch.setattr(
+        derive_module,
+        "_resolve_cumulative_step_fhs",
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [1],
+    )
+
+    data, _, _ = derive_module._derive_snowfall_kuchera_total_cumulative(
+        model_id="hrrr",
+        var_key="snowfall_kuchera_total",
+        product="sfc",
+        run_date=datetime(2026, 3, 5, 17, 0),
+        fh=1,
+        var_spec_model=_kuchera_var_spec(),
+        var_capability=None,
+        model_plugin=_Plugin(),
+    )
+
+    ratio = derive_module._compute_kuchera_slr(
+        levels_hpa=[850],
+        temp_stack_c=[temp_850],
+    )
+    expected = apcp * np.float32(0.5) * ratio * np.float32(0.03937007874015748)
+    np.testing.assert_allclose(data, expected.astype(np.float32, copy=False), rtol=1e-6, atol=1e-6)
+
+
+def test_kuchera_ptype_gate_filters_interval_samples_to_step_cadence(monkeypatch) -> None:
+    crs = CRS.from_epsg(4326)
+    transform = Affine.identity()
+    apcp = np.full((2, 2), 2.0, dtype=np.float32)
+    temp_850 = np.full((2, 2), -10.0, dtype=np.float32)
+    zeros = np.zeros((2, 2), dtype=np.float32)
+    ones = np.ones((2, 2), dtype=np.float32)
+    exact_apcp_pattern = ":APCP:surface:0-6 hour acc fcst:"
+    seen_ptype_fhs: list[tuple[str, int]] = []
+
+    def _fake_fetch_variable(
+        *,
+        model_id,
+        product,
+        search_pattern,
+        run_date,
+        fh,
+        herbie_kwargs=None,
+        return_meta=False,
+    ):
+        del model_id, product, run_date, herbie_kwargs
+        pattern = str(search_pattern)
+        sample_fh = int(fh)
+        if pattern == exact_apcp_pattern or pattern == f"{exact_apcp_pattern}$":
+            meta = {"inventory_line": exact_apcp_pattern, "search_pattern": pattern}
+            return (apcp, crs, transform, meta) if return_meta else (apcp, crs, transform)
+        if pattern == ":TMP:850 mb:":
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (temp_850, crs, transform, meta) if return_meta else (temp_850, crs, transform)
+        if pattern == ":CSNOW:surface:":
+            seen_ptype_fhs.append(("csnow", sample_fh))
+            sample = zeros if sample_fh == 0 else ones
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (sample, crs, transform, meta) if return_meta else (sample, crs, transform)
+        if pattern == ":CRAIN:surface:":
+            seen_ptype_fhs.append(("crain", sample_fh))
+            sample = ones if sample_fh == 0 else zeros
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (sample, crs, transform, meta) if return_meta else (sample, crs, transform)
+        if pattern == ":CICEP:surface:":
+            seen_ptype_fhs.append(("cicep", sample_fh))
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (zeros, crs, transform, meta) if return_meta else (zeros, crs, transform)
+        if pattern == ":CFRZR:surface:":
+            seen_ptype_fhs.append(("cfrzr", sample_fh))
+            meta = {"inventory_line": "", "search_pattern": pattern}
+            return (zeros, crs, transform, meta) if return_meta else (zeros, crs, transform)
+        raise AssertionError(f"unexpected search pattern: {pattern}")
+
+    monkeypatch.setattr(derive_module, "fetch_variable", _fake_fetch_variable)
+    monkeypatch.setattr(
+        derive_module,
+        "_kuchera_inventory_lines",
+        lambda *, model_id, product, run_date, fh, search_pattern: [exact_apcp_pattern],
+    )
+    monkeypatch.setattr(
+        derive_module,
+        "_resolve_cumulative_step_fhs",
+        lambda *, hints, fh, run_date=None, default_step_hours=6: [6],
+    )
+
+    data, _, _ = derive_module._derive_snowfall_kuchera_total_cumulative(
+        model_id="gfs",
+        var_key="snowfall_kuchera_total",
+        product="pgrb2.0p25",
+        run_date=datetime(2026, 3, 5, 0, 0),
+        fh=6,
+        var_spec_model=_kuchera_var_spec_with_overrides(
+            step_hours="6",
+            kuchera_ptype_interval_sample_mode="three_point",
+        ),
+        var_capability=None,
+        model_plugin=_Plugin(),
+    )
+
+    assert all(sample_fh in {0, 6} for _, sample_fh in seen_ptype_fhs)
+    assert not any(sample_fh == 3 for _, sample_fh in seen_ptype_fhs)
+
+    ratio = derive_module._compute_kuchera_slr(
+        levels_hpa=[850],
+        temp_stack_c=[temp_850],
+    )
+    expected = apcp * np.float32(0.5) * ratio * np.float32(0.03937007874015748)
+    np.testing.assert_allclose(data, expected.astype(np.float32, copy=False), rtol=1e-6, atol=1e-6)
